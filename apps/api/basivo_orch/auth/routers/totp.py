@@ -22,9 +22,19 @@ from basivo_orch.auth.schemas import (
 )
 from basivo_orch.auth.security import tokens, totp
 from basivo_orch.auth.security.audit import AuditAction, Outcome, record
+from basivo_orch.auth.security.crypto import sha256_hex
+from basivo_orch.auth.security import redis_client
 from basivo_orch.auth.security.ratelimit import client_ip, limiter
 
 router = APIRouter(prefix="/auth/2fa", tags=["two-factor"])
+
+STEP_UP_TTL_SECONDS = 300
+"""Mirrors the lifetime given to the step-up token at login."""
+
+
+def _step_up_used_key(jti: str) -> str:
+    return redis_client.namespaced("stepup", "used", jti)
+
 
 
 @router.post("/enrol", response_model=TOTPEnrolStart)
@@ -146,6 +156,25 @@ async def verify(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="This sign-in attempt has expired. Start again.",
         ) from exc
+
+    # Single use. The token authorises exactly one exchange, so it is burned
+    # here — before a session is minted, and regardless of whether the code
+    # that follows turns out to be correct.
+    #
+    # Without this the token stays valid for its full five minutes and can be
+    # exchanged repeatedly, each time producing another session. An attacker
+    # still needs a valid code, but a credential that survives its own use is
+    # one that a proxy log, a crash report or a shared terminal can hand to
+    # someone else inside the window. Set-if-absent, so two concurrent
+    # exchanges resolve to one winner instead of racing a check against a write.
+    claimed = await redis_client.get_redis().set(
+        _step_up_used_key(sha256_hex(claims.jti)), "1", ex=STEP_UP_TTL_SECONDS, nx=True
+    )
+    if not claimed:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="This sign-in attempt has expired. Start again.",
+        )
 
     user = await session.get(User, claims.subject)
     if user is None or not user.is_active or not user.totp_enabled or user.totp_secret is None:

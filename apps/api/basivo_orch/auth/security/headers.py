@@ -161,18 +161,41 @@ class CSRFMiddleware(BaseHTTPMiddleware):
 
     Requests carrying an ``Authorization`` header are exempt: a bearer token is
     not attached automatically by the browser, so there is nothing to forge.
+
+    ``exempt_prefixes`` exists for the same reason, one level up. An application
+    that embeds this package usually has its own API authenticated by something
+    that is *not* a cookie — an API key, an HMAC signature, an mTLS client cert.
+    CSRF does not apply to any of them, because the browser will not attach them
+    on a cross-site request, and enforcing it there breaks callers that send
+    their credential in a header this middleware does not recognise. A caller
+    using ``X-API-Key`` instead of ``Authorization`` would otherwise be rejected
+    with "CSRF token missing", which is both wrong and impossible to act on.
+
+    Exempt a prefix only when **no** route beneath it can be authenticated by an
+    ambient cookie. If a session cookie alone would authorise the request, the
+    exemption hands an attacker a cross-site write.
     """
 
-    def __init__(self, app: ASGIApp, *, exempt_paths: frozenset[str] = frozenset()) -> None:
+    def __init__(
+        self,
+        app: ASGIApp,
+        *,
+        exempt_paths: frozenset[str] = frozenset(),
+        exempt_prefixes: tuple[str, ...] = (),
+    ) -> None:
         super().__init__(app)
         self._exempt = exempt_paths
+        self._exempt_prefixes = exempt_prefixes
+
+    def _is_exempt(self, path: str) -> bool:
+        return path in self._exempt or path.startswith(self._exempt_prefixes)
 
     async def dispatch(
         self, request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
         if (
             request.method not in CSRF_SAFE_METHODS
-            and request.url.path not in self._exempt
+            and not self._is_exempt(request.url.path)
             and "authorization" not in request.headers
             and get_settings().environment is not Environment.TEST
         ):

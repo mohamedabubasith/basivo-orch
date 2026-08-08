@@ -95,7 +95,7 @@ def _build_router() -> APIRouter:
 auth_router: APIRouter = _build_router()
 
 
-def install_auth(app: FastAPI) -> None:
+def install_auth(app: FastAPI, *, csrf_exempt_prefixes: tuple[str, ...] = ()) -> None:
     """Attach the middleware auth depends on.
 
     Call this **before** adding your own middleware. Starlette runs middleware
@@ -117,6 +117,11 @@ def install_auth(app: FastAPI) -> None:
     app.add_middleware(SecurityHeadersMiddleware)
     app.add_middleware(
         CSRFMiddleware,
+        # Path prefixes your own API owns that are authenticated by something
+        # the browser does not attach automatically — an API key, an HMAC
+        # signature. CSRF does not apply there. Pass nothing if every route in
+        # your app can be authenticated by a session cookie.
+        exempt_prefixes=csrf_exempt_prefixes,
         # These bootstrap a session, so there is no CSRF cookie to present yet.
         # Safe to exempt: none performs a state change an attacker gains from
         # forging, and each is independently rate limited.

@@ -8,6 +8,7 @@ import pyotp
 import pytest
 
 from basivo_orch.auth.security import totp
+from basivo_orch.auth.settings import get_settings
 
 pytestmark = pytest.mark.security
 
@@ -124,3 +125,81 @@ def test_qr_renders_svg() -> None:
 def test_counter_advances_with_time() -> None:
     now = time.time()
     assert totp.current_counter(now + 30) == totp.current_counter(now) + 1
+
+
+# ---------------------------------------------------------------------------
+# The step-up exchange, over HTTP
+# ---------------------------------------------------------------------------
+
+
+async def _sign_in(client, email: str, password: str) -> None:
+    """Authenticate the test client.
+
+    The session cookie is set explicitly rather than left to the jar. Cookies
+    are issued with `Secure`, and the ASGI transport speaks plain `http://test`,
+    so httpx stores them and then declines to send them — the request arrives
+    unauthenticated and the test fails for a reason that has nothing to do with
+    what it is checking. Setting it by hand is what a real browser over HTTPS
+    would do anyway.
+    """
+    response = await client.post("/auth/login", data={"username": email, "password": password})
+    assert response.status_code == 200, response.text
+    client.cookies.set(get_settings().cookie_name, response.json()["access_token"])
+
+
+async def _enrol(client, session, user, password: str) -> str:
+    """Sign in, turn on 2FA, and return the shared secret."""
+    await _sign_in(client, user.email, password)
+    started = await client.post("/auth/2fa/enrol")
+    assert started.status_code == 200, started.text
+    secret = started.json()["secret"]
+    confirmed = await client.post(
+        "/auth/2fa/enrol/confirm", json={"code": pyotp.TOTP(secret).now()}
+    )
+    assert confirmed.status_code == 200, confirmed.text
+    await session.refresh(user)
+
+    # Confirming enrolment spends the current 30-second window, so the very
+    # next code would be refused by the replay guard rather than by whatever
+    # the caller is actually testing. Clearing the counter avoids a 30-second
+    # sleep in the suite; the replay guard has its own tests above.
+    user.totp_last_counter = None
+    await session.commit()
+    return secret
+
+
+@pytest.mark.security
+async def test_a_step_up_token_cannot_be_exchanged_twice(client, session, user, password) -> None:
+    """One approval of the second factor buys exactly one session.
+
+    The step-up token is a bearer credential with a five-minute life. If using
+    it did not burn it, anyone who obtained a copy inside that window — from a
+    proxy log, a crash report, a shared terminal — could mint further sessions
+    for as long as they could also produce a code. Burning the jti on first use
+    bounds the damage to the single exchange the user actually made.
+    """
+    secret = await _enrol(client, session, user, password)
+    client.cookies.clear()
+
+    response = await client.post(
+        "/auth/login", data={"username": user.email, "password": password}
+    )
+    assert response.status_code == 401
+    step_up = response.headers["X-Step-Up-Token"]
+
+    totp_gen = pyotp.TOTP(secret)
+    first = await client.post(
+        "/auth/2fa/verify", json={"step_up_token": step_up, "code": totp_gen.now()}
+    )
+    assert first.status_code == 200, first.text
+
+    second = await client.post(
+        "/auth/2fa/verify", json={"step_up_token": step_up, "code": totp_gen.now()}
+    )
+
+    # 401, specifically. The step-up token is claimed before the code is
+    # checked, so a burned token fails here with 401. If the claim were ever
+    # removed, this request would reach the code check instead and the TOTP
+    # replay guard would answer 400 — which is why the exact status matters and
+    # `>= 400` would not catch the regression.
+    assert second.status_code == 401, second.text

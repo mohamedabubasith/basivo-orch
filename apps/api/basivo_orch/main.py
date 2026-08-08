@@ -73,7 +73,19 @@ def create_app() -> FastAPI:
     # everything, including responses that never reach a route handler — a 403
     # from the CSRF check or a 429 from the rate limiter. Without those headers
     # the browser reports an opaque CORS failure and the real reason is lost.
-    install_auth(app)
+    install_auth(
+        app,
+        # The external execution API is authenticated by an API key and nothing
+        # else — `require_api_key` never consults a cookie — so CSRF does not
+        # apply to it. Without this exemption a caller sending `X-API-Key` is
+        # rejected with "CSRF token missing" before reaching authentication at
+        # all, because the middleware only recognises `Authorization`.
+        #
+        # /api/v1/* is deliberately NOT exempt: those routes are the web app's,
+        # authenticated by the session cookie, and exempting them would hand an
+        # attacker cross-site writes.
+        csrf_exempt_prefixes=("/flows",),
+    )
 
     app.add_middleware(
         CORSMiddleware,
