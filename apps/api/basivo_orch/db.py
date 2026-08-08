@@ -10,7 +10,12 @@ from __future__ import annotations
 
 from collections.abc import AsyncGenerator
 
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 from sqlalchemy.orm import DeclarativeBase
 
 from basivo_orch.config import get_settings
@@ -35,7 +40,7 @@ def _create_engine() -> AsyncEngine:
             "max_overflow": settings.DATABASE_MAX_OVERFLOW,
             "pool_recycle": settings.DATABASE_POOL_RECYCLE_SECONDS,
         }
-    return create_async_engine(settings.DATABASE_URL, **kwargs)  # type: ignore[arg-type]
+    return create_async_engine(settings.DATABASE_URL, **kwargs)
 
 
 engine: AsyncEngine = _create_engine()

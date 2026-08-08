@@ -41,6 +41,13 @@ dev = [
     "aiosqlite>=0.20.0",
     "fakeredis>=2.26.1",
     "asgi-lifespan>=2.1.0",
+    # Typing stubs the generated auth package needs to pass mypy. `basivo-auth
+    # new` puts these in the projects it generates; `basivo-auth init` does not
+    # list them, because in embedded mode the host owns pyproject.toml. Without
+    # types-redis, `Redis[str]` in the auth package is an error — redis-py
+    # itself does not ship a generic Redis.
+    "types-redis>=4.6.0",
+    "types-qrcode>=8.0",
 ]
 
 # The generator that produced basivo_orch/auth/. Not needed at runtime — the
@@ -65,11 +72,56 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "S", "ASYNC"]
-ignore = ["S101"]
+ignore = [
+    "S101",
+    # `Depends(...)` and `Query(...)` in argument defaults is how FastAPI
+    # declares dependencies. B008 exists to catch accidental shared mutable
+    # defaults, which these are not.
+    "B008",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# S105 flags any constant whose *name* contains PASSWORD/TOKEN/SECRET as a
+# hardcoded credential. In the auth package those names belong to audit-action
+# and token-type enum members whose values are literals like "token_refresh" —
+# every hit is a false positive, and silencing them individually would mean
+# editing generated code that `basivo-auth update` rewrites.
+"basivo_orch/auth/**" = ["S105", "S106"]
 
 [tool.mypy]
 python_version = "3.12"
 strict = true
+plugins = ["pydantic.mypy"]
+
+# The engine's `UserProtocol` declares plain attribute types (`email: str`).
+# `basivo_orch.auth.models.User` types the same columns as SQLAlchemy
+# `Mapped[...]`, which is what makes every `User.email == x` query expression
+# type-check. mypy cannot see through the descriptor to match the protocol
+# structurally, so it reports a type-var mismatch on a handful of engine call
+# sites. Conformance holds at runtime and the auth suite exercises it.
+#
+# `basivo-auth new` writes this block into the projects it generates. `init`
+# does not, because in embedded mode the host owns pyproject.toml — so an
+# embedded install has to add it by hand, as here.
+[[tool.mypy.overrides]]
+module = [
+    "basivo_orch.auth.engine.adapters",
+    "basivo_orch.auth.engine.backends",
+    "basivo_orch.auth.engine.dependencies",
+    "basivo_orch.auth.engine.manager",
+]
+disable_error_code = ["type-var"]
+
+[[tool.mypy.overrides]]
+module = [
+    "fastapi_users.*",
+    "fastapi_users_db_sqlalchemy.*",
+    "slowapi.*",
+    "httpx_oauth.*",
+    "authlib.*",
+    "qrcode.*",
+]
+ignore_missing_imports = true
 
 [build-system]
 requires = ["hatchling"]

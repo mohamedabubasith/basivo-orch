@@ -21,7 +21,12 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from basivo_orch.auth.db import get_async_session
-from basivo_orch.auth.engine import UserManager, current_active_user, get_jwt_strategy, get_user_manager
+from basivo_orch.auth.engine import (
+    UserManager,
+    current_active_user,
+    get_jwt_strategy,
+    get_user_manager,
+)
 from basivo_orch.auth.models import User
 from basivo_orch.auth.schemas import MessageResponse, RefreshRequest, TokenResponse
 from basivo_orch.auth.security import tokens
@@ -221,9 +226,7 @@ async def logout(
         presented = payload.refresh_token
 
     if presented:
-        await tokens.revoke_by_token(
-            session, presented, reason=tokens.RevocationReason.LOGOUT
-        )
+        await tokens.revoke_by_token(session, presented, reason=tokens.RevocationReason.LOGOUT)
 
     await record(
         session,

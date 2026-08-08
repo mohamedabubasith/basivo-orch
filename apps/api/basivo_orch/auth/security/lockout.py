@@ -24,7 +24,6 @@ from basivo_orch.auth.settings import get_settings
 logger = structlog.get_logger(__name__)
 
 
-
 @dataclass(frozen=True, slots=True)
 class LockoutState:
     locked: bool

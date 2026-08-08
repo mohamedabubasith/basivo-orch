@@ -29,7 +29,6 @@ from basivo_orch.auth.settings import get_settings
 logger = structlog.get_logger(__name__)
 
 
-
 class OTPPurpose(StrEnum):
     LOGIN = "login"
     VERIFY_EMAIL = "verify_email"

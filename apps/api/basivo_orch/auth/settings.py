@@ -296,5 +296,13 @@ def get_settings() -> Settings:
 
 
 def generate_secret() -> str:
-    """Helper: `python -c "from basivo_orch.auth.settings import generate_secret as g; print(g())"`."""
+    """Generate a SECRET_KEY.
+
+    Wrapped rather than written on one line: the module path is interpolated,
+    so a long package name (embedded mode, e.g. `myproject.auth`) pushes a
+    single-line docstring past the line limit and the generated project fails
+    its own lint.
+
+        python -c "from basivo_orch.auth.settings import generate_secret as g; print(g())"
+    """
     return secrets.token_urlsafe(64)

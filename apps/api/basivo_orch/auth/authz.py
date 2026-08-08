@@ -102,6 +102,23 @@ class Permission(StrEnum):
 
     AUDIT_READ = "audit:read"
 
+    # --- orchestrator -----------------------------------------------------
+    # Added by this product, at the extension point above. Kept in one block so
+    # `basivo-auth update` has a clean region to merge around.
+    FLOW_READ = "flow:read"
+    FLOW_CREATE = "flow:create"
+    FLOW_UPDATE = "flow:update"
+    FLOW_DELETE = "flow:delete"
+    FLOW_PUBLISH = "flow:publish"
+    FLOW_RUN = "flow:run"
+
+    RUN_READ = "run:read"
+    RUN_CANCEL = "run:cancel"
+
+    APIKEY_READ = "apikey:read"
+    APIKEY_CREATE = "apikey:create"
+    APIKEY_REVOKE = "apikey:revoke"
+
 
 #: Which permissions each role carries. The single source of truth for authority.
 #:
@@ -112,12 +129,22 @@ ROLE_PERMISSIONS: dict[Role, frozenset[Permission]] = {
     Role.VIEWER: frozenset(
         {
             Permission.ORG_READ,
+            # Read-only staff can watch runs. Seeing that a flow failed is not
+            # the same authority as being able to start one.
+            Permission.FLOW_READ,
+            Permission.RUN_READ,
         }
     ),
     Role.MEMBER: frozenset(
         {
             Permission.ORG_READ,
             Permission.MEMBER_READ,
+            Permission.FLOW_READ,
+            Permission.FLOW_CREATE,
+            Permission.FLOW_UPDATE,
+            Permission.FLOW_RUN,
+            Permission.RUN_READ,
+            Permission.RUN_CANCEL,
         }
     ),
     Role.ADMIN: frozenset(
@@ -129,6 +156,19 @@ ROLE_PERMISSIONS: dict[Role, frozenset[Permission]] = {
             Permission.MEMBER_ROLE_UPDATE,
             Permission.MEMBER_REMOVE,
             Permission.AUDIT_READ,
+            Permission.FLOW_READ,
+            Permission.FLOW_CREATE,
+            Permission.FLOW_UPDATE,
+            Permission.FLOW_RUN,
+            Permission.RUN_READ,
+            Permission.RUN_CANCEL,
+            # Publishing exposes a flow to the outside world over an API key,
+            # and deleting destroys its run history. Both are admin-level.
+            Permission.FLOW_DELETE,
+            Permission.FLOW_PUBLISH,
+            Permission.APIKEY_READ,
+            Permission.APIKEY_CREATE,
+            Permission.APIKEY_REVOKE,
         }
     ),
     Role.OWNER: frozenset(Permission),
@@ -164,7 +204,7 @@ class OrgContext:
 
 
 def _article(role: Role) -> str:
-    """"a viewer" but "an admin" — these strings are shown to end users."""
+    """ "a viewer" but "an admin" — these strings are shown to end users."""
     return "an" if role.value[0] in "aeiou" else "a"
 
 
@@ -401,13 +441,17 @@ async def assert_not_last_owner(
     so it is blocked rather than repaired.
     """
     owners = (
-        await session.execute(
-            select(Membership.user_id).where(
-                Membership.organization_id == organization_id,
-                Membership.role == Role.OWNER.value,
+        (
+            await session.execute(
+                select(Membership.user_id).where(
+                    Membership.organization_id == organization_id,
+                    Membership.role == Role.OWNER.value,
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     if subject_user_id in owners and len(owners) <= 1:
         raise HTTPException(

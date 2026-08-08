@@ -187,12 +187,30 @@ class SSOProvider(BaseModel):
 #: the frontend routes tenants by subdomain.
 RESERVED_ORG_SLUGS = frozenset(
     {
-        "admin", "api", "app", "auth", "billing", "docs", "health", "help",
-        "internal", "login", "mail", "new", "orgs", "root", "settings",
-        "signup", "static", "status", "support", "system", "users", "www",
+        "admin",
+        "api",
+        "app",
+        "auth",
+        "billing",
+        "docs",
+        "health",
+        "help",
+        "internal",
+        "login",
+        "mail",
+        "new",
+        "orgs",
+        "root",
+        "settings",
+        "signup",
+        "static",
+        "status",
+        "support",
+        "system",
+        "users",
+        "www",
     }
 )
-
 
 
 class OrganizationCreate(BaseModel):

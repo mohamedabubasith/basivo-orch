@@ -33,8 +33,16 @@ REDACTED = "[redacted]"
 # Substring match, case-insensitive: catches `password`, `new_password`,
 # `hashed_password`, `totp_secret`, `refresh_token` and friends in one rule.
 SENSITIVE_KEY_FRAGMENTS = (
-    "password", "secret", "token", "authorization", "cookie",
-    "otp", "code", "credential", "key", "session",
+    "password",
+    "secret",
+    "token",
+    "authorization",
+    "cookie",
+    "otp",
+    "code",
+    "credential",
+    "key",
+    "session",
 )
 
 MAX_DETAIL_BYTES = 4096

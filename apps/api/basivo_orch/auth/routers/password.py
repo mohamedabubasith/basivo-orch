@@ -177,6 +177,4 @@ async def change_password(
     await session.commit()
 
     await send_password_changed_email(user.email)
-    return MessageResponse(
-        detail="Password changed. All other sessions have been signed out."
-    )
+    return MessageResponse(detail="Password changed. All other sessions have been signed out.")

@@ -9,5 +9,6 @@ from __future__ import annotations
 
 from basivo_orch.auth import models as auth_models  # noqa: F401  (registers auth tables)
 from basivo_orch.db import Base
+from basivo_orch.flows import models as flow_models  # noqa: F401  (registers flow tables)
 
-__all__ = ["Base", "auth_models"]
+__all__ = ["Base", "auth_models", "flow_models"]

@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
+import redis.asyncio as redis
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -13,6 +14,8 @@ from basivo_orch.auth.router import auth_router, install_auth
 from basivo_orch.auth.settings import get_settings as get_auth_settings
 from basivo_orch.config import get_settings
 from basivo_orch.db import dispose_engine
+from basivo_orch.flows.events import RedisClient
+from basivo_orch.flows.router import external_router, management_router
 from basivo_orch.logging import configure_logging, get_logger
 
 log = get_logger(__name__)
@@ -22,8 +25,28 @@ log = get_logger(__name__)
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     settings = get_settings()
     configure_logging(json_logs=settings.is_production)
+
+    # One Redis client for the whole process, carrying the live tail of run
+    # events. The run log itself is in Postgres, so a Redis outage degrades
+    # streaming to polling rather than losing anything.
+    client: RedisClient | None = None
+    try:
+        client = redis.from_url(get_auth_settings().redis_url, decode_responses=True)
+        await client.ping()
+    except Exception as exc:  # noqa: BLE001 - startup must not hinge on Redis
+        log.warning(
+            "redis.unavailable", error=str(exc), impact="run streaming falls back to polling"
+        )
+        client = None
+    app.state.redis = client
+
     log.info("service.start", environment=settings.ENVIRONMENT, version=__version__)
     yield
+
+    if client is not None:
+        # types-redis lags the runtime (stubs 4.6 vs redis 8.1), where
+        # close() is deprecated in favour of aclose().
+        await client.aclose()  # type: ignore[attr-defined]
     await dispose_engine()
     log.info("service.stop")
 
@@ -73,6 +96,11 @@ def create_app() -> FastAPI:
     #
     # So: /auth/* and /users/* are auth's, /api/v1/* is the orchestrator's.
     app.include_router(auth_router)
+
+    # The orchestrator's own API. Management is versioned; execution sits at
+    # the paths the SOW specifies, because those go into other people's code.
+    app.include_router(management_router, prefix=settings.API_V1_PREFIX)
+    app.include_router(external_router)
 
     @app.get("/health", tags=["ops"])
     async def health() -> dict[str, str]:

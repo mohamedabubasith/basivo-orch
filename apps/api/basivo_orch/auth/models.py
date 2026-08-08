@@ -258,7 +258,5 @@ class Membership(UUIDMixin, TimestampMixin, Base):
     )
     """Who granted this membership. The audit trail for how someone got access."""
 
-    user: Mapped[User] = relationship(
-        back_populates="memberships", foreign_keys=[user_id]
-    )
+    user: Mapped[User] = relationship(back_populates="memberships", foreign_keys=[user_id])
     organization: Mapped[Organization] = relationship(back_populates="memberships")

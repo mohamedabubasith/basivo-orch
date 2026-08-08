@@ -18,11 +18,25 @@ from basivo_orch.auth.settings import get_settings
 
 SENSITIVE_KEYS = frozenset(
     {
-        "password", "new_password", "current_password", "hashed_password",
-        "token", "access_token", "refresh_token", "step_up_token",
-        "secret", "jwt_secret", "totp_secret", "client_secret",
-        "authorization", "cookie", "set-cookie", "code", "otp",
-        "recovery_code", "api_key",
+        "password",
+        "new_password",
+        "current_password",
+        "hashed_password",
+        "token",
+        "access_token",
+        "refresh_token",
+        "step_up_token",
+        "secret",
+        "jwt_secret",
+        "totp_secret",
+        "client_secret",
+        "authorization",
+        "cookie",
+        "set-cookie",
+        "code",
+        "otp",
+        "recovery_code",
+        "api_key",
     }
 )
 

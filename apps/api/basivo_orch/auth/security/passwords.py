@@ -41,9 +41,23 @@ password_hash = PasswordHash((_hasher,))
 
 COMMON_PASSWORDS = frozenset(
     {
-        "password", "123456", "123456789", "qwerty", "abc123", "letmein",
-        "welcome", "admin", "iloveyou", "monkey", "dragon", "sunshine",
-        "princess", "football", "charlie", "passw0rd", "trustno1",
+        "password",
+        "123456",
+        "123456789",
+        "qwerty",
+        "abc123",
+        "letmein",
+        "welcome",
+        "admin",
+        "iloveyou",
+        "monkey",
+        "dragon",
+        "sunshine",
+        "princess",
+        "football",
+        "charlie",
+        "passw0rd",
+        "trustno1",
     }
 )
 

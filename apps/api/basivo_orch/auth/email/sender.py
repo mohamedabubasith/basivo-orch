@@ -159,6 +159,3 @@ async def send_otp_email(to: str, code: str, *, purpose: str = "sign in") -> boo
         expires_minutes=max(1, settings.otp_ttl_seconds // 60),
     )
     return await send(email)
-
-
-

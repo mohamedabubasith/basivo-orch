@@ -10,7 +10,12 @@ from basivo_orch.auth.email.sender import send_otp_email
 from basivo_orch.auth.engine import UserManager, get_user_manager
 from basivo_orch.auth.engine.types import UserNotExists
 from basivo_orch.auth.routers.session import issue_session
-from basivo_orch.auth.schemas import MessageResponse, OTPRequestPayload, OTPVerifyPayload, TokenResponse
+from basivo_orch.auth.schemas import (
+    MessageResponse,
+    OTPRequestPayload,
+    OTPVerifyPayload,
+    TokenResponse,
+)
 from basivo_orch.auth.security import otp, redis_client, tokens
 from basivo_orch.auth.security.audit import AuditAction, Outcome, record
 from basivo_orch.auth.security.ratelimit import client_ip, limiter

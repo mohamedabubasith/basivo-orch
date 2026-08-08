@@ -16,9 +16,7 @@ from basivo_orch.auth.settings import Environment, get_settings
 # nothing is allowed to load or execute at all. It still matters, because it
 # neutralises reflected content should a response ever be rendered as a
 # document (for example when a browser sniffs an error page).
-API_CSP = (
-    "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
-)
+API_CSP = "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
 
 # Interactive docs need their own bundle, so they get a narrower exception.
 DOCS_CSP = (
