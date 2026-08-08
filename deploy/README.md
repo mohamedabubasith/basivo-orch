@@ -79,6 +79,23 @@ have verified individually, which is fine for you and a handful of testers.
 Request production access in the SES console to lift it — usually granted
 within a day. Until then, public signups will not receive their email.
 
+## Verifying a deploy
+
+```bash
+python deploy/smoke-test.py
+```
+
+37 assertions against the running site: TLS, single-origin routing, both run
+modes, SSE arriving progressively rather than buffered, attaching to a run
+mid-flight, tenant isolation, key revocation and rate limiting. It reads the
+hostname from Terraform, so it follows the deployment rather than hard-coding
+an address.
+
+Run it after every deploy. Both deployment defects found so far — Caddy not
+routing bare collection paths like `POST /orgs`, and the bootstrap silently
+running under `dash` — were invisible locally and obvious on the first real
+request.
+
 ## Operating it
 
 ```bash
