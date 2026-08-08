@@ -1,0 +1,37 @@
+# This file records the answers used to generate this project, and the template
+# version it came from. `basivo-auth update` reads it to work out what changed
+# between that version and the latest one.
+#
+# Do not edit by hand, and do not delete it: without this file the project is
+# permanently cut off from template updates, including security fixes.
+# Committing it is intentional — it contains no secrets.
+_commit: v0.1.0
+_src_path: https://github.com/mohamedabubasith/basivo-auth.git
+access_token_ttl_seconds: 900
+database: postgres
+deploy_target: none
+email_provider: smtp
+feature_magic_link: false
+feature_orgs: true
+feature_otp: true
+feature_passkeys: false
+feature_saml: false
+feature_sso: true
+feature_totp: true
+host_base_name: Base
+host_db_module: basivo_orch.db
+host_session_dependency: get_async_session
+include_admin_cli: false
+include_ci: false
+include_docker: false
+install_mode: embedded
+package_dir: basivo_orch/auth
+preset: standard
+project_description: Authentication service.
+project_name: Basivo Orch Api
+project_slug: basivo-orch-api
+python_version: '3.12'
+refresh_token_ttl_seconds: 2592000
+state_backend: redis
+tests_dir: tests/auth
+token_transport: cookie

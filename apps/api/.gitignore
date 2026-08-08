@@ -1,0 +1,5 @@
+
+# --- basivo-auth: never commit local secrets ---
+.env
+.env.*
+!.env.example

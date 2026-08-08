@@ -1,0 +1,13 @@
+{% extends "_base.html.j2" %}
+{% block content %}
+  <p style="margin:0 0 12px;">Use this code to {{ purpose }}:</p>
+  <p style="margin:20px 0;font-size:32px;font-weight:700;letter-spacing:8px;color:#111827;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;">
+    {{ code }}
+  </p>
+  <p style="margin:0;font-size:13px;color:#6b7280;">
+    Expires in {{ expires_minutes }} minutes. It can be used once.
+  </p>
+{% endblock %}
+{% block footer %}
+  Never share this code. {{ project_name }} staff will never ask you for it.
+{% endblock %}

@@ -1,0 +1,44 @@
+# --- secrets ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# --- python ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# --- node ---
+node_modules/
+.vite/
+apps/web/dist/
+*.tsbuildinfo
+npm-debug.log*
+pnpm-debug.log*
+
+# --- editors / os ---
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# --- ai assistants / editors ---
+.claude/
+CLAUDE.md
+AGENTS.md
+AGENT.md
+.cursor/
+.cursorrules
+.aider*
+.github/copilot-instructions.md

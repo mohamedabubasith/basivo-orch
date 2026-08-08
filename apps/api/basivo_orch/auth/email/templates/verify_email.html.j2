@@ -1,0 +1,8 @@
+{% extends "_base.html.j2" %}
+{% block content %}
+  <p style="margin:0 0 12px;">Confirm your email address to finish setting up your account.</p>
+  {% with label = "Confirm email address" %}{% include "_button.html.j2" %}{% endwith %}
+  <p style="margin:20px 0 0;font-size:13px;color:#6b7280;">
+    This link expires in {{ expires_hours }} hour{{ "s" if expires_hours != 1 else "" }}.
+  </p>
+{% endblock %}
