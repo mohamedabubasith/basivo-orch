@@ -20,10 +20,9 @@ from basivo_orch.auth.schemas import (
     TOTPEnrolStart,
     TOTPVerifyPayload,
 )
-from basivo_orch.auth.security import tokens, totp
+from basivo_orch.auth.security import redis_client, tokens, totp
 from basivo_orch.auth.security.audit import AuditAction, Outcome, record
 from basivo_orch.auth.security.crypto import sha256_hex
-from basivo_orch.auth.security import redis_client
 from basivo_orch.auth.security.ratelimit import client_ip, limiter
 
 router = APIRouter(prefix="/auth/2fa", tags=["two-factor"])
