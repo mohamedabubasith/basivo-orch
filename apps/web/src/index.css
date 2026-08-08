@@ -1,0 +1,117 @@
+@import "tailwindcss";
+
+/* Design tokens. Tailwind v4 reads these straight out of CSS — no JS config. */
+@theme {
+  --color-ink-950: #06070c;
+  --color-ink-900: #0a0c14;
+  --color-ink-850: #0f121c;
+  --color-ink-800: #141826;
+  --color-ink-700: #1d2233;
+  --color-ink-600: #2a3145;
+  --color-ink-500: #3d4560;
+  --color-ink-400: #6b7490;
+  --color-ink-300: #9aa2bd;
+  --color-ink-200: #c7cddf;
+  --color-ink-100: #e8ebf4;
+
+  --color-brand-500: #6366f1;
+  --color-brand-400: #818cf8;
+  --color-brand-300: #a5b4fc;
+  --color-accent-500: #22d3ee;
+  --color-accent-400: #67e8f9;
+
+  --color-ok-500: #34d399;
+  --color-warn-500: #fbbf24;
+  --color-err-500: #fb7185;
+
+  --font-sans: "Inter var", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+    sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+
+  --animate-marquee: marquee 40s linear infinite;
+  --animate-pulse-slow: pulse-slow 4s ease-in-out infinite;
+  --animate-grid: grid-drift 24s linear infinite;
+}
+
+@keyframes marquee {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+
+@keyframes pulse-slow {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 0.75; }
+}
+
+@keyframes grid-drift {
+  from { background-position: 0 0; }
+  to { background-position: 0 60px; }
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: var(--color-ink-950);
+    color: var(--color-ink-200);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* A visible focus ring is an accessibility requirement, and on auth screens
+     it is also a security one: people must be able to see which field is about
+     to receive their password. */
+  :focus-visible {
+    outline: 2px solid var(--color-brand-400);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background: color-mix(in oklab, var(--color-brand-500) 40%, transparent);
+    color: var(--color-ink-100);
+  }
+}
+
+@layer utilities {
+  .text-gradient {
+    background: linear-gradient(
+      100deg,
+      var(--color-ink-100) 10%,
+      var(--color-brand-300) 45%,
+      var(--color-accent-400) 80%
+    );
+    background-clip: text;
+    -webkit-background-clip: text;
+    color: transparent;
+  }
+
+  .surface {
+    background: color-mix(in oklab, var(--color-ink-850) 70%, transparent);
+    border: 1px solid color-mix(in oklab, var(--color-ink-600) 55%, transparent);
+    backdrop-filter: blur(12px);
+  }
+
+  .grid-bg {
+    background-image:
+      linear-gradient(to right, color-mix(in oklab, var(--color-ink-600) 40%, transparent) 1px, transparent 1px),
+      linear-gradient(to bottom, color-mix(in oklab, var(--color-ink-600) 40%, transparent) 1px, transparent 1px);
+    background-size: 60px 60px;
+  }
+}
+
+/* Everything animated below is decoration. Honour the OS setting rather than
+   making motion-sensitive people sit through it. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

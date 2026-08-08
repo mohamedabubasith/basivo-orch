@@ -19,8 +19,6 @@ from functools import lru_cache
 from typing import Final
 
 from cryptography.fernet import Fernet, InvalidToken
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
 from basivo_orch.auth.settings import get_settings
 
@@ -48,15 +46,13 @@ def constant_time_equals(left: str, right: str) -> bool:
 
 
 def derive_key(purpose: str, *, length: int = 32) -> bytes:
-    """Derive a purpose-bound key from the master secret."""
-    settings = get_settings()
-    hkdf = HKDF(
-        algorithm=hashes.SHA256(),
-        length=length,
-        salt=None,
-        info=f"{settings.jwt_issuer}:{purpose}".encode(),
-    )
-    return hkdf.derive(settings.secret_key.get_secret_value().encode("utf-8"))
+    """Derive a purpose-bound key from the master secret.
+
+    Thin wrapper over `Settings.subkey`, kept so callers in this package do not
+    each have to reach for settings. One derivation implementation, so a change
+    to the labelling scheme cannot apply to some keys and not others.
+    """
+    return get_settings().subkey(purpose, length=length)
 
 
 @lru_cache(maxsize=8)

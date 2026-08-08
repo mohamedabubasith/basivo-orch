@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#06070c" />
+    <title>Basivo — agent pipelines you can actually watch run</title>
+    <meta
+      name="description"
+      content="Build multi-step agent workflows visually, then watch every run stream its own logs. Step timing, retries and errors, kept and searchable."
+    />
+    <link rel="icon" type="image/svg+xml" href="/logo.svg" />
+
+    <!-- Auth pages must never be framed: a transparent overlay over a real
+         login form is how clickjacking harvests credentials. The API sends
+         X-Frame-Options on its own responses; this covers the SPA, which is
+         served by Vite in dev and by a static host in production. -->
+    <meta http-equiv="X-Frame-Options" content="DENY" />
+    <meta name="referrer" content="strict-origin-when-cross-origin" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Basivo — agent pipelines you can actually watch run" />
+    <meta
+      property="og:description"
+      content="Visual agent workflows with run logs as a first-class feature."
+    />
+  </head>
+  <body>
+    <div id="root"></div>
+    <noscript>
+      <div style="padding: 2rem; font-family: system-ui; color: #c7cddf">
+        Basivo needs JavaScript enabled.
+      </div>
+    </noscript>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

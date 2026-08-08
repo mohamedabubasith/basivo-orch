@@ -52,8 +52,8 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
         # and rather than as properties, because the base class declares them
         # as writeable attributes.
         settings = get_settings()
-        self.reset_password_token_secret = settings.secret_key.get_secret_value()
-        self.verification_token_secret = settings.secret_key.get_secret_value()
+        self.reset_password_token_secret = settings.subkey_str("reset-password")
+        self.verification_token_secret = settings.subkey_str("verify-email")
         self.reset_password_token_lifetime_seconds = settings.reset_password_token_ttl_seconds
         self.verification_token_lifetime_seconds = settings.verify_email_token_ttl_seconds
 

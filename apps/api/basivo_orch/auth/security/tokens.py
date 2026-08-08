@@ -45,7 +45,8 @@ class TokenType(StrEnum):
     issued and validated by the engine's own JWT strategy
     (``app.auth.engine.backends``), and this module never mints one.
 
-    That separation is load-bearing. Both sign with ``JWT_SECRET``, so if a
+    That separation is load-bearing. Both sign with the same derived JWT key,
+    so if a
     token minted here carried the same ``aud`` as an access token, the engine
     would happily accept it — meaning a step-up token, which is supposed to
     represent "first factor done, second factor pending", would authenticate
@@ -164,7 +165,7 @@ def create_purpose_token(
 
     encoded = jwt.encode(
         payload,
-        settings.jwt_secret.get_secret_value(),
+        settings.subkey_str("jwt"),
         algorithm=settings.jwt_algorithm,
     )
     claims = PurposeClaims(
@@ -187,7 +188,7 @@ def decode_purpose_token(token: str, *, expected_type: TokenType) -> PurposeClai
     try:
         payload = jwt.decode(
             token,
-            settings.jwt_secret.get_secret_value(),
+            settings.subkey_str("jwt"),
             # Pinning the algorithm list is what prevents the `alg: none` and
             # RS256->HS256 confusion attacks. Never pass the token's own header.
             algorithms=[settings.jwt_algorithm],

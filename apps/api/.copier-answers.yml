@@ -5,7 +5,7 @@
 # Do not edit by hand, and do not delete it: without this file the project is
 # permanently cut off from template updates, including security fixes.
 # Committing it is intentional — it contains no secrets.
-_commit: v0.1.0
+_commit: v0.2.0
 _src_path: https://github.com/mohamedabubasith/basivo-auth.git
 access_token_ttl_seconds: 900
 database: postgres

@@ -68,7 +68,7 @@ def _build_router() -> APIRouter:
             fastapi_users.get_oauth_router(
                 provider.client,
                 auth_backends[0],
-                settings.secret_key.get_secret_value(),
+                settings.subkey_str("oauth-state"),
                 redirect_url=None,
                 # Never link an OAuth identity to an existing local account
                 # purely because the addresses match: with an IdP that does not
@@ -82,7 +82,7 @@ def _build_router() -> APIRouter:
         )
         router.include_router(
             fastapi_users.get_oauth_associate_router(
-                provider.client, UserRead, settings.secret_key.get_secret_value()
+                provider.client, UserRead, settings.subkey_str("oauth-associate")
             ),
             prefix=f"/auth/associate/{provider.name}",
             tags=["sso"],

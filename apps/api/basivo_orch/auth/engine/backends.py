@@ -44,7 +44,7 @@ def get_jwt_strategy() -> JWTStrategy[User, uuid.UUID]:
     """
     settings = get_settings()
     return JWTStrategy(
-        secret=settings.jwt_secret.get_secret_value(),
+        secret=settings.subkey_str("jwt"),
         lifetime_seconds=settings.access_token_ttl_seconds,
         token_audience=[settings.jwt_audience],
         algorithm=settings.jwt_algorithm,

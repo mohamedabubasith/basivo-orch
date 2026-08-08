@@ -73,7 +73,7 @@ refreshes with the same token cannot both succeed.
 ### Audience separation
 
 The engine's access tokens and the purpose-bound tokens in `security/tokens.py`
-are signed with the same `JWT_SECRET`. Only the `aud` claim separates them:
+are signed with the same derived JWT key. Only the `aud` claim separates them:
 
 | Token | Audience |
 | --- | --- |
@@ -341,17 +341,37 @@ authority they do not have.
 
 ---
 
-## Secret rotation
+## The secret
 
-| Secret | Rotating it breaks |
-| --- | --- |
-| `JWT_SECRET` | Every access token; all users re-authenticate |
-| `REFRESH_TOKEN_SECRET` | Every refresh token |
-| `CSRF_SECRET` | In-flight form submissions |
-| `SECRET_KEY` | Reset/verify links, **and every TOTP seed** |
+There is exactly one: **`SECRET_KEY`**. Every other key this service uses is
+derived from it at runtime with HKDF-SHA256 under a distinct label:
 
-For zero downtime, verify against both old and new keys through one deployment,
-then drop the old. `basivo-auth secrets rotate` does the simple, disruptive version.
+| Derived key | Label | Used for |
+| --- | --- | --- |
+| JWT signing | `jwt` | Access tokens and every purpose-bound token |
+| CSRF signing | `csrf` | Double-submit token signatures |
+| Reset password | `reset-password` | Password reset links |
+| Verify email | `verify-email` | Email verification links |
+| OAuth state | `oauth-state` | SSO round-trip integrity |
+| TOTP encryption | `totp` | Encrypting TOTP seeds at rest |
+
+Derivation is not a shortcut around key separation — it *is* key separation.
+HKDF outputs are independent: recovering one subkey reveals nothing about the
+master or about any sibling. What it removes is the operational burden, and
+with it the failure mode where one of four variables is missed, weak, or
+accidentally shared between environments.
+
+Two consequences worth knowing:
+
+- **`SECRET_KEY` is the strength of the whole service.** Generate it with a
+  CSPRNG (`openssl rand -base64 48`) and never hand-write one. The settings
+  model refuses to start on anything under 32 characters.
+- **Rotating it rotates everything.** Sessions end, and outstanding reset and
+  verification links stop working; enrolled TOTP seeds
+  become undecryptable, so users must re-enrol. That is the correct
+  behaviour for a master-key rotation, but it is not zero-downtime. For that,
+  run one deployment that accepts both old and new before dropping the old.
+  `basivo-auth secrets rotate` does the simple, disruptive version.
 
 ---
 

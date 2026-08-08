@@ -8,15 +8,34 @@ that will not boot is a much better failure mode than one that boots insecurely.
 
 from __future__ import annotations
 
+import base64
 import secrets
 from enum import StrEnum
 from functools import lru_cache
 from typing import Annotated, Any, Self
 
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from pydantic import AnyHttpUrl, BeforeValidator, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 MIN_SECRET_LENGTH = 32
+
+
+def _hkdf(root: bytes, *, info: str, length: int = 32) -> bytes:
+    """Derive an independent subkey from the master secret.
+
+    HKDF's `info` label is what separates purposes: two labels produce two keys
+    with no computable relationship, so a subkey that leaks cannot be walked
+    back to the master or across to a sibling. This is why the service needs
+    only one configured secret rather than one per purpose.
+    """
+    return HKDF(
+        algorithm=hashes.SHA256(),
+        length=length,
+        salt=None,
+        info=info.encode("utf-8"),
+    ).derive(root)
 
 
 class Environment(StrEnum):
@@ -68,13 +87,22 @@ class Settings(BaseSettings):
 
     cors_origins: CommaSeparated = Field(default_factory=lambda: ["http://localhost:3000"])
 
-    # -- Secrets -----------------------------------------------------------
-    # No defaults. A missing secret must be a startup error, not a silent
-    # fallback to a value an attacker could guess from the source.
+    # -- Secret ------------------------------------------------------------
+    # Exactly one. No default: a missing secret must be a startup error, not a
+    # silent fallback to a value an attacker could read in the source.
+    #
+    # Every other key the service needs — JWT signing, CSRF signing, password
+    # reset and verification tokens, OAuth state, TOTP seed encryption — is
+    # derived from this one with HKDF under a distinct label (see
+    # `subkey` below). Derivation gives the same separation that separate
+    # environment variables would: the subkeys are independent, and recovering
+    # one tells an attacker nothing about the others. It just does not make
+    # that the operator's problem.
+    #
+    # Rotating this key rotates everything at once: sessions end, and
+    # outstanding reset and verification links stop working. That is the
+    # intended behaviour of a master-key rotation.
     secret_key: SecretStr
-    jwt_secret: SecretStr
-    refresh_token_secret: SecretStr
-    csrf_secret: SecretStr
 
     # -- Storage -----------------------------------------------------------
     # No database_url in embedded mode: the host application owns the engine,
@@ -186,36 +214,42 @@ class Settings(BaseSettings):
     audit_log_enabled: bool = True
 
     # ---------------------------------------------------------------------
+    # Derived keys
+    # ---------------------------------------------------------------------
+
+    def subkey(self, purpose: str, *, length: int = 32) -> bytes:
+        """An independent key for `purpose`, derived from `secret_key`.
+
+        The issuer is folded into the label so that two services sharing a
+        secret by accident still do not share subkeys.
+        """
+        return _hkdf(
+            self.secret_key.get_secret_value().encode("utf-8"),
+            info=f"{self.jwt_issuer}:{purpose}",
+            length=length,
+        )
+
+    def subkey_str(self, purpose: str) -> str:
+        """`subkey` as text, for libraries that want a string secret."""
+        return base64.urlsafe_b64encode(self.subkey(purpose)).decode("ascii")
+
+    # ---------------------------------------------------------------------
     # Validation
     # ---------------------------------------------------------------------
 
     @model_validator(mode="after")
     def _enforce_secret_strength(self) -> Self:
         weak = {"", "changeme", "secret", "supersecret", "dev", "test", "password"}
-        fields = {
-            "SECRET_KEY": self.secret_key,
-            "JWT_SECRET": self.jwt_secret,
-            "REFRESH_TOKEN_SECRET": self.refresh_token_secret,
-            "CSRF_SECRET": self.csrf_secret,
-        }
-        for name, value in fields.items():
-            raw = value.get_secret_value()
-            if raw.strip().lower() in weak:
-                raise ValueError(
-                    f"{name} is a placeholder. "
-                    "Generate one with `openssl rand -base64 48`."
-                )
-            if len(raw) < MIN_SECRET_LENGTH:
-                raise ValueError(
-                    f"{name} is {len(raw)} characters; needs at least {MIN_SECRET_LENGTH}."
-                )
-
-        # Distinct keys mean a leak of one does not compromise the others, and
-        # tokens minted for one purpose can never validate for another.
-        distinct = {value.get_secret_value() for value in fields.values()}
-        if len(distinct) != len(fields):
+        raw = self.secret_key.get_secret_value()
+        if raw.strip().lower() in weak:
             raise ValueError(
-                "SECRET_KEY, JWT_SECRET, REFRESH_TOKEN_SECRET and CSRF_SECRET must all differ."
+                "SECRET_KEY is a placeholder. Generate one with `openssl rand -base64 48`."
+            )
+        if len(raw) < MIN_SECRET_LENGTH:
+            raise ValueError(
+                f"SECRET_KEY is {len(raw)} characters; needs at least {MIN_SECRET_LENGTH}. "
+                "It is the root of every other key in the service, so its strength "
+                "is the strength of all of them."
             )
         return self
 

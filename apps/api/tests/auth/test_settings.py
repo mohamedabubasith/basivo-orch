@@ -15,9 +15,6 @@ pytestmark = pytest.mark.security
 
 BASE = {
     "secret_key": "s" * 64,
-    "jwt_secret": "j" * 64,
-    "refresh_token_secret": "r" * 64,
-    "csrf_secret": "c" * 64,
 }
 
 
@@ -32,14 +29,36 @@ def test_placeholder_secret_is_rejected() -> None:
 
 def test_short_secret_is_rejected() -> None:
     with pytest.raises(ValidationError, match="at least"):
-        Settings(**{**BASE, "jwt_secret": "too-short"})
+        Settings(**{**BASE, "secret_key": "too-short"})
 
 
-def test_reused_secrets_are_rejected() -> None:
-    """Distinct keys per purpose mean one leak does not compromise the others."""
-    shared = "x" * 64
-    with pytest.raises(ValidationError, match="must all differ"):
-        Settings(**{**BASE, "secret_key": shared, "jwt_secret": shared})
+def test_subkeys_are_independent_per_purpose() -> None:
+    """One configured secret, but no two purposes share a key.
+
+    This is what replaces the old separate JWT_SECRET / CSRF_SECRET variables:
+    the separation is still real, it is just derived rather than configured.
+    """
+    settings = Settings(**BASE)
+    purposes = ["jwt", "csrf", "reset-password", "verify-email", "oauth-state"]
+    keys = [settings.subkey(p) for p in purposes]
+
+    assert len(set(keys)) == len(purposes)
+    assert all(len(k) == 32 for k in keys)
+    # and not simply the master secret handed out under different names
+    assert settings.secret_key.get_secret_value().encode() not in keys
+
+
+def test_subkeys_are_deterministic() -> None:
+    """Two processes with the same SECRET_KEY must agree, or tokens minted by
+    one instance would fail to verify on another."""
+    assert Settings(**BASE).subkey("jwt") == Settings(**BASE).subkey("jwt")
+
+
+def test_changing_the_master_secret_changes_every_subkey() -> None:
+    a = Settings(**BASE)
+    b = Settings(**{**BASE, "secret_key": "t" * 64})
+    assert a.subkey("jwt") != b.subkey("jwt")
+    assert a.subkey("csrf") != b.subkey("csrf")
 
 
 def test_debug_is_rejected_in_production() -> None:

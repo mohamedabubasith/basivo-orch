@@ -42,3 +42,6 @@ AGENT.md
 .cursorrules
 .aider*
 .github/copilot-instructions.md
+
+# --- generated ---
+apps/api/basivo_orch/auth/**/__pycache__/

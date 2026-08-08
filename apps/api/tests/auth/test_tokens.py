@@ -138,7 +138,8 @@ async def test_revoking_for_user_kills_every_live_session(session, user: User) -
 def test_purpose_tokens_do_not_cross_validate() -> None:
     """A token minted for one purpose must not validate for another.
 
-    Both are signed with JWT_SECRET, so only the audience separates them. If
+    Both are signed with the same derived JWT key, so only the audience
+    separates them. If
     this regressed, a low-authority token (a pending-2FA step-up, say) could be
     replayed where a high-authority one is expected.
     """
@@ -168,7 +169,7 @@ def test_purpose_token_is_not_accepted_by_the_access_token_strategy() -> None:
     with pytest.raises(jwt.InvalidAudienceError):
         jwt.decode(
             token,
-            settings.jwt_secret.get_secret_value(),
+            settings.subkey_str("jwt"),
             algorithms=[settings.jwt_algorithm],
             audience=settings.jwt_audience,
             issuer=settings.jwt_issuer,

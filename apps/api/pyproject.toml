@@ -51,7 +51,7 @@ dev = [
 # The authoritative record of what generated the package is
 # apps/api/.copier-answers.yml (`_commit`); this keeps the tool in step with it.
 tools = [
-    "basivo-auth @ git+https://github.com/mohamedabubasith/basivo-auth.git@v0.1.0",
+    "basivo-auth @ git+https://github.com/mohamedabubasith/basivo-auth.git@v0.2.0",
 ]
 
 [tool.pytest.ini_options]
