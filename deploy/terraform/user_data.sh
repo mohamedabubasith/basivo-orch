@@ -1,4 +1,14 @@
 #!/bin/bash
+# Re-exec under bash before anything else.
+#
+# Lightsail prepends its own initialisation to user data, which displaces this
+# shebang. cloud-init then runs the whole thing with /bin/sh — dash on Ubuntu —
+# where `set -o pipefail` and the process substitution below are syntax errors,
+# and the only symptom is `cloud-init status: error` with no bootstrap log.
+# `$$` escapes the interpolation: templatefile would otherwise try to
+# evaluate BASH_VERSION as a Terraform expression and fail to render.
+if [ -z "$${BASH_VERSION:-}" ]; then exec /bin/bash "$0" "$@"; fi
+
 # First-boot provisioning. Runs once, as root, before the instance is useful.
 #
 # Everything it writes is idempotent, because Lightsail will re-run user data

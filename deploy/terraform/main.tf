@@ -8,8 +8,12 @@
 # ElastiCache, no NAT gateway. Each is a real improvement and each costs more
 # per month than the entire instance. See deploy/README.md for when to add them.
 
+# Suffixed, because Lightsail resource names share one namespace across types:
+# a key pair called "basivo-beta" makes that name unavailable for the instance,
+# and the error ("Some names are already in use") does not say which resource
+# is holding it.
 resource "aws_lightsail_key_pair" "deploy" {
-  name       = "basivo-beta"
+  name       = "basivo-beta-key"
   public_key = file(pathexpand(var.ssh_public_key_path))
 }
 
