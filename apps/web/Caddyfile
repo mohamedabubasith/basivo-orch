@@ -29,7 +29,12 @@
 	}
 
 	@api {
-		path /auth/* /users/* /orgs/* /api/* /flows/* /health
+		# Both forms of every prefix. Caddy's `/orgs/*` matches `/orgs/x` but
+		# *not* `/orgs` itself, so listing and creating — the collection
+		# endpoints — would fall through to the static file server and answer
+		# 405 to a POST. Nothing in development catches this: the Vite dev
+		# server routes by origin, not by path.
+		path /auth /auth/* /users /users/* /orgs /orgs/* /api /api/* /flows /flows/* /health
 	}
 	handle @api {
 		reverse_proxy api:8000 {
