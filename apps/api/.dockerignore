@@ -1,0 +1,15 @@
+# The build context is uploaded to the daemon before anything runs. On a 1GB
+# instance, shipping a 400MB .venv and every cache directory across is the
+# difference between a build that starts in a second and one that stalls.
+.venv/
+__pycache__/
+*.py[cod]
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.env
+.env.*
+tests/
+docs/
+*.db
+*.sqlite3

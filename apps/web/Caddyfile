@@ -1,0 +1,68 @@
+# Caddy fetches and renews the TLS certificate itself over ACME. Nothing to
+# configure beyond the hostname, and nothing to remember to renew.
+{
+	email {$ACME_EMAIL}
+}
+
+{$SITE_ADDRESS} {
+	encode zstd gzip
+
+	# --- routing -----------------------------------------------------------
+	#
+	# `/auth/*` is contested. The API serves POST /auth/verify and
+	# POST /auth/reset-password, and the API *also* mails users a link to
+	# `{FRONTEND_BASE_URL}/auth/verify?token=…` — a page, not an endpoint, at
+	# the same path. Proxying all of /auth to the API would hand someone
+	# clicking a confirmation link a lump of JSON.
+	#
+	# Method plus path separates them: a browser navigation is a GET, the
+	# client's call is a POST. Note this deliberately does not divert the
+	# API's own GET routes (/auth/csrf, /auth/sso/providers, the SSO
+	# callbacks) — only these two exact paths.
+	@spa_auth_pages {
+		method GET
+		path /auth/verify /auth/reset-password
+	}
+	handle @spa_auth_pages {
+		rewrite * /index.html
+		file_server
+	}
+
+	@api {
+		path /auth/* /users/* /orgs/* /api/* /flows/* /health
+	}
+	handle @api {
+		reverse_proxy api:8000 {
+			# Streaming, not buffering. Run events are Server-Sent Events; with
+			# the default buffering a client would receive the whole run at once
+			# when it finished, which is exactly what the streaming endpoint
+			# exists to avoid.
+			flush_interval -1
+		}
+	}
+
+	# Everything else is the single-page app. try_files sends unknown paths to
+	# index.html so a deep link like /app/security survives a hard refresh
+	# instead of 404ing.
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+
+	# --- headers -----------------------------------------------------------
+	header {
+		# The API sets its own headers on API responses; these cover the static
+		# app, which Caddy serves without the API ever being involved.
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}

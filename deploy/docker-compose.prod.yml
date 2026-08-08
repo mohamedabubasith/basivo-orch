@@ -1,0 +1,126 @@
+# Production stack for a single 1 GB instance.
+#
+# Everything lives on one box: Postgres and Redis beside the app rather than as
+# managed services. That is the whole reason this costs $7/month instead of
+# $44 — and the trade-off is stated plainly in deploy/README.md rather than
+# discovered later.
+#
+# Memory limits are set on every service. On a 1 GB box an unbounded Postgres
+# cache plus a Node build is exactly how you get the kernel OOM-killer picking
+# a victim at random, and the victim is usually the API.
+
+name: basivo
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: basivo
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env}
+      POSTGRES_DB: basivo_orch
+      # Tuned down for a small box. The defaults assume a machine with room.
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+    command:
+      - postgres
+      - -c
+      - shared_buffers=96MB
+      - -c
+      - effective_cache_size=256MB
+      - -c
+      - max_connections=50
+      - -c
+      - work_mem=4MB
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U basivo -d basivo_orch"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    deploy:
+      resources:
+        limits:
+          memory: 320M
+    # Not published to the host. Only the api container can reach it, over the
+    # compose network — there is no path from the internet to port 5432.
+    expose:
+      - "5432"
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command:
+      - redis-server
+      - --save
+      - ""
+      - --appendonly
+      - "no"
+      - --maxmemory
+      - 64mb
+      # Redis here holds rate-limit counters, lockout state, OTPs and the live
+      # tail of run events — all of it reconstructible or short-lived. Evicting
+      # the oldest key under pressure is correct; refusing writes is not.
+      - --maxmemory-policy
+      - allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    deploy:
+      resources:
+        limits:
+          memory: 96M
+    expose:
+      - "6379"
+
+  api:
+    build:
+      context: ../apps/api
+      dockerfile: Dockerfile
+    image: basivo-api:latest
+    restart: unless-stopped
+    env_file: [.env]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://basivo:${POSTGRES_PASSWORD}@postgres:5432/basivo_orch
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    deploy:
+      resources:
+        limits:
+          memory: 384M
+    expose:
+      - "8000"
+
+  web:
+    build:
+      context: ../apps/web
+      dockerfile: Dockerfile
+    image: basivo-web:latest
+    restart: unless-stopped
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:?set in .env}
+      ACME_EMAIL: ${ACME_EMAIL:?set in .env}
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - api
+    volumes:
+      # Certificates survive a redeploy. Without this every `docker compose up`
+      # would request a new certificate, and Let's Encrypt rate-limits that to
+      # five per week per hostname — enough to lock yourself out for days.
+      - caddy_data:/data
+      - caddy_config:/config
+    deploy:
+      resources:
+        limits:
+          memory: 96M
+
+volumes:
+  postgres_data:
+  caddy_data:
+  caddy_config:

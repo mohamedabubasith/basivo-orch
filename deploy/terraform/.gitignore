@@ -1,0 +1,11 @@
+# Terraform state holds the SES SMTP password in clear. It must never be
+# committed, and this is the only copy — back it up somewhere private if the
+# instance matters to you.
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+tfplan
+
+# Contains an operator's own IP address and email.
+terraform.tfvars

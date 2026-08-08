@@ -1,0 +1,9 @@
+# Copy to terraform.tfvars and fill in.
+
+# Where Let's Encrypt sends certificate-expiry warnings.
+acme_email = "you@example.com"
+
+# Who may SSH in. A single address, not 0.0.0.0/0 — an open SSH port starts
+# collecting credential-stuffing traffic within minutes.
+#   curl -s https://checkip.amazonaws.com
+ssh_allowed_cidr = "203.0.113.4/32"
