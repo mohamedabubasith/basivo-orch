@@ -35,7 +35,6 @@ def _step_up_used_key(jti: str) -> str:
     return redis_client.namespaced("stepup", "used", jti)
 
 
-
 @router.post("/enrol", response_model=TOTPEnrolStart)
 @limiter.limit("5/hour")
 async def start_enrolment(
