@@ -1,0 +1,86 @@
+{
+  "name": "Basivo — send auth email",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "basivo-send-mail",
+        "responseMode": "responseNode",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "id": "b1000000-0000-4000-8000-000000000001",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-200, 0],
+      "webhookId": "b1000000-0000-4000-8000-000000000001",
+      "notes": "Raw Body is on so the signature can be checked against the exact bytes that were signed. The Code node falls back to rebuilding them if your n8n version does not expose it."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Verify the request really came from your auth service.\n//\n// An n8n webhook is a URL, and URLs leak — browser history, a screenshot, an\n// exported workflow. Without this check, whoever finds it can send email from\n// your domain with content of their choosing.\n//\n// Set BASIVO_WEBHOOK_SECRET in n8n's environment to the EMAIL_WEBHOOK_SECRET\n// from your service's .env. Never paste the secret into this node.\n\nconst crypto = require('crypto');\n\nconst secret = $env.BASIVO_WEBHOOK_SECRET;\nif (!secret) {\n  throw new Error('BASIVO_WEBHOOK_SECRET is not set in n8n');\n}\n\nconst item = $input.first();\nconst headers = item.json.headers || {};\nconst signature = headers['x-basivo-signature'] || '';\nconst timestamp = headers['x-basivo-timestamp'] || '';\n\nif (!signature || !timestamp) {\n  throw new Error('Unsigned request');\n}\n\n// Bound replay: reject anything older than five minutes.\nif (Math.abs(Date.now() / 1000 - Number(timestamp)) > 300) {\n  throw new Error('Stale request');\n}\n\n// Prefer the raw body, which is exactly what was signed. n8n exposes it in\n// different shapes depending on version and settings, so try each in turn.\nlet raw;\nif (item.binary && item.binary.data && item.binary.data.data) {\n  raw = Buffer.from(item.binary.data.data, 'base64');\n} else if (Buffer.isBuffer(item.json.body)) {\n  raw = item.json.body;\n} else if (typeof item.json.body === 'string') {\n  raw = Buffer.from(item.json.body, 'utf8');\n} else {\n  // Fallback: rebuild the canonical form. The sender serialises with sorted\n  // keys, no spaces and real UTF-8, so this reproduces the signed bytes.\n  const canonical = (v) => {\n    if (Array.isArray(v)) return '[' + v.map(canonical).join(',') + ']';\n    if (v && typeof v === 'object') {\n      return '{' + Object.keys(v).sort()\n        .map((k) => JSON.stringify(k) + ':' + canonical(v[k])).join(',') + '}';\n    }\n    return JSON.stringify(v);\n  };\n  raw = Buffer.from(canonical(item.json.body), 'utf8');\n}\n\nconst expected = 'sha256=' + crypto\n  .createHmac('sha256', secret)\n  .update(Buffer.concat([Buffer.from(timestamp + '.', 'utf8'), raw]))\n  .digest('hex');\n\n// timingSafeEqual, not ===. A plain comparison returns at the first wrong\n// byte, and that timing difference is enough to recover a signature.\nconst a = Buffer.from(signature);\nconst b = Buffer.from(expected);\nif (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {\n  throw new Error('Bad signature');\n}\n\n// Hand the parsed email on as the item body.\nconst email = typeof item.json.body === 'string'\n  ? JSON.parse(item.json.body)\n  : (Buffer.isBuffer(item.json.body) ? JSON.parse(item.json.body.toString('utf8')) : item.json.body);\n\nreturn [{ json: email }];"
+      },
+      "id": "b1000000-0000-4000-8000-000000000002",
+      "name": "Verify signature",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [20, 0],
+      "notes": "Throws on a bad or stale signature, which returns a non-2xx. The auth service logs that as email_send_failed."
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.to }}",
+        "subject": "={{ $json.subject }}",
+        "emailType": "html",
+        "message": "={{ $json.html }}",
+        "options": {
+          "appendAttribution": false,
+          "senderName": "={{ $json.from.name }}"
+        }
+      },
+      "id": "b1000000-0000-4000-8000-000000000003",
+      "name": "Send with Gmail",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [240, 0],
+      "credentials": {},
+      "notes": "Connect your Google account here. This is the only place a mail credential exists — the auth service never holds one."
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ sent: true, id: $json.id }) }}",
+        "options": {}
+      },
+      "id": "b1000000-0000-4000-8000-000000000004",
+      "name": "Respond 200",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [460, 0],
+      "notes": "A 2xx tells the auth service the message was accepted. Anything else is logged as a delivery failure."
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [[{ "node": "Verify signature", "type": "main", "index": 0 }]]
+    },
+    "Verify signature": {
+      "main": [[{ "node": "Send with Gmail", "type": "main", "index": 0 }]]
+    },
+    "Send with Gmail": {
+      "main": [[{ "node": "Respond 200", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": false,
+    "saveExecutionProgress": false,
+    "saveDataSuccessExecution": "none",
+    "saveDataErrorExecution": "all"
+  },
+  "pinData": {},
+  "tags": []
+}
+
