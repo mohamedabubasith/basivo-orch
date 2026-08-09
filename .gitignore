@@ -1,3 +1,12 @@
+# --- database dumps ---
+# ./deploy.sh backup writes here. A dump contains every user's email address
+# and password hash — it is the single most sensitive artefact this repo can
+# produce, and exactly the kind of file that gets committed by a reflexive
+# `git add -A`.
+backups/
+*.sql
+*.sql.gz
+
 # --- secrets ---
 .env
 .env.*

@@ -42,14 +42,36 @@ Stated plainly, because these are real:
 - **Builds happen on the box.** Slow (several minutes on 1 GB), but it keeps
   the deployment to one moving part and needs no registry.
 
+## `./deploy.sh`
+
+One entry point for everything:
+
+```bash
+./deploy.sh up          # provision (first time)
+./deploy.sh deploy      # ship current main to the instance
+./deploy.sh status      # instance + containers + a live health check
+./deploy.sh logs api    # follow logs
+./deploy.sh ssh         # shell on the box
+./deploy.sh smoke       # 37 assertions against the running site
+./deploy.sh backup      # database dump to ./backups/
+./deploy.sh destroy     # tear it all down
+```
+
+`deploy` warns if you have uncommitted or unpushed commits, because the
+instance builds from GitHub — anything not pushed is not deployed, and finding
+that out an hour later is avoidable.
+
+`destroy` takes a backup, prints every resource it will remove, and requires
+you to type `destroy basivo-beta`. Not `[y/N]`: it releases the static IP (so
+the DNS record breaks and a rebuild gets a different address) and deletes the
+database, which is too much to hang on one keystroke of muscle memory.
+
 ## First deploy
 
 ```bash
 cd deploy/terraform
 cp terraform.tfvars.example terraform.tfvars   # fill in both values
-terraform init
-terraform apply
-terraform output dns_records_to_add            # paste these into GoDaddy
+cd ../.. && ./deploy.sh up
 ```
 
 Then add the records it prints. **Caddy cannot obtain a certificate until the
