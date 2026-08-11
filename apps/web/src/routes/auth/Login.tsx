@@ -30,9 +30,9 @@ export function Login() {
       navigate(from, { replace: true });
     } catch (err) {
       if (err instanceof StepUpRequired) {
-        // Password was correct; the second factor is outstanding. The step-up
+        // The password was right; the second factor is outstanding. The step-up
         // token is a credential, so it travels in router state (memory) and is
-        // never written to storage or the URL.
+        // never written to storage or put in the URL.
         navigate("/two-factor", {
           replace: true,
           state: { stepUpToken: err.token, methods: err.methods, from },
@@ -40,14 +40,17 @@ export function Login() {
         return;
       }
       setError(err instanceof ApiError ? err.message : "Could not sign in. Please try again.");
-    } finally {
       setBusy(false);
+      return;
     }
+    // Left busy on the success path: the redirect is about to unmount this
+    // form, and clearing it first makes the button flicker back to its idle
+    // state for a frame.
   }
 
   return (
     <AuthLayout
-      title="Sign in"
+      title="Welcome back"
       subtitle="Pick up where your pipelines left off."
       footer={
         <>
@@ -69,6 +72,7 @@ export function Login() {
           autoComplete="username"
           required
           autoFocus
+          disabled={busy}
           placeholder="you@company.com"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
@@ -80,7 +84,9 @@ export function Login() {
             type="password"
             name="password"
             autoComplete="current-password"
+            revealable
             required
+            disabled={busy}
             placeholder="••••••••••••"
             value={password}
             onChange={(e) => setPassword(e.target.value)}

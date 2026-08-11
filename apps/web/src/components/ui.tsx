@@ -2,6 +2,7 @@ import { motion } from "motion/react";
 import {
   forwardRef,
   useId,
+  useState,
   type ButtonHTMLAttributes,
   type InputHTMLAttributes,
   type ReactNode,
@@ -29,16 +30,16 @@ export function Button({
   ...rest
 }: ButtonProps) {
   const base =
-    "relative inline-flex items-center justify-center gap-2 rounded-xl font-medium " +
-    "transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-55 " +
+    "group relative inline-flex items-center justify-center gap-2 overflow-hidden rounded-xl " +
+    "font-medium transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-55 " +
     "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-400";
 
   const variants = {
     primary:
       "bg-brand-500 text-white shadow-lg shadow-brand-500/25 " +
-      "hover:bg-brand-400 hover:shadow-brand-500/40 active:scale-[0.985]",
+      "hover:bg-brand-400 hover:shadow-brand-500/40 hover:-translate-y-px active:translate-y-0",
     secondary:
-      "surface text-ink-100 hover:border-ink-500 hover:bg-ink-800/80 active:scale-[0.985]",
+      "surface text-ink-100 hover:border-ink-500 hover:bg-ink-800/80 hover:-translate-y-px active:translate-y-0",
     ghost: "text-ink-300 hover:text-ink-100 hover:bg-ink-800/60",
   } as const;
 
@@ -52,9 +53,28 @@ export function Button({
       aria-busy={loading || undefined}
       {...rest}
     >
-      {loading && <Spinner />}
-      <span className={cx(loading && "opacity-0")}>{children}</span>
-      {loading && <span className="absolute inset-0 grid place-items-center"><Spinner /></span>}
+      {/* One spinner, laid over the hidden label so the button does not change
+          width mid-submit. An earlier version rendered a second inline spinner
+          as well, which showed two at once. */}
+      <span className={cx("inline-flex items-center gap-2", loading && "invisible")}>
+        {children}
+      </span>
+      {loading && (
+        <span className="absolute inset-0 grid place-items-center">
+          <Spinner />
+        </span>
+      )}
+
+      {/* Sheen on hover. Purely decorative, and pointer-events-none so it can
+          never intercept the click. */}
+      {variant === "primary" && (
+        <span
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 -translate-x-full bg-gradient-to-r
+                     from-transparent via-white/20 to-transparent transition-transform
+                     duration-700 group-hover:translate-x-full motion-reduce:hidden"
+        />
+      )}
     </button>
   );
 }
@@ -68,12 +88,25 @@ export function Spinner({ className }: { className?: string }) {
       aria-hidden="true"
     >
       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
-      <path
-        className="opacity-90"
-        fill="currentColor"
-        d="M4 12a8 8 0 0 1 8-8v3a5 5 0 0 0-5 5H4z"
-      />
+      <path className="opacity-90" fill="currentColor" d="M4 12a8 8 0 0 1 8-8v3a5 5 0 0 0-5 5H4z" />
     </svg>
+  );
+}
+
+/** Full-page loading state, for when there is nothing yet to show. */
+export function PageLoader({ label = "Loading" }: { label?: string }) {
+  return (
+    <div className="grid min-h-dvh place-items-center" role="status" aria-live="polite">
+      <div className="flex flex-col items-center gap-4">
+        <span className="relative flex h-10 w-10">
+          <span className="absolute inset-0 animate-ping rounded-full bg-brand-500/30" />
+          <span className="relative m-auto h-6 w-6">
+            <Spinner className="h-6 w-6 text-brand-400" />
+          </span>
+        </span>
+        <span className="text-sm text-ink-400">{label}…</span>
+      </div>
+    </div>
   );
 }
 
@@ -83,40 +116,89 @@ type FieldProps = InputHTMLAttributes<HTMLInputElement> & {
   label: string;
   hint?: ReactNode;
   error?: string | null;
+  /** Renders a show/hide toggle. Only meaningful for type="password". */
+  revealable?: boolean;
 };
 
 export const Field = forwardRef<HTMLInputElement, FieldProps>(function Field(
-  { label, hint, error, className, id, ...rest },
+  { label, hint, error, className, id, type, revealable, ...rest },
   ref,
 ) {
   const generated = useId();
   const inputId = id ?? generated;
   const describedBy = error ? `${inputId}-error` : hint ? `${inputId}-hint` : undefined;
+  const [revealed, setRevealed] = useState(false);
+
+  const actualType = revealable && revealed ? "text" : type;
 
   return (
     <div className="space-y-1.5">
       <label htmlFor={inputId} className="block text-sm font-medium text-ink-200">
         {label}
       </label>
-      <input
-        ref={ref}
-        id={inputId}
-        // Screen readers announce the message only if the input points at it.
-        aria-describedby={describedBy}
-        aria-invalid={error ? true : undefined}
-        className={cx(
-          "w-full rounded-xl border bg-ink-900/70 px-3.5 py-2.5 text-[0.95rem] text-ink-100",
-          "placeholder:text-ink-500 transition-colors duration-150",
-          "focus:border-brand-400 focus:bg-ink-900 focus:outline-none",
-          error ? "border-err-500/70" : "border-ink-600/70 hover:border-ink-500",
-          className,
+
+      <div className="relative">
+        <input
+          ref={ref}
+          id={inputId}
+          type={actualType}
+          // Screen readers announce the message only if the input points at it.
+          aria-describedby={describedBy}
+          aria-invalid={error ? true : undefined}
+          className={cx(
+            "w-full rounded-xl border bg-ink-900/70 px-3.5 py-2.5 text-[0.95rem] text-ink-100",
+            "placeholder:text-ink-500 transition-all duration-200",
+            "focus:border-brand-400 focus:bg-ink-900 focus:ring-4 focus:ring-brand-500/15 focus:outline-none",
+            "disabled:cursor-not-allowed disabled:opacity-60",
+            revealable && "pr-11",
+            error ? "border-err-500/70" : "border-ink-600/70 hover:border-ink-500",
+            className,
+          )}
+          {...rest}
+        />
+
+        {revealable && (
+          <button
+            type="button"
+            // Not in the tab order: it is a convenience, and stopping between
+            // the password field and the submit button is worse than useful.
+            tabIndex={-1}
+            onClick={() => setRevealed((value) => !value)}
+            aria-label={revealed ? "Hide password" : "Show password"}
+            className="absolute top-1/2 right-3 -translate-y-1/2 text-ink-500 transition-colors hover:text-ink-200"
+          >
+            <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" aria-hidden="true">
+              {revealed ? (
+                <path
+                  d="M3 3l18 18M10.6 10.6a2 2 0 002.8 2.8M9.4 5.4A9.8 9.8 0 0112 5c5 0 9 4.5 9 7a12 12 0 01-2.4 3.3M6.2 6.2A12.6 12.6 0 003 12c0 2.5 4 7 9 7 1.2 0 2.3-.2 3.3-.6"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                  strokeLinecap="round"
+                />
+              ) : (
+                <>
+                  <path
+                    d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"
+                    stroke="currentColor"
+                    strokeWidth="1.6"
+                  />
+                  <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.6" />
+                </>
+              )}
+            </svg>
+          </button>
         )}
-        {...rest}
-      />
+      </div>
+
       {error ? (
-        <p id={`${inputId}-error`} className="text-sm text-err-500">
+        <motion.p
+          id={`${inputId}-error`}
+          initial={{ opacity: 0, y: -4 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="text-sm text-err-500"
+        >
           {error}
-        </p>
+        </motion.p>
       ) : hint ? (
         <p id={`${inputId}-hint`} className="text-sm text-ink-400">
           {hint}
@@ -141,15 +223,31 @@ export function Alert({
     info: "border-brand-400/35 bg-brand-500/10 text-brand-300",
   } as const;
 
+  const icons = {
+    error: "M12 8v5M12 16.5v.5M12 3l9 16H3l9-16Z",
+    success: "M4.5 12.5l5 5 10-10",
+    info: "M12 11v6M12 7.5v.5M12 3a9 9 0 100 18 9 9 0 000-18Z",
+  } as const;
+
   return (
     <motion.div
-      initial={{ opacity: 0, y: -6 }}
-      animate={{ opacity: 1, y: 0 }}
+      initial={{ opacity: 0, y: -6, scale: 0.98 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      transition={{ duration: 0.2 }}
       // Errors that appear after an action must be announced, not just drawn.
       role={tone === "error" ? "alert" : "status"}
-      className={cx("rounded-xl border px-3.5 py-2.5 text-sm", tones[tone])}
+      className={cx("flex items-start gap-2.5 rounded-xl border px-3.5 py-2.5 text-sm", tones[tone])}
     >
-      {children}
+      <svg viewBox="0 0 24 24" className="mt-0.5 h-4 w-4 flex-none" fill="none" aria-hidden="true">
+        <path
+          d={icons[tone]}
+          stroke="currentColor"
+          strokeWidth="1.7"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+      <span className="min-w-0">{children}</span>
     </motion.div>
   );
 }
@@ -196,9 +294,7 @@ export function Logo({ className }: { className?: string }) {
           strokeLinecap="round"
         />
       </svg>
-      <span className="text-[1.05rem] font-semibold tracking-tight text-ink-100">
-        Basivo
-      </span>
+      <span className="text-[1.05rem] font-semibold tracking-tight text-ink-100">Basivo</span>
     </span>
   );
 }

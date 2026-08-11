@@ -6,6 +6,7 @@ import {
   HowItWorks,
   Nav,
   Observability,
+  Stats,
 } from "../components/landing/Sections";
 
 export function Landing() {
@@ -14,6 +15,7 @@ export function Landing() {
       <Nav />
       <main>
         <Hero />
+        <Stats />
         <Observability />
         <Features />
         <HowItWorks />

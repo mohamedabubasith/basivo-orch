@@ -2,7 +2,7 @@ import { NavLink, Navigate, Outlet, useLocation } from "react-router-dom";
 
 import { useAuth } from "../../lib/auth";
 import { cx } from "../../lib/cx";
-import { Button, Logo, Spinner } from "../../components/ui";
+import { Button, Logo, PageLoader } from "../../components/ui";
 
 /**
  * Gate for everything behind sign-in.
@@ -16,13 +16,10 @@ export function RequireAuth() {
   const { user, loading } = useAuth();
   const location = useLocation();
 
-  if (loading) {
-    return (
-      <div className="grid min-h-dvh place-items-center">
-        <Spinner className="h-6 w-6 text-ink-500" />
-      </div>
-    );
-  }
+  // Held, not flashed. The session probe is one request; rendering the signed
+  // -out view first and correcting it a moment later shows a login screen to
+  // someone who is already signed in.
+  if (loading) return <PageLoader label="Checking your session" />;
 
   if (!user) {
     // Remember where they were going so sign-in can put them back.

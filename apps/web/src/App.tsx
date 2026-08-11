@@ -1,4 +1,5 @@
-import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { AnimatePresence, motion } from "motion/react";
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
 
 import { AuthProvider } from "./lib/auth";
 import { Landing } from "./routes/Landing";
@@ -12,11 +13,19 @@ import { ResetPassword } from "./routes/auth/ResetPassword";
 import { TwoFactor } from "./routes/auth/TwoFactor";
 import { VerifyEmail } from "./routes/auth/VerifyEmail";
 
-export default function App() {
+/** Cross-fades between routes so navigation is not a hard cut. */
+function AnimatedRoutes() {
+  const location = useLocation();
   return (
-    <BrowserRouter>
-      <AuthProvider>
-        <Routes>
+    <AnimatePresence mode="wait">
+      <motion.div
+        key={location.pathname}
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        transition={{ duration: 0.18 }}
+      >
+        <Routes location={location}>
           <Route path="/" element={<Landing />} />
 
           <Route path="/login" element={<Login />} />
@@ -40,6 +49,16 @@ export default function App() {
 
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
+      </motion.div>
+    </AnimatePresence>
+  );
+}
+
+export default function App() {
+  return (
+    <BrowserRouter>
+      <AuthProvider>
+        <AnimatedRoutes />
       </AuthProvider>
     </BrowserRouter>
   );

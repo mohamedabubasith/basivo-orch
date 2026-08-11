@@ -1,5 +1,13 @@
-import { motion, useReducedMotion } from "motion/react";
-import { useEffect, useState, type ReactNode } from "react";
+import {
+  motion,
+  useMotionValue,
+  useReducedMotion,
+  useScroll,
+  useSpring,
+  useTransform,
+  type MotionValue,
+} from "motion/react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 
 import { Badge, Button, Logo } from "../ui";
@@ -19,13 +27,63 @@ function Reveal({
   return (
     <motion.div
       className={className}
-      initial={reduceMotion ? false : { opacity: 0, y: 22 }}
-      whileInView={{ opacity: 1, y: 0 }}
+      initial={reduceMotion ? false : { opacity: 0, y: 26, scale: 0.985 }}
+      whileInView={{ opacity: 1, y: 0, scale: 1 }}
       viewport={{ once: true, margin: "-80px" }}
-      transition={{ duration: 0.55, delay, ease: [0.21, 0.5, 0.35, 1] }}
+      transition={{ duration: 0.6, delay, ease: [0.21, 0.5, 0.35, 1] }}
     >
       {children}
     </motion.div>
+  );
+}
+
+/** A progress bar tied to page scroll. Cheap orientation on a long page. */
+function ScrollProgress() {
+  const { scrollYProgress } = useScroll();
+  const scaleX = useSpring(scrollYProgress, { stiffness: 120, damping: 30, mass: 0.2 });
+  return (
+    <motion.div
+      aria-hidden="true"
+      style={{ scaleX }}
+      className="fixed inset-x-0 top-0 z-[60] h-0.5 origin-left bg-gradient-to-r from-brand-500 to-accent-500"
+    />
+  );
+}
+
+/** Counts up when it scrolls into view. */
+function Counter({ to, suffix = "" }: { to: number; suffix?: string }) {
+  const reduceMotion = useReducedMotion();
+  const [value, setValue] = useState(reduceMotion ? to : 0);
+  const ref = useRef<HTMLSpanElement>(null);
+  const started = useRef(false);
+
+  useEffect(() => {
+    if (reduceMotion || !ref.current) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (!entry.isIntersecting || started.current) return;
+        started.current = true;
+        const start = performance.now();
+        const step = (now: number) => {
+          const t = Math.min(1, (now - start) / 900);
+          // Ease-out: fast then settling, which reads as counting rather than
+          // sliding.
+          setValue(Math.round(to * (1 - Math.pow(1 - t, 3))));
+          if (t < 1) requestAnimationFrame(step);
+        };
+        requestAnimationFrame(step);
+      },
+      { threshold: 0.4 },
+    );
+    observer.observe(ref.current);
+    return () => observer.disconnect();
+  }, [to, reduceMotion]);
+
+  return (
+    <span ref={ref}>
+      {value.toLocaleString()}
+      {suffix}
+    </span>
   );
 }
 
@@ -42,6 +100,8 @@ export function Nav() {
   }, []);
 
   return (
+    <>
+    <ScrollProgress />
     <header
       className={`fixed inset-x-0 top-0 z-50 transition-all duration-300 ${
         scrolled
@@ -80,6 +140,31 @@ export function Nav() {
         </div>
       </nav>
     </header>
+    </>
+  );
+}
+
+/* --------------------------------------------------------------- stats --- */
+
+export function Stats() {
+  const items = [
+    { to: 6, suffix: "", label: "Tier 1 nodes, ready to wire" },
+    { to: 100, suffix: "%", label: "of node executions logged" },
+    { to: 2, suffix: "", label: "ways to call a flow: blocking or streamed" },
+  ];
+  return (
+    <section className="relative border-t border-ink-800/70 py-16">
+      <div className="mx-auto grid max-w-5xl gap-8 px-5 sm:grid-cols-3">
+        {items.map((item, i) => (
+          <Reveal key={item.label} delay={i * 0.08} className="text-center">
+            <p className="text-4xl font-semibold tracking-tight text-gradient">
+              <Counter to={item.to} suffix={item.suffix} />
+            </p>
+            <p className="mt-2 text-sm text-ink-400">{item.label}</p>
+          </Reveal>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -87,14 +172,38 @@ export function Nav() {
 
 export function Hero() {
   const reduceMotion = useReducedMotion();
+  const { scrollY } = useScroll();
+  // The panel drifts slower than the page. Subtle — 60px over a full screen —
+  // because parallax that announces itself is worse than none.
+  const panelY: MotionValue<number> = useTransform(scrollY, [0, 600], [0, reduceMotion ? 0 : 60]);
+  const panelOpacity = useTransform(scrollY, [0, 500], [1, reduceMotion ? 1 : 0.72]);
+
+  const glowX = useMotionValue(50);
+  const glowY = useMotionValue(0);
 
   return (
-    <section className="relative overflow-hidden pt-32 pb-20">
+    <section
+      className="relative overflow-hidden pt-32 pb-20"
+      onPointerMove={(event) => {
+        if (reduceMotion) return;
+        const box = event.currentTarget.getBoundingClientRect();
+        glowX.set(((event.clientX - box.left) / box.width) * 100);
+        glowY.set(((event.clientY - box.top) / box.height) * 100);
+      }}
+    >
       {/* ambient background */}
       <div aria-hidden="true" className="pointer-events-none absolute inset-0">
         <div className="grid-bg absolute inset-0 opacity-[0.18] [mask-image:radial-gradient(ellipse_at_50%_0%,black_25%,transparent_70%)]" />
         <div className="absolute -top-40 left-1/2 h-[520px] w-[820px] -translate-x-1/2 rounded-full bg-brand-500/18 blur-[120px] animate-pulse-slow" />
         <div className="absolute top-32 right-[8%] h-[320px] w-[320px] rounded-full bg-accent-500/12 blur-[100px]" />
+        {/* Follows the pointer. Decorative, and disabled under reduced motion. */}
+        <motion.div
+          className="absolute h-[340px] w-[340px] rounded-full bg-accent-500/10 blur-[90px] motion-reduce:hidden"
+          style={{
+            left: useTransform(glowX, (v) => `calc(${v}% - 170px)`),
+            top: useTransform(glowY, (v) => `calc(${v}% - 170px)`),
+          }}
+        />
       </div>
 
       <div className="relative mx-auto max-w-6xl px-5">
@@ -110,8 +219,25 @@ export function Hero() {
           </Badge>
 
           <h1 className="text-[2.6rem] leading-[1.08] font-semibold tracking-tight text-balance text-ink-100 sm:text-6xl">
-            Agent pipelines you can
-            <span className="text-gradient"> actually watch run</span>
+            {"Agent pipelines you can".split(" ").map((word, i) => (
+              <motion.span
+                key={word + i}
+                className="inline-block"
+                initial={reduceMotion ? false : { opacity: 0, y: 18 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.5, delay: 0.05 * i, ease: [0.21, 0.5, 0.35, 1] }}
+              >
+                {word}&nbsp;
+              </motion.span>
+            ))}
+            <motion.span
+              className="text-gradient inline-block"
+              initial={reduceMotion ? false : { opacity: 0, y: 18 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5, delay: 0.25, ease: [0.21, 0.5, 0.35, 1] }}
+            >
+              actually watch run
+            </motion.span>
           </h1>
 
           <p className="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-pretty text-ink-300">
@@ -140,6 +266,7 @@ export function Hero() {
 
         <motion.div
           className="relative mx-auto mt-16 max-w-4xl"
+          style={{ y: panelY, opacity: panelOpacity }}
           initial={reduceMotion ? false : { opacity: 0, y: 32, scale: 0.98 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
           transition={{ duration: 0.7, delay: 0.15, ease: [0.21, 0.5, 0.35, 1] }}
@@ -258,7 +385,11 @@ export function Features() {
         <div className="mt-14 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {FEATURES.map((feature, i) => (
             <Reveal key={feature.title} delay={(i % 3) * 0.07}>
-              <div className="group surface h-full rounded-2xl p-6 transition-all duration-300 hover:border-ink-500 hover:bg-ink-800/50">
+              <motion.div
+                whileHover={{ y: -4 }}
+                transition={{ type: "spring", stiffness: 300, damping: 22 }}
+                className="group surface h-full rounded-2xl p-6 transition-colors duration-300 hover:border-ink-500 hover:bg-ink-800/50"
+              >
                 <div className="mb-4 inline-flex h-10 w-10 items-center justify-center rounded-xl border border-ink-600/60 bg-ink-850 text-brand-300 transition-colors group-hover:border-brand-400/50 group-hover:text-brand-400">
                   <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" aria-hidden="true">
                     <path
@@ -272,7 +403,7 @@ export function Features() {
                 </div>
                 <h3 className="text-base font-semibold text-ink-100">{feature.title}</h3>
                 <p className="mt-2 text-[0.95rem] leading-relaxed text-ink-400">{feature.body}</p>
-              </div>
+              </motion.div>
             </Reveal>
           ))}
         </div>
