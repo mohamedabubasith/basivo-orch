@@ -118,6 +118,22 @@ def create_app() -> FastAPI:
     async def health() -> dict[str, str]:
         return {"status": "ok", "version": __version__}
 
+    @app.get("/config", tags=["ops"])
+    async def public_config() -> dict[str, object]:
+        """The handful of server decisions the browser has to mirror.
+
+        Without this the frontend would hard-code whether email confirmation
+        gates the app, and the two could disagree — either a wall the API does
+        not enforce, or a 403 the UI never saw coming. Nothing here is a
+        secret: it is all inferable by making one request and reading the
+        status code.
+        """
+        return {
+            "app_name": settings.APP_NAME,
+            "version": __version__,
+            "require_verified_email": settings.REQUIRE_VERIFIED_EMAIL,
+        }
+
     return app
 
 

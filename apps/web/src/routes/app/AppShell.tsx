@@ -1,11 +1,28 @@
+/**
+ * The application chrome: a left sidebar, the shape every tool of this kind
+ * uses, and for a reason worth stating — a horizontal bar has room for about
+ * five words before it starts hiding things behind a "More" menu, and this app
+ * has a workspace switcher, five destinations and an account to fit. Vertical
+ * space is the one axis that does not run out.
+ *
+ * Three states are resolved here, in order, so that no page below has to think
+ * about any of them: not signed in, signed in but unconfirmed, signed in with
+ * no workspace. Each is a whole screen rather than a message wedged into a
+ * dashboard that cannot load.
+ */
+
 import { AnimatePresence, motion } from "motion/react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, NavLink, Navigate, Outlet, useLocation } from "react-router-dom";
 
+import { api } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
+import { loadConfig } from "../../lib/config";
 import { cx } from "../../lib/cx";
-import { Logo, PageLoader } from "../../components/ui";
-import { VerifyBanner } from "../../components/VerifyBanner";
+import { WorkspaceProvider, useWorkspace } from "../../lib/workspace";
+import { Alert, Button, Field, Logo, PageLoader } from "../../components/ui";
+
+/* ------------------------------------------------------------------ gates --- */
 
 /**
  * Gate for everything behind sign-in.
@@ -32,141 +49,552 @@ export function RequireAuth() {
   return <Outlet />;
 }
 
-const NAV = [
-  { to: "/app", label: "Overview", end: true },
-  { to: "/app/security", label: "Security" },
-];
-
-export function AppShell() {
-  const { user, signOut } = useAuth();
-  const [menuOpen, setMenuOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
+/**
+ * Gate for a confirmed email address.
+ *
+ * Mirrors the server rule rather than restating it — `require_verified_email`
+ * comes from `GET /config`, so a deployment that relaxes the gate does not end
+ * up with a UI still enforcing it. The API is the boundary either way; this
+ * only decides whether the user meets a wall or a 403.
+ */
+export function RequireVerified() {
+  const { user } = useAuth();
+  const [required, setRequired] = useState<boolean | null>(null);
 
   useEffect(() => {
-    if (!menuOpen) return;
-    const close = (event: MouseEvent) => {
-      if (!menuRef.current?.contains(event.target as Node)) setMenuOpen(false);
-    };
-    const escape = (event: KeyboardEvent) => event.key === "Escape" && setMenuOpen(false);
-    document.addEventListener("mousedown", close);
-    document.addEventListener("keydown", escape);
+    let cancelled = false;
+    void loadConfig().then((config) => {
+      if (!cancelled) setRequired(config.require_verified_email);
+    });
     return () => {
-      document.removeEventListener("mousedown", close);
-      document.removeEventListener("keydown", escape);
+      cancelled = true;
     };
-  }, [menuOpen]);
+  }, []);
+
+  if (required === null) return <PageLoader label="Loading" />;
+  if (required && user && !user.is_verified) return <Navigate to="/confirm-email" replace />;
+  return <Outlet />;
+}
+
+/* --------------------------------------------------------------- nav data --- */
+
+interface NavItem {
+  to: string;
+  label: string;
+  end?: boolean;
+  icon: ReactNode;
+}
+
+const stroke = {
+  fill: "none",
+  stroke: "currentColor",
+  strokeWidth: 1.7,
+  strokeLinecap: "round" as const,
+  strokeLinejoin: "round" as const,
+};
+
+const NAV: { heading: string; items: NavItem[] }[] = [
+  {
+    heading: "Workspace",
+    items: [
+      {
+        to: "/app",
+        label: "Overview",
+        end: true,
+        icon: (
+          <svg viewBox="0 0 24 24" {...stroke}>
+            <path d="M4 13h6V4H4v9ZM14 20h6v-9h-6v9ZM4 20h6v-3H4v3ZM14 7h6V4h-6v3Z" />
+          </svg>
+        ),
+      },
+      {
+        to: "/app/flows",
+        label: "Flows",
+        icon: (
+          <svg viewBox="0 0 24 24" {...stroke}>
+            <circle cx="6" cy="6" r="2.5" />
+            <circle cx="18" cy="12" r="2.5" />
+            <circle cx="6" cy="18" r="2.5" />
+            <path d="M8.5 6h3a2 2 0 0 1 2 2v2M8.5 18h3a2 2 0 0 0 2-2v-2" />
+          </svg>
+        ),
+      },
+      {
+        to: "/app/runs",
+        label: "Runs",
+        icon: (
+          <svg viewBox="0 0 24 24" {...stroke}>
+            <circle cx="12" cy="12" r="8.5" />
+            <path d="M12 7.5V12l3 2" />
+          </svg>
+        ),
+      },
+    ],
+  },
+  {
+    heading: "Account",
+    items: [
+      {
+        to: "/app/api-keys",
+        label: "API keys",
+        icon: (
+          <svg viewBox="0 0 24 24" {...stroke}>
+            <circle cx="8" cy="12" r="3.5" />
+            <path d="M11.5 12H21M18 12v3M15 12v2" />
+          </svg>
+        ),
+      },
+      {
+        to: "/app/security",
+        label: "Security",
+        icon: (
+          <svg viewBox="0 0 24 24" {...stroke}>
+            <path d="M12 3.5 5 6.5v5c0 4 2.9 7.6 7 9 4.1-1.4 7-5 7-9v-5l-7-3Z" />
+            <path d="M9.3 12.2 11.2 14l3.5-3.6" />
+          </svg>
+        ),
+      },
+    ],
+  },
+];
+
+/* ------------------------------------------------------------------ shell --- */
+
+const COLLAPSE_KEY = "basivo.sidebar.collapsed";
+
+export function AppShell() {
+  const [collapsed, setCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem(COLLAPSE_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const location = useLocation();
+
+  // A drawer that survives navigation covers the page the user just asked for.
+  useEffect(() => setDrawerOpen(false), [location.pathname]);
+
+  function toggleCollapsed() {
+    setCollapsed((value) => {
+      try {
+        localStorage.setItem(COLLAPSE_KEY, value ? "0" : "1");
+      } catch {
+        // Preference only; a refusal here must not break the layout.
+      }
+      return !value;
+    });
+  }
 
   return (
-    <div className="min-h-dvh">
-      <header className="sticky top-0 z-40 border-b border-ink-800/70 bg-ink-950/80 backdrop-blur-xl">
-        <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-4 px-5">
-          <div className="flex items-center gap-6">
-            <Logo />
+    <WorkspaceProvider>
+      <div className="min-h-dvh lg:flex">
+        {/* Desktop: a real column, so the content beside it scrolls on its own
+            and the nav never scrolls out of reach. */}
+        <motion.aside
+          animate={{ width: collapsed ? 76 : 264 }}
+          transition={{ type: "spring", stiffness: 420, damping: 38 }}
+          className="sticky top-0 hidden h-dvh flex-none border-r border-ink-800/70 bg-ink-900/40 lg:block"
+        >
+          <SidebarContent collapsed={collapsed} onToggle={toggleCollapsed} />
+        </motion.aside>
 
-            <nav className="flex items-center gap-1">
-              {NAV.map((item) => (
-                <NavLink key={item.to} to={item.to} end={item.end} className="relative">
-                  {({ isActive }) => (
-                    <span
-                      className={cx(
-                        "relative block rounded-lg px-3 py-1.5 text-sm transition-colors",
-                        isActive ? "text-ink-100" : "text-ink-400 hover:text-ink-200",
-                      )}
-                    >
-                      {/* One element that travels between tabs, rather than a
-                          background per tab fading in and out. `layoutId` is
-                          what makes it move instead of teleport. */}
-                      {isActive && (
-                        <motion.span
-                          layoutId="nav-active"
-                          className="absolute inset-0 rounded-lg bg-ink-800"
-                          transition={{ type: "spring", stiffness: 380, damping: 30 }}
-                        />
-                      )}
-                      <span className="relative">{item.label}</span>
-                    </span>
-                  )}
-                </NavLink>
-              ))}
-            </nav>
-          </div>
-
-          <div className="relative flex items-center gap-3" ref={menuRef}>
-            <button
-              onClick={() => setMenuOpen((open) => !open)}
-              aria-haspopup="menu"
-              aria-expanded={menuOpen}
-              className="flex items-center gap-2 rounded-lg py-1 pr-2 pl-1 transition-colors hover:bg-ink-850"
-            >
-              <span className="grid h-8 w-8 place-items-center rounded-full bg-gradient-to-br from-brand-500 to-accent-500 text-sm font-semibold text-white">
-                {(user?.email ?? "?").charAt(0).toUpperCase()}
-              </span>
-              <span className="hidden max-w-[12rem] truncate text-sm text-ink-300 sm:inline">
-                {user?.email}
-              </span>
-              <svg
-                viewBox="0 0 24 24"
-                className="h-4 w-4 text-ink-500"
-                fill="none"
-                aria-hidden="true"
+        {/* Mobile: the same content in a drawer. */}
+        <AnimatePresence>
+          {drawerOpen && (
+            <>
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                onClick={() => setDrawerOpen(false)}
+                className="fixed inset-0 z-40 bg-ink-950/70 backdrop-blur-sm lg:hidden"
+              />
+              <motion.aside
+                initial={{ x: -280 }}
+                animate={{ x: 0 }}
+                exit={{ x: -280 }}
+                transition={{ type: "spring", stiffness: 420, damping: 40 }}
+                className="fixed inset-y-0 left-0 z-50 w-[264px] border-r border-ink-800/70 bg-ink-900 lg:hidden"
               >
-                <path
-                  d="M6 9l6 6 6-6"
-                  stroke="currentColor"
-                  strokeWidth="1.8"
-                  strokeLinecap="round"
-                />
+                <SidebarContent collapsed={false} />
+              </motion.aside>
+            </>
+          )}
+        </AnimatePresence>
+
+        <div className="min-w-0 flex-1">
+          {/* Mobile only: something has to open the drawer. */}
+          <header className="sticky top-0 z-30 flex h-14 items-center gap-3 border-b border-ink-800/70 bg-ink-950/85 px-4 backdrop-blur-xl lg:hidden">
+            <button
+              onClick={() => setDrawerOpen(true)}
+              aria-label="Open navigation"
+              className="rounded-lg p-2 text-ink-300 transition-colors hover:bg-ink-800 hover:text-ink-100"
+            >
+              <svg viewBox="0 0 24 24" className="h-5 w-5" {...stroke}>
+                <path d="M4 7h16M4 12h16M4 17h16" />
               </svg>
             </button>
+            <Logo />
+          </header>
 
-            <AnimatePresence>
-              {menuOpen && (
-                <motion.div
-                  role="menu"
-                  initial={{ opacity: 0, y: -6, scale: 0.97 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: -6, scale: 0.97 }}
-                  transition={{ duration: 0.15 }}
-                  className="surface absolute top-full right-0 mt-2 w-56 rounded-xl p-1.5 shadow-xl shadow-black/40"
-                >
-                  <div className="border-b border-ink-700/60 px-3 py-2">
-                    <p className="truncate text-sm text-ink-200">{user?.email}</p>
-                    {user?.is_verified ? (
-                      <p className="mt-0.5 text-xs" style={{ color: "#059669" }}>
-                        Email confirmed
-                      </p>
-                    ) : (
-                      // A status with nowhere to go is just a complaint.
-                      <Link
-                        to="/app/security"
-                        onClick={() => setMenuOpen(false)}
-                        className="mt-0.5 inline-block text-xs underline decoration-dotted underline-offset-2"
-                        style={{ color: "#d97706" }}
-                      >
-                        Email unconfirmed — confirm it
-                      </Link>
-                    )}
-                  </div>
-                  <button
-                    role="menuitem"
-                    onClick={() => void signOut()}
-                    className="mt-1 w-full rounded-lg px-3 py-2 text-left text-sm text-ink-300 transition-colors hover:bg-ink-800 hover:text-ink-100"
-                  >
-                    Sign out
-                  </button>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
+          <main className="mx-auto max-w-6xl px-5 py-8 sm:px-8 sm:py-10">
+            <WorkspaceGate />
+          </main>
         </div>
-      </header>
+      </div>
+    </WorkspaceProvider>
+  );
+}
 
-      <main className="mx-auto max-w-6xl px-5 py-10">
-        {/* Above the page rather than inside it, so it is visible wherever the
-            user lands and cannot be missed by going straight to a sub-page. */}
-        <VerifyBanner />
+/**
+ * No workspace means every page below is addressing an id that does not exist.
+ * Resolving it here rather than per-page is why the dashboard could once render
+ * completely blank: it finished loading, found nothing, and had no branch for
+ * the case.
+ */
+function WorkspaceGate() {
+  const { loading, current, error, refresh, select } = useWorkspace();
+  const location = useLocation();
+
+  if (loading) return <PageLoader label="Loading your workspace" />;
+  if (error && !current) {
+    return (
+      <Alert>
+        {error}{" "}
+        <button onClick={() => void refresh()} className="underline underline-offset-2">
+          Try again
+        </button>
+      </Alert>
+    );
+  }
+  if (!current) {
+    return (
+      <CreateWorkspace
+        onCreated={async (id) => {
+          await refresh();
+          select(id);
+        }}
+      />
+    );
+  }
+  // Only the page content is keyed, so the sidebar, the workspace provider and
+  // its data survive navigation. `mode="wait"` would hold an empty frame
+  // between pages; overlapping the fade keeps the chrome visibly still.
+  return (
+    <AnimatePresence initial={false}>
+      <motion.div
+        key={location.pathname}
+        initial={{ opacity: 0, y: 6 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.2, ease: [0.21, 0.5, 0.35, 1] }}
+      >
         <Outlet />
-      </main>
+      </motion.div>
+    </AnimatePresence>
+  );
+}
+
+/* ---------------------------------------------------------------- sidebar --- */
+
+function SidebarContent({ collapsed, onToggle }: { collapsed: boolean; onToggle?: () => void }) {
+  return (
+    <div className="flex h-full flex-col overflow-hidden">
+      <div className={cx("flex h-16 flex-none items-center", collapsed ? "justify-center" : "px-5")}>
+        {collapsed ? <Logo className="[&>span:last-child]:hidden" /> : <Logo />}
+      </div>
+
+      {!collapsed && <WorkspaceSwitcher />}
+
+      <nav className="mt-2 flex-1 overflow-y-auto px-3">
+        {NAV.map((group) => (
+          <div key={group.heading} className="mb-5">
+            {!collapsed && (
+              <p className="mb-1.5 px-3 text-[0.68rem] font-medium tracking-[0.12em] text-ink-500 uppercase">
+                {group.heading}
+              </p>
+            )}
+            <ul className="space-y-0.5">
+              {group.items.map((item) => (
+                <li key={item.to}>
+                  <NavLink to={item.to} end={item.end} title={collapsed ? item.label : undefined}>
+                    {({ isActive }) => (
+                      <span
+                        className={cx(
+                          "relative flex items-center rounded-xl py-2 text-sm transition-colors",
+                          collapsed ? "justify-center px-2" : "gap-3 px-3",
+                          isActive ? "text-ink-100" : "text-ink-400 hover:text-ink-100",
+                        )}
+                      >
+                        {/* One element that travels between items, rather than
+                            a background per item fading in and out. `layoutId`
+                            is what makes it move instead of teleport. */}
+                        {isActive && (
+                          <motion.span
+                            layoutId="nav-active"
+                            className="absolute inset-0 rounded-xl bg-ink-800"
+                            transition={{ type: "spring", stiffness: 400, damping: 34 }}
+                          />
+                        )}
+                        {isActive && !collapsed && (
+                          <motion.span
+                            layoutId="nav-rail"
+                            className="absolute top-1.5 bottom-1.5 -left-3 w-[3px] rounded-r-full bg-brand-400"
+                            transition={{ type: "spring", stiffness: 400, damping: 34 }}
+                          />
+                        )}
+                        <span className="relative h-[18px] w-[18px] flex-none">{item.icon}</span>
+                        {!collapsed && <span className="relative truncate">{item.label}</span>}
+                      </span>
+                    )}
+                  </NavLink>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </nav>
+
+      <AccountBlock collapsed={collapsed} />
+
+      {onToggle && (
+        <button
+          onClick={onToggle}
+          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          className="flex h-11 flex-none items-center justify-center border-t border-ink-800/70 text-ink-500 transition-colors hover:bg-ink-850 hover:text-ink-200"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            className={cx("h-4 w-4 transition-transform", collapsed && "rotate-180")}
+            {...stroke}
+          >
+            <path d="M14 7l-5 5 5 5" />
+          </svg>
+        </button>
+      )}
     </div>
+  );
+}
+
+function WorkspaceSwitcher() {
+  const { workspaces, current, select } = useWorkspace();
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useCloseOnOutside(ref, open, () => setOpen(false));
+
+  return (
+    <div className="relative px-3" ref={ref}>
+      <button
+        onClick={() => setOpen((value) => !value)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        className="flex w-full items-center gap-2.5 rounded-xl border border-ink-700/60 bg-ink-850/60 px-3 py-2.5 text-left transition-colors hover:border-ink-600"
+      >
+        <span className="grid h-7 w-7 flex-none place-items-center rounded-lg bg-gradient-to-br from-brand-500 to-accent-500 text-xs font-semibold text-white">
+          {(current?.name ?? "?").charAt(0).toUpperCase()}
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm text-ink-100">{current?.name}</span>
+          <span className="block truncate text-xs text-ink-500 capitalize">{current?.role}</span>
+        </span>
+        <svg viewBox="0 0 24 24" className="h-4 w-4 flex-none text-ink-500" {...stroke}>
+          <path d="M8 10l4-4 4 4M8 14l4 4 4-4" />
+        </svg>
+      </button>
+
+      <AnimatePresence>
+        {open && (
+          <motion.ul
+            role="listbox"
+            initial={{ opacity: 0, y: -6, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -6, scale: 0.98 }}
+            transition={{ duration: 0.14 }}
+            className="surface absolute inset-x-3 top-full z-20 mt-1.5 max-h-64 overflow-y-auto rounded-xl p-1.5 shadow-xl shadow-black/50"
+          >
+            {workspaces.map((workspace) => (
+              <li key={workspace.id}>
+                <button
+                  role="option"
+                  aria-selected={workspace.id === current?.id}
+                  onClick={() => {
+                    select(workspace.id);
+                    setOpen(false);
+                  }}
+                  className={cx(
+                    "flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm transition-colors hover:bg-ink-800",
+                    workspace.id === current?.id ? "text-ink-100" : "text-ink-300",
+                  )}
+                >
+                  <span className="min-w-0 flex-1 truncate">{workspace.name}</span>
+                  {workspace.id === current?.id && (
+                    <svg viewBox="0 0 12 12" className="h-3.5 w-3.5 flex-none text-brand-400">
+                      <path
+                        d="M2.5 6.4 4.8 8.7 9.5 3.9"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.8"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  )}
+                </button>
+              </li>
+            ))}
+          </motion.ul>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+function AccountBlock({ collapsed }: { collapsed: boolean }) {
+  const { user, signOut } = useAuth();
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useCloseOnOutside(ref, open, () => setOpen(false));
+
+  return (
+    <div className="relative flex-none border-t border-ink-800/70 p-3" ref={ref}>
+      <button
+        onClick={() => setOpen((value) => !value)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title={collapsed ? user?.email : undefined}
+        className={cx(
+          "flex w-full items-center rounded-xl py-2 transition-colors hover:bg-ink-850",
+          collapsed ? "justify-center px-1" : "gap-2.5 px-2",
+        )}
+      >
+        <span className="grid h-8 w-8 flex-none place-items-center rounded-full bg-gradient-to-br from-brand-500 to-accent-500 text-sm font-semibold text-white">
+          {(user?.email ?? "?").charAt(0).toUpperCase()}
+        </span>
+        {!collapsed && (
+          <>
+            <span className="min-w-0 flex-1 text-left">
+              <span className="block truncate text-sm text-ink-200">{user?.email}</span>
+              <span className="block text-xs" style={{ color: "#059669" }}>
+                Email confirmed
+              </span>
+            </span>
+            <svg viewBox="0 0 24 24" className="h-4 w-4 flex-none text-ink-500" {...stroke}>
+              <path d="M6 9l6 6 6-6" />
+            </svg>
+          </>
+        )}
+      </button>
+
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            role="menu"
+            initial={{ opacity: 0, y: 6, scale: 0.97 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 6, scale: 0.97 }}
+            transition={{ duration: 0.14 }}
+            className="surface absolute right-3 bottom-full left-3 z-20 mb-1.5 rounded-xl p-1.5 shadow-xl shadow-black/50"
+          >
+            <Link
+              to="/app/security"
+              role="menuitem"
+              onClick={() => setOpen(false)}
+              className="block rounded-lg px-3 py-2 text-sm text-ink-300 transition-colors hover:bg-ink-800 hover:text-ink-100"
+            >
+              Security
+            </Link>
+            <button
+              role="menuitem"
+              onClick={() => void signOut()}
+              className="w-full rounded-lg px-3 py-2 text-left text-sm text-ink-300 transition-colors hover:bg-ink-800 hover:text-ink-100"
+            >
+              Sign out
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+function useCloseOnOutside(
+  ref: React.RefObject<HTMLElement | null>,
+  active: boolean,
+  close: () => void,
+) {
+  useEffect(() => {
+    if (!active) return;
+    const onDown = (event: MouseEvent) => {
+      if (!ref.current?.contains(event.target as Node)) close();
+    };
+    const onEscape = (event: KeyboardEvent) => event.key === "Escape" && close();
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onEscape);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onEscape);
+    };
+  }, [ref, active, close]);
+}
+
+/* -------------------------------------------------------- first workspace --- */
+
+function CreateWorkspace({ onCreated }: { onCreated: (id: string) => void | Promise<void> }) {
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit(event: React.FormEvent) {
+    event.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      const slug =
+        name
+          .trim()
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/^-|-$/g, "")
+          .slice(0, 40) || "workspace";
+      const created = await api.post<{ id: string }>("/orgs", { name: name.trim(), slug });
+      await onCreated(created.id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not create the workspace.");
+      setBusy(false);
+    }
+  }
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3 }}
+      className="mx-auto max-w-md py-10"
+    >
+      <h1 className="text-2xl font-semibold tracking-tight text-ink-100">Create your workspace</h1>
+      <p className="mt-2 leading-relaxed text-ink-400">
+        Flows, runs and API keys all live inside a workspace, so there is nothing
+        to show until you have one. You can rename it later.
+      </p>
+
+      <form onSubmit={submit} className="mt-6 space-y-4" noValidate>
+        {error && <Alert>{error}</Alert>}
+        <Field
+          label="Workspace name"
+          name="workspace"
+          required
+          autoFocus
+          placeholder="Acme Engineering"
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+        />
+        <Button type="submit" loading={busy} disabled={!name.trim()}>
+          Create workspace
+        </Button>
+      </form>
+    </motion.div>
   );
 }

@@ -1,10 +1,13 @@
-import { AnimatePresence, motion } from "motion/react";
-import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 
 import { AuthProvider } from "./lib/auth";
 import { Landing } from "./routes/Landing";
-import { AppShell, RequireAuth } from "./routes/app/AppShell";
+import { ApiKeys } from "./routes/app/ApiKeys";
+import { AppShell, RequireAuth, RequireVerified } from "./routes/app/AppShell";
 import { Dashboard } from "./routes/app/Dashboard";
+import { EmailGate } from "./routes/app/EmailGate";
+import { Flows } from "./routes/app/Flows";
+import { Runs } from "./routes/app/Runs";
 import { Security } from "./routes/app/Security";
 import { ForgotPassword } from "./routes/auth/ForgotPassword";
 import { Login } from "./routes/auth/Login";
@@ -13,44 +16,54 @@ import { ResetPassword } from "./routes/auth/ResetPassword";
 import { TwoFactor } from "./routes/auth/TwoFactor";
 import { VerifyEmail } from "./routes/auth/VerifyEmail";
 
-/** Cross-fades between routes so navigation is not a hard cut. */
-function AnimatedRoutes() {
-  const location = useLocation();
+/**
+ * The route table. Deliberately *not* wrapped in a keyed <AnimatePresence>.
+ *
+ * It used to be: one `motion.div key={location.pathname}` around this entire
+ * tree. That cross-faded navigation, and it also unmounted and rebuilt
+ * everything on every click — the shell, the sidebar, the workspace provider
+ * and its `/orgs` request. Switching tabs looked like a full page refresh
+ * because structurally it was one.
+ *
+ * Page transitions belong *inside* whatever should survive them, so the
+ * animation now lives around the shell's <Outlet /> and the chrome stays put.
+ */
+function AppRoutes() {
   return (
-    <AnimatePresence mode="wait">
-      <motion.div
-        key={location.pathname}
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        transition={{ duration: 0.18 }}
-      >
-        <Routes location={location}>
-          <Route path="/" element={<Landing />} />
+    <Routes>
+      <Route path="/" element={<Landing />} />
 
-          <Route path="/login" element={<Login />} />
-          <Route path="/register" element={<Register />} />
-          <Route path="/two-factor" element={<TwoFactor />} />
-          <Route path="/forgot-password" element={<ForgotPassword />} />
-          {/* These two paths are fixed by the API: it emails
-              `{FRONTEND_BASE_URL}/auth/verify?token=…` and
-              `/auth/reset-password?token=…`. They must match
-              `_frontend_link()` in apps/api/basivo_orch/auth/email/sender.py,
-              and renaming one breaks every link already sitting in an inbox. */}
-          <Route path="/auth/verify" element={<VerifyEmail />} />
-          <Route path="/auth/reset-password" element={<ResetPassword />} />
+      <Route path="/login" element={<Login />} />
+      <Route path="/register" element={<Register />} />
+      <Route path="/two-factor" element={<TwoFactor />} />
+      <Route path="/forgot-password" element={<ForgotPassword />} />
+      {/* These two paths are fixed by the API: it emails
+          `{FRONTEND_BASE_URL}/auth/verify?token=…` and
+          `/auth/reset-password?token=…`. They must match
+          `_frontend_link()` in apps/api/basivo_orch/auth/email/sender.py,
+          and renaming one breaks every link already sitting in an inbox. */}
+      <Route path="/auth/verify" element={<VerifyEmail />} />
+      <Route path="/auth/reset-password" element={<ResetPassword />} />
 
-          <Route element={<RequireAuth />}>
-            <Route path="/app" element={<AppShell />}>
-              <Route index element={<Dashboard />} />
-              <Route path="security" element={<Security />} />
-            </Route>
+      <Route element={<RequireAuth />}>
+        {/* Signed in, but not yet through the email gate. Outside the
+            shell on purpose: there is no workspace to put chrome around
+            until the address is confirmed. */}
+        <Route path="/confirm-email" element={<EmailGate />} />
+
+        <Route element={<RequireVerified />}>
+          <Route path="/app" element={<AppShell />}>
+            <Route index element={<Dashboard />} />
+            <Route path="flows" element={<Flows />} />
+            <Route path="runs" element={<Runs />} />
+            <Route path="api-keys" element={<ApiKeys />} />
+            <Route path="security" element={<Security />} />
           </Route>
+        </Route>
+      </Route>
 
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </motion.div>
-    </AnimatePresence>
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
   );
 }
 
@@ -58,7 +71,7 @@ export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <AnimatedRoutes />
+        <AppRoutes />
       </AuthProvider>
     </BrowserRouter>
   );

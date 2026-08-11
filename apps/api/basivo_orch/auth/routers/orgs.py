@@ -41,6 +41,7 @@ from basivo_orch.auth.schemas import (
 )
 from basivo_orch.auth.security.audit import AuditAction, Outcome, record
 from basivo_orch.auth.security.ratelimit import client_ip, limiter
+from basivo_orch.gate import current_app_user
 
 router = APIRouter(prefix="/orgs", tags=["organisations"])
 
@@ -105,7 +106,7 @@ async def create_organization(
     request: Request,
     response: Response,
     payload: OrganizationCreate,
-    user: User = Depends(current_active_user),
+    user: User = Depends(current_app_user),
     session: AsyncSession = Depends(get_async_session),
 ) -> OrganizationRead:
     """Create an organisation. The creator becomes its owner."""

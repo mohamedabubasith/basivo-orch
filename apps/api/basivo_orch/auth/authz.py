@@ -35,11 +35,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from basivo_orch.auth.db import get_async_session
-from basivo_orch.auth.engine import current_active_user
 from basivo_orch.auth.models import Membership, Organization, User
 from basivo_orch.auth.security.audit import AuditAction, Outcome, record
 from basivo_orch.auth.security.ratelimit import client_ip
 from basivo_orch.auth.settings import get_settings
+from basivo_orch.gate import current_app_user
 
 logger = structlog.get_logger(__name__)
 
@@ -317,7 +317,7 @@ def require(*permissions: Permission) -> OrgDependency:
     async def dependency(
         request: Request,
         organization_id: uuid.UUID = Path(description="Organisation the request targets."),
-        user: User = Depends(current_active_user),
+        user: User = Depends(current_app_user),
         session: AsyncSession = Depends(get_async_session),
     ) -> OrgContext:
         context = await load_context(session, user=user, organization_id=organization_id)

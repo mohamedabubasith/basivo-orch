@@ -40,6 +40,16 @@ class Settings(BaseSettings):
     DATABASE_POOL_RECYCLE_SECONDS: int = 1800
     DATABASE_ECHO: bool = False
 
+    REQUIRE_VERIFIED_EMAIL: bool = Field(
+        default=True,
+        description=(
+            "Refuse workspace access until the account's email is confirmed. "
+            "This is the real gate — the UI only mirrors it. Turning it off is "
+            "an escape hatch for a deployment whose mail is not yet delivering: "
+            "with it on and mail broken, nobody who signs up can ever get in."
+        ),
+    )
+
     @field_validator("DEBUG")
     @classmethod
     def _no_debug_in_production(cls, value: bool, info) -> bool:  # type: ignore[no-untyped-def]

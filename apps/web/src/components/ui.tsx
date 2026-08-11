@@ -273,22 +273,28 @@ export function Badge({ children, className }: { children: ReactNode; className?
 }
 
 export function Logo({ className }: { className?: string }) {
+  // The gradient id must be unique per instance. It was a literal "bx", which
+  // is fine until two logos are on the page at once — the sidebar and the
+  // mobile drawer. Duplicate ids collapse to one target, and every `url(#bx)`
+  // in the document resolves to whichever came first; when that one sat inside
+  // a hidden element the other logo rendered as nothing at all.
+  const gradient = useId();
   return (
     <span className={cx("inline-flex items-center gap-2.5", className)}>
       <svg viewBox="0 0 32 32" className="h-7 w-7" aria-hidden="true">
         <defs>
-          <linearGradient id="bx" x1="0" y1="0" x2="1" y2="1">
+          <linearGradient id={gradient} x1="0" y1="0" x2="1" y2="1">
             <stop offset="0%" stopColor="#818cf8" />
             <stop offset="100%" stopColor="#22d3ee" />
           </linearGradient>
         </defs>
-        <rect x="2" y="2" width="28" height="28" rx="9" fill="url(#bx)" opacity="0.16" />
-        <circle cx="10" cy="10" r="3" fill="url(#bx)" />
-        <circle cx="22" cy="10" r="3" fill="url(#bx)" />
-        <circle cx="16" cy="22" r="3" fill="url(#bx)" />
+        <rect x="2" y="2" width="28" height="28" rx="9" fill={`url(#${gradient})`} opacity="0.16" />
+        <circle cx="10" cy="10" r="3" fill={`url(#${gradient})`} />
+        <circle cx="22" cy="10" r="3" fill={`url(#${gradient})`} />
+        <circle cx="16" cy="22" r="3" fill={`url(#${gradient})`} />
         <path
           d="M10 13v3a3 3 0 0 0 3 3h6a3 3 0 0 0 3-3v-3"
-          stroke="url(#bx)"
+          stroke={`url(#${gradient})`}
           strokeWidth="1.8"
           fill="none"
           strokeLinecap="round"

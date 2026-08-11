@@ -1,11 +1,12 @@
 import { motion } from "motion/react";
 import { useCallback, useEffect, useState } from "react";
 
-import { ApiError, api } from "../../lib/api";
+import { api } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
+import { useWorkspace } from "../../lib/workspace";
 import { BarList, Panel, StatTile, StatusPip, type BarDatum } from "../../components/charts";
 import { formatMs, formatPercent } from "../../lib/viz";
-import { Alert, Badge, Button, Card, Field, Spinner } from "../../components/ui";
+import { Badge, Card, Spinner } from "../../components/ui";
 
 interface NodeStat {
   node_id: string;
@@ -51,7 +52,9 @@ const WINDOWS = [1, 7, 30] as const;
 
 export function Dashboard() {
   const { user } = useAuth();
-  const [org, setOrg] = useState<string | null>(null);
+  // The shell guarantees a workspace before this renders, so there is no
+  // "which org?" question left here and no branch for having none.
+  const { orgId } = useWorkspace();
   const [data, setData] = useState<Analytics | null>(null);
   const [days, setDays] = useState<number>(7);
   const [loading, setLoading] = useState(true);
@@ -73,24 +76,11 @@ export function Dashboard() {
   );
 
   useEffect(() => {
-    let cancelled = false;
-    api
-      .get<{ id: string }[]>("/orgs")
-      .then((orgs) => {
-        if (cancelled) return;
-        const first = orgs[0]?.id ?? null;
-        setOrg(first);
-        if (first) return load(first, days);
-        setLoading(false);
-      })
-      .catch(() => !cancelled && (setError("Could not load your workspaces"), setLoading(false)));
-    return () => {
-      cancelled = true;
-    };
+    if (orgId) void load(orgId, days);
     // `days` deliberately excluded: the window switcher reloads directly, and
-    // including it here would re-fetch the workspace list on every change.
+    // including it here would fetch twice on every change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [load]);
+  }, [orgId, load]);
 
   const runs = data?.runs;
   const hasRuns = (runs?.total ?? 0) > 0;
@@ -114,7 +104,7 @@ export function Dashboard() {
               key={window}
               onClick={() => {
                 setDays(window);
-                if (org) void load(org, window);
+                if (orgId) void load(orgId, window);
               }}
               className={`relative rounded-lg px-3 py-1.5 text-sm transition-colors ${
                 days === window ? "text-ink-100" : "text-ink-400 hover:text-ink-200"
@@ -145,12 +135,6 @@ export function Dashboard() {
           <p className="text-ink-300">{error}</p>
         </Card>
       )}
-
-      {/* A brand-new account has no workspace, so there is nothing to load
-          analytics for. Without this the page rendered completely blank —
-          loading finished, data stayed null, and every condition below was
-          false. */}
-      {!loading && !org && <NoWorkspace onCreated={(id) => { setOrg(id); void load(id, days); }} />}
 
       {data && !hasRuns && <EmptyState />}
 
@@ -309,70 +293,6 @@ export function Dashboard() {
         </>
       )}
     </div>
-  );
-}
-
-function NoWorkspace({ onCreated }: { onCreated: (id: string) => void }) {
-  const [name, setName] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  async function create(event: React.FormEvent) {
-    event.preventDefault();
-    setBusy(true);
-    setError(null);
-    try {
-      const slug =
-        name
-          .toLowerCase()
-          .replace(/[^a-z0-9]+/g, "-")
-          .replace(/^-|-$/g, "")
-          .slice(0, 40) || `workspace-${Date.now().toString(36)}`;
-      const org = await api.post<{ id: string }>("/orgs", { name: name.trim(), slug });
-      onCreated(org.id);
-    } catch (err) {
-      setError(
-        err instanceof ApiError ? err.message : "Could not create the workspace. Try again.",
-      );
-      setBusy(false);
-    }
-  }
-
-  return (
-    <Card className="mx-auto max-w-lg p-8 text-center">
-      <div className="mx-auto mb-4 grid h-12 w-12 place-items-center rounded-2xl border border-ink-700/70 bg-ink-850">
-        <svg viewBox="0 0 24 24" className="h-5 w-5 text-brand-300" fill="none" aria-hidden="true">
-          <path
-            d="M3 7a2 2 0 012-2h4l2 2h7a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7Z"
-            stroke="currentColor"
-            strokeWidth="1.6"
-            strokeLinejoin="round"
-          />
-        </svg>
-      </div>
-      <h2 className="text-lg font-semibold text-ink-100">Create your workspace</h2>
-      <p className="mx-auto mt-2 max-w-sm text-sm leading-relaxed text-ink-400">
-        Flows, runs and API keys all belong to a workspace. You need one before
-        there is anything to measure.
-      </p>
-
-      <form onSubmit={create} className="mx-auto mt-6 max-w-sm space-y-3 text-left">
-        {error && <Alert>{error}</Alert>}
-        <Field
-          label="Workspace name"
-          name="workspace"
-          required
-          autoFocus
-          disabled={busy}
-          placeholder="Acme Engineering"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-        />
-        <Button type="submit" full loading={busy} disabled={!name.trim()}>
-          Create workspace
-        </Button>
-      </form>
-    </Card>
   );
 }
 
