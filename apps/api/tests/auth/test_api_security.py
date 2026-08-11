@@ -30,9 +30,7 @@ async def test_server_header_is_not_leaked(client) -> None:
 async def test_forgot_password_does_not_reveal_whether_an_account_exists(client, user) -> None:
     """The response must be byte-identical for a known and an unknown address."""
     known = await client.post("/auth/forgot-password", json={"email": user.email})
-    unknown = await client.post(
-        "/auth/forgot-password", json={"email": "nobody-here@example.com"}
-    )
+    unknown = await client.post("/auth/forgot-password", json={"email": "nobody-here@example.com"})
 
     assert known.status_code == unknown.status_code == 202
     assert known.json() == unknown.json()
@@ -58,9 +56,7 @@ async def test_login_failure_messages_are_identical(client, user) -> None:
 
 
 async def test_login_succeeds_with_correct_credentials(client, user, password) -> None:
-    response = await client.post(
-        "/auth/login", data={"username": user.email, "password": password}
-    )
+    response = await client.post("/auth/login", data={"username": user.email, "password": password})
     assert response.status_code in (200, 204)
 
 
@@ -108,6 +104,3 @@ async def test_unhandled_errors_do_not_leak_internals(client, monkeypatch) -> No
 async def test_openapi_is_available_outside_production(client) -> None:
     response = await client.get("/openapi.json")
     assert response.status_code == 200
-
-
-

@@ -57,7 +57,7 @@ async def send(email: Email) -> bool:
     """Dispatch one email. Returns success; never raises."""
     settings = get_settings()
     try:
-        await _send_smtp(email)
+        await _send_webhook(email)
     except Exception as exc:  # noqa: BLE001 - delivery must not break the flow
         logger.error(
             "email_send_failed",
@@ -71,28 +71,85 @@ async def send(email: Email) -> bool:
     return True
 
 
-async def _send_smtp(email: Email) -> None:
-    from email.message import EmailMessage
+async def _send_webhook(email: Email) -> None:
+    """POST the rendered email to a URL you control, which does the sending.
 
-    import aiosmtplib
+    Built for an automation platform — n8n, Make, Zapier — so the mailbox can
+    be one this service holds no credentials for: connect Gmail to n8n over
+    OAuth, and all this service ever knows is a URL.
+
+    The request is signed. An automation webhook is a URL and URLs leak — into
+    browser history, a screenshot, an exported workflow — and an unauthenticated
+    one lets whoever finds it send mail from your domain with content of their
+    choosing. That is a phishing kit, addressed from you. Verifying the
+    signature on the other end is what makes the endpoint safe to expose.
+    """
+    import hashlib
+    import hmac
+    import json
+    import time
+
+    import httpx
 
     settings = get_settings()
-    message = EmailMessage()
-    message["From"] = f"{settings.email_from_name} <{settings.email_from}>"
-    message["To"] = email.to
-    message["Subject"] = email.subject
-    message.set_content(email.text)
-    message.add_alternative(email.html, subtype="html")
 
-    await aiosmtplib.send(
-        message,
-        hostname=settings.smtp_host,
-        port=settings.smtp_port,
-        username=settings.smtp_user or None,
-        password=settings.smtp_password.get_secret_value() or None,
-        start_tls=settings.smtp_tls,
-        timeout=10,
+    payload = {
+        "to": email.to,
+        "subject": email.subject,
+        "html": email.html,
+        "text": email.text,
+        "from": {"name": settings.email_from_name, "email": settings.email_from},
+        "project": settings.project_name,
+    }
+    # Serialised once, and the signature covers these exact bytes. Re-encoding
+    # before sending would let key order or spacing differ from what was
+    # signed, and the receiver's check would fail intermittently.
+    #
+    # The form is deliberately canonical — sorted keys, no spaces, UTF-8 rather
+    # than \uXXXX escapes. Verifying against the raw body is still the correct
+    # approach, but not every receiver can reach it: n8n only exposes the raw
+    # body when a specific option is set. Canonical output means such a
+    # receiver can rebuild these exact bytes from the parsed JSON instead.
+    # `ensure_ascii=False` is the load-bearing part: with the default, an
+    # em-dash in an email template becomes \u2014 here and stays literal in
+    # JavaScript, and every signature check fails on exactly the messages that
+    # contain one.
+    body = json.dumps(payload, separators=(",", ":"), sort_keys=True, ensure_ascii=False).encode(
+        "utf-8"
     )
+
+    timestamp = str(int(time.time()))
+    headers = {
+        "Content-Type": "application/json",
+        "User-Agent": "basivo-orch-api/auth",
+        # Lets the receiver reject an old capture even if it never sees the
+        # same request twice.
+        "X-Basivo-Timestamp": timestamp,
+    }
+
+    secret = settings.email_webhook_secret.get_secret_value()
+    if secret:
+        signature = hmac.new(
+            secret.encode("utf-8"),
+            timestamp.encode("utf-8") + b"." + body,
+            hashlib.sha256,
+        ).hexdigest()
+        headers["X-Basivo-Signature"] = f"sha256={signature}"
+
+    auth = settings.email_webhook_auth_header.get_secret_value()
+    if auth:
+        headers["Authorization"] = auth
+
+    async with httpx.AsyncClient(timeout=settings.email_webhook_timeout_seconds) as client:
+        response = await client.post(
+            settings.email_webhook_url,
+            content=body,
+            headers=headers,
+            # Not followed. A redirect would forward the body — which contains a
+            # password-reset link — to a host that was never configured here.
+            follow_redirects=False,
+        )
+        response.raise_for_status()
 
 
 # ---------------------------------------------------------------------------

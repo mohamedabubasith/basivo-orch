@@ -47,8 +47,10 @@ async def test_rotation_keeps_the_family(session, user: User) -> None:
     await session.commit()
 
     rows = (
-        await session.execute(select(RefreshToken).where(RefreshToken.user_id == user.id))
-    ).scalars().all()
+        (await session.execute(select(RefreshToken).where(RefreshToken.user_id == user.id)))
+        .scalars()
+        .all()
+    )
     assert len({row.family_id for row in rows}) == 1
     assert len(rows) == 2
     assert second
@@ -74,12 +76,12 @@ async def test_reusing_a_rotated_token_revokes_the_entire_family(session, user: 
         await tokens.rotate_refresh_token(session, stolen)
 
     rows = (
-        await session.execute(select(RefreshToken).where(RefreshToken.user_id == user.id))
-    ).scalars().all()
-    assert all(row.revoked_at is not None for row in rows), "every token in the family must be dead"
-    assert any(
-        row.revoked_reason == tokens.RevocationReason.REUSE_DETECTED.value for row in rows
+        (await session.execute(select(RefreshToken).where(RefreshToken.user_id == user.id)))
+        .scalars()
+        .all()
     )
+    assert all(row.revoked_at is not None for row in rows), "every token in the family must be dead"
+    assert any(row.revoked_reason == tokens.RevocationReason.REUSE_DETECTED.value for row in rows)
 
     # And the attacker's freshly minted token is now useless too.
     with pytest.raises(tokens.TokenInvalidError):

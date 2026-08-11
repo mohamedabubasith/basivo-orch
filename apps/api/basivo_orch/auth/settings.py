@@ -164,14 +164,34 @@ class Settings(BaseSettings):
     address by prepending entries, which defeats every IP-keyed control here."""
 
     # -- Email -------------------------------------------------------------
-    email_provider: str = "smtp"
+    email_provider: str = "webhook"
     email_from: str = "no-reply@basivo-orch-api.local"
     email_from_name: str = "Basivo Orch Api"
-    smtp_host: str = "localhost"
-    smtp_port: int = 1025
-    smtp_user: str = ""
-    smtp_password: SecretStr = SecretStr("")
-    smtp_tls: bool = False
+    email_webhook_url: str = ""
+    """Where to POST each rendered email. Your automation does the sending.
+
+    Must be https outside development — see the validator below. The payload
+    carries password-reset and verification links.
+    """
+
+    email_webhook_secret: SecretStr = SecretStr("")
+    """Signs every request: `X-Basivo-Signature: sha256=<hmac>` over the exact
+    body, with `X-Basivo-Timestamp` to bound replay.
+
+    An automation webhook is a URL, and a URL leaks — into a browser history, a
+    screenshot, a shared workflow export. Without a signature anyone holding it
+    can make your system send mail with content of their choosing, from your
+    domain. Verifying the signature is what makes the endpoint safe to expose.
+    """
+
+    email_webhook_auth_header: SecretStr = SecretStr("")
+    """Optional `Authorization` header value, sent verbatim.
+
+    n8n's built-in Header Auth credential is the quickest way to lock a webhook
+    down, so this exists alongside the signature rather than instead of it.
+    """
+
+    email_webhook_timeout_seconds: float = Field(default=10.0, ge=1, le=60)
 
     # -- TOTP --------------------------------------------------------------
     totp_issuer: str = "Basivo Orch Api"
@@ -279,6 +299,21 @@ class Settings(BaseSettings):
 
         if str(self.public_base_url).startswith("http://"):
             raise ValueError("PUBLIC_BASE_URL must be https in staging/production.")
+        if not self.email_webhook_url:
+            raise ValueError("EMAIL_WEBHOOK_URL must be set; nothing would be delivered.")
+        if not self.email_webhook_url.startswith("https://"):
+            # The body contains password-reset and verification links. Over
+            # plain HTTP those are readable by anything on the path, which is a
+            # full account takeover for every message sent.
+            raise ValueError("EMAIL_WEBHOOK_URL must be https in staging/production.")
+        if not self.email_webhook_secret.get_secret_value() and not (
+            self.email_webhook_auth_header.get_secret_value()
+        ):
+            raise ValueError(
+                "Set EMAIL_WEBHOOK_SECRET (request signing) or "
+                "EMAIL_WEBHOOK_AUTH_HEADER. An unauthenticated webhook lets "
+                "anyone who learns the URL send mail as your domain."
+            )
         for url in self.sso_allowed_redirect_urls:
             if url.startswith("http://") and "localhost" not in url:
                 raise ValueError(f"SSO redirect {url!r} is plaintext HTTP in production.")

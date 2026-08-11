@@ -37,6 +37,9 @@ resource "aws_lightsail_instance" "app" {
     # parameter expansion, and templatefile would try to interpolate it as a
     # Terraform expression and fail before the instance ever boots.
     mail_domain = var.domain
+
+    email_webhook_url    = var.email_webhook_url
+    email_webhook_secret = var.email_webhook_secret
   })
 
   tags = {

@@ -75,3 +75,33 @@ variable "repo_ref" {
   type        = string
   default     = "main"
 }
+
+
+variable "email_webhook_url" {
+  description = <<-EOT
+    Where the service POSTs each rendered email. Your n8n workflow sends it.
+
+    Must be https: the payload carries password-reset and verification links,
+    and the service refuses to start in production on a plaintext URL.
+
+    The workflow has to be *activated* in n8n for this to resolve — an inactive
+    one returns 404 to the production URL, and the only symptom on this side is
+    `email_send_failed` in the logs.
+  EOT
+  type        = string
+}
+
+variable "email_webhook_secret" {
+  description = <<-EOT
+    Shared secret. Every request is signed with it, so the workflow can tell
+    this service apart from anyone else who has found the URL.
+
+    The same value must be set in n8n's environment as BASIVO_WEBHOOK_SECRET.
+    Generate one with: openssl rand -base64 48
+
+    Kept in terraform.tfvars (gitignored) rather than generated on the instance,
+    because both sides need to agree and only one of them is provisioned here.
+  EOT
+  type        = string
+  sensitive   = true
+}

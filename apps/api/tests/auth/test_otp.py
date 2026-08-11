@@ -118,7 +118,7 @@ async def test_codes_are_scoped_by_identifier(state) -> None:
 
 
 async def test_verifying_without_an_issued_code_reports_expired(state) -> None:
-    """"Never issued" and "expired" are indistinguishable by design: telling
+    """ "Never issued" and "expired" are indistinguishable by design: telling
     them apart reveals whether a code was ever sent to that address."""
     assert (
         await otp.verify(

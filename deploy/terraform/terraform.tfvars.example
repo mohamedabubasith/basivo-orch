@@ -7,3 +7,11 @@ acme_email = "you@example.com"
 # collecting credential-stuffing traffic within minutes.
 #   curl -s https://checkip.amazonaws.com
 ssh_allowed_cidr = "203.0.113.4/32"
+
+# Where email goes. Your n8n workflow's *production* URL (not the test URL),
+# and the workflow must be activated or this 404s.
+email_webhook_url = "https://n8n.example.com/webhook/basivo-send-mail"
+
+# Must match BASIVO_WEBHOOK_SECRET in n8n's environment.
+#   openssl rand -base64 48
+email_webhook_secret = "replace-me"

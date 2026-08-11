@@ -89,12 +89,15 @@ EMAIL_FROM=no-reply@${mail_domain}
 EMAIL_FROM_NAME=Basivo
 TOTP_ISSUER=Basivo
 
-# Filled in by deploy/configure-email.sh once SES DKIM has verified.
-SMTP_HOST=
-SMTP_PORT=587
-SMTP_USER=
-SMTP_PASSWORD=
-SMTP_TLS=true
+# Email goes out through a webhook you own — an n8n workflow that sends it
+# from a Gmail account this service holds no credentials for.
+#
+# The secret must match BASIVO_WEBHOOK_SECRET in n8n's environment, or the
+# workflow rejects every request as unsigned.
+EMAIL_WEBHOOK_URL=${email_webhook_url}
+EMAIL_WEBHOOK_SECRET=${email_webhook_secret}
+EMAIL_WEBHOOK_AUTH_HEADER=
+EMAIL_WEBHOOK_TIMEOUT_SECONDS=10
 
 # Caddy
 SITE_ADDRESS=${site_host}

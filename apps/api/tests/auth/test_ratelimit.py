@@ -98,9 +98,7 @@ async def test_rate_limited_endpoint_does_not_error(client, monkeypatch) -> None
     ratelimit.limiter.enabled = True
     ratelimit.limiter.reset()
 
-    response = await client.post(
-        "/auth/forgot-password", json={"email": "nobody@example.com"}
-    )
+    response = await client.post("/auth/forgot-password", json={"email": "nobody@example.com"})
 
     ratelimit.limiter.enabled = False
     ratelimit.limiter.reset()

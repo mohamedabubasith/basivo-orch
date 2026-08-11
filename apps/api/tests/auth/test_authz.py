@@ -180,12 +180,16 @@ async def test_blocked_escalation_is_audited(session) -> None:
         await assert_can_assign(session, context, Role.OWNER)
 
     rows = (
-        await session.execute(
-            _select(AuditEvent).where(
-                AuditEvent.action == AuditAction.AUTHZ_ESCALATION_BLOCKED.value
+        (
+            await session.execute(
+                _select(AuditEvent).where(
+                    AuditEvent.action == AuditAction.AUTHZ_ESCALATION_BLOCKED.value
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert rows, "the escalation attempt must be recorded"
     assert rows[0].outcome == "blocked"
     assert rows[0].user_id == context.user.id
@@ -306,9 +310,7 @@ async def test_last_owner_cannot_be_removed(session) -> None:
     await _add_member(session, owner, org, Role.OWNER)
 
     with pytest.raises(HTTPException) as exc:
-        await assert_not_last_owner(
-            session, organization_id=org.id, subject_user_id=owner.id
-        )
+        await assert_not_last_owner(session, organization_id=org.id, subject_user_id=owner.id)
     assert exc.value.status_code == 409
 
 
@@ -344,9 +346,7 @@ async def test_owner_count_is_scoped_to_one_organisation(session) -> None:
     await _add_member(session, elsewhere, other, Role.OWNER)
 
     with pytest.raises(HTTPException):
-        await assert_not_last_owner(
-            session, organization_id=mine.id, subject_user_id=owner.id
-        )
+        await assert_not_last_owner(session, organization_id=mine.id, subject_user_id=owner.id)
 
 
 async def test_membership_is_unique_per_user_and_org(session) -> None:
@@ -389,9 +389,9 @@ async def test_only_the_target_orgs_members_are_visible(session) -> None:
     await _add_member(session, b_user, org_b, Role.OWNER)
 
     rows = (
-        await session.execute(
-            select(Membership).where(Membership.organization_id == org_a.id)
-        )
-    ).scalars().all()
+        (await session.execute(select(Membership).where(Membership.organization_id == org_a.id)))
+        .scalars()
+        .all()
+    )
 
     assert [row.user_id for row in rows] == [a_user.id]

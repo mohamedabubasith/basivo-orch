@@ -181,9 +181,7 @@ async def test_a_step_up_token_cannot_be_exchanged_twice(client, session, user, 
     secret = await _enrol(client, session, user, password)
     client.cookies.clear()
 
-    response = await client.post(
-        "/auth/login", data={"username": user.email, "password": password}
-    )
+    response = await client.post("/auth/login", data={"username": user.email, "password": password})
     assert response.status_code == 401
     step_up = response.headers["X-Step-Up-Token"]
 
