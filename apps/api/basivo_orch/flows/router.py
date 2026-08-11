@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from basivo_orch.auth.authz import OrgContext, Permission, require
 from basivo_orch.db import get_async_session
+from basivo_orch.flows import analytics as analytics_module
 from basivo_orch.flows import nodes as node_registry
 from basivo_orch.flows import service
 from basivo_orch.flows.apikeys import ApiCaller, generate_key, require_api_key
@@ -278,6 +279,23 @@ async def list_runs(
         status=run_status,
         limit=limit,
         offset=offset,
+    )
+
+
+@management_router.get("/orgs/{organization_id}/analytics")
+async def flow_analytics(
+    flow_id: uuid.UUID | None = None,
+    days: Annotated[int, Query(ge=1, le=90)] = 7,
+    context: OrgContext = Depends(require(Permission.RUN_READ)),
+    session: AsyncSession = Depends(get_async_session),
+) -> dict[str, Any]:
+    """The analysis layer of SOW section 3.
+
+    Latency attribution, retry rescues, clustered failures and branches that
+    never fire — the questions a run list cannot answer.
+    """
+    return await analytics_module.analytics(
+        session, organization_id=context.organization_id, flow_id=flow_id, days=days
     )
 
 
