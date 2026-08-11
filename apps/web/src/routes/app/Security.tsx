@@ -70,7 +70,7 @@ function EmailSection() {
           <p className="mt-1.5 truncate text-sm text-ink-300">{user?.email}</p>
 
           {user?.is_verified ? (
-            <p className="mt-2 flex items-center gap-1.5 text-sm" style={{ color: "#059669" }}>
+            <p className="mt-2 flex items-center gap-1.5 text-sm" style={{ color: "var(--status-good)" }}>
               <svg viewBox="0 0 12 12" className="h-3.5 w-3.5" aria-hidden="true">
                 <path
                   d="M2.5 6.4 4.8 8.7 9.5 3.9"
@@ -85,7 +85,7 @@ function EmailSection() {
             </p>
           ) : (
             <p className="mt-2 max-w-md text-sm leading-relaxed text-ink-400">
-              <span style={{ color: "#d97706" }}>Not confirmed.</span> Your
+              <span style={{ color: "var(--status-warn)" }}>Not confirmed.</span> Your
               account works either way — confirming is what makes password
               recovery possible. Without it, a forgotten password cannot be
               reset, because the reset link has nowhere verified to go.

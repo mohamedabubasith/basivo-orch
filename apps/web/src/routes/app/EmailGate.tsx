@@ -74,7 +74,7 @@ export function EmailGate() {
           animate={{ scale: 1, opacity: 1 }}
           transition={{ delay: 0.1, type: "spring", stiffness: 260, damping: 20 }}
           className="mt-8 grid h-12 w-12 place-items-center rounded-2xl"
-          style={{ backgroundColor: "rgba(217,119,6,0.14)", color: "#d97706" }}
+          style={{ backgroundColor: "color-mix(in oklab, var(--status-warn) 15%, transparent)", color: "var(--status-warn)" }}
           aria-hidden="true"
         >
           <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none">

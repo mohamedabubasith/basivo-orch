@@ -1,0 +1,698 @@
+/**
+ * The flow builder.
+ *
+ * Three commitments shape this screen.
+ *
+ * **Saving is explicit.** An autosaving canvas sounds friendlier and is worse
+ * here: a flow is a thing other systems call, and a half-dragged graph written
+ * to the server is a production pipeline in a state nobody chose. The draft
+ * lives in the browser until saved, and the header says so.
+ *
+ * **Validation belongs to the engine.** `POST …/validate` runs the same
+ * `validate_graph` the executor runs, and its problems are pinned to the nodes
+ * they name. Re-implementing those rules in TypeScript would produce a second
+ * opinion, and the second opinion is always the wrong one.
+ *
+ * **A test run reports what happened, not that it was requested.** Node results
+ * come back from the run itself and are painted onto the canvas, and the event
+ * timeline underneath is the real sequence with real durations and retries.
+ */
+
+import { motion } from "motion/react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Link, useParams } from "react-router-dom";
+import {
+  Background,
+  Controls,
+  ReactFlow,
+  ReactFlowProvider,
+  addEdge,
+  useEdgesState,
+  useNodesState,
+  useReactFlow,
+  type Connection,
+  type Edge,
+  type NodeChange,
+} from "@xyflow/react";
+import "@xyflow/react/dist/style.css";
+
+import { ApiError, api } from "../../lib/api";
+import { WorkspaceProvider, useWorkspace } from "../../lib/workspace";
+import { ThemeToggle } from "../../components/ThemeToggle";
+import { Alert, Button, PageLoader } from "../../components/ui";
+import { FlowNodeCard } from "../../builder/FlowNodeCard";
+import { Inspector } from "../../builder/Inspector";
+import {
+  attachProblems,
+  edgeId,
+  makeNodeId,
+  toCanvas,
+  toGraph,
+  type FlowNode,
+  type Graph,
+} from "../../builder/graph";
+import { groupSpecs, initialConfig, loadSpecs, type NodeSpec } from "../../builder/specs";
+import { duration } from "./bits";
+
+const NODE_TYPES = { basivo: FlowNodeCard };
+
+/** Kept in one place: the layout maths and the components must agree. */
+const INSPECTOR_WIDTH = 340;
+const NODE_WIDTH = 248;
+
+interface FlowDetail {
+  id: string;
+  name: string;
+  slug: string;
+  description: string | null;
+  published_version_id: string | null;
+  graph: Graph;
+  version: number;
+}
+
+interface NodeExecution {
+  node_id: string;
+  node_type: string;
+  status: "pending" | "running" | "succeeded" | "failed" | "skipped";
+  attempt: number;
+  duration_ms: number | null;
+  error: string | null;
+  started_at: string | null;
+}
+
+interface RunDetail {
+  id: string;
+  status: string;
+  error: string | null;
+  duration_ms: number | null;
+  nodes: NodeExecution[];
+}
+
+/**
+ * The builder owns the whole viewport.
+ *
+ * It was inside the app shell, which meant a canvas boxed into the same
+ * `max-w-6xl` column as a settings form, with a sidebar eating 264px of the
+ * one axis a graph needs most. A builder is a workspace, not a page: it gets
+ * the screen, and its own compact bar carries the way back.
+ */
+export function Builder() {
+  return (
+    <WorkspaceProvider>
+      <ReactFlowProvider>
+        <BuilderInner />
+      </ReactFlowProvider>
+    </WorkspaceProvider>
+  );
+}
+
+function BuilderInner() {
+  const { flowId } = useParams<{ flowId: string }>();
+  const { orgId } = useWorkspace();
+  const base = `/api/v1/orgs/${orgId}/flows/${flowId}`;
+
+  const [flow, setFlow] = useState<FlowDetail | null>(null);
+  const [specs, setSpecs] = useState<NodeSpec[] | null>(null);
+  const [nodes, setNodes, onNodesChange] = useNodesState<FlowNode>([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [dirty, setDirty] = useState(false);
+  const [busy, setBusy] = useState<null | "save" | "validate" | "publish" | "run">(null);
+  const [banner, setBanner] = useState<{ tone: "ok" | "bad"; text: string } | null>(null);
+  const [problems, setProblems] = useState<string[]>([]);
+  const [run, setRun] = useState<RunDetail | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  const canvasRef = useRef<HTMLDivElement>(null);
+  const { screenToFlowPosition } = useReactFlow();
+
+  const specMap = useMemo(
+    () => new Map((specs ?? []).map((spec) => [spec.type, spec])),
+    [specs],
+  );
+
+  useEffect(() => {
+    if (!orgId || !flowId) return;
+    let cancelled = false;
+    void Promise.all([api.get<FlowDetail>(base), loadSpecs()])
+      .then(([detail, specList]) => {
+        if (cancelled) return;
+        setFlow(detail);
+        setSpecs(specList);
+        const map = new Map(specList.map((spec) => [spec.type, spec]));
+        const canvas = toCanvas(detail.graph, map);
+        setNodes(canvas.nodes);
+        setEdges(canvas.edges);
+      })
+      .catch(() => !cancelled && setLoadError("Could not open this flow."));
+    return () => {
+      cancelled = true;
+    };
+  }, [base, orgId, flowId, setNodes, setEdges]);
+
+  // Leaving with unsaved work should cost a keystroke, not a flow.
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (event: BeforeUnloadEvent) => event.preventDefault();
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty]);
+
+  const markDirty = useCallback(() => {
+    setDirty(true);
+    setBanner(null);
+  }, []);
+
+  const handleNodesChange = useCallback(
+    (changes: NodeChange<FlowNode>[]) => {
+      onNodesChange(changes);
+      // Selection and measurement are not edits. Without this filter the flow
+      // is "unsaved" the moment it is opened and clicked once.
+      if (changes.some((change) => change.type !== "select" && change.type !== "dimensions")) {
+        markDirty();
+      }
+    },
+    [onNodesChange, markDirty],
+  );
+
+  const onConnect = useCallback(
+    (connection: Connection) => {
+      setEdges((current) =>
+        addEdge(
+          {
+            ...connection,
+            id: edgeId(connection.source, connection.target, connection.sourceHandle),
+            type: "smoothstep",
+          },
+          current,
+        ),
+      );
+      markDirty();
+    },
+    [setEdges, markDirty],
+  );
+
+  /**
+   * Where a click-added node lands.
+   *
+   * Three versions, each wrong in its own way. A fixed point stacked every
+   * node at identical coordinates — the second hid the first and their handles
+   * overlapped, and you cannot drag a connection between two nodes occupying
+   * the same pixels. Fixed flow coordinates fixed the overlap but not the aim:
+   * the canvas has been panned and zoomed and the inspector covers its right
+   * third, so nodes landed off-screen or under a panel. A small stagger from
+   * the viewport centre kept them on screen but still visibly overlapping.
+   *
+   * What a flow actually wants is a chain: each new node to the right of the
+   * furthest-right one, at its height, a clear gap away. The first node goes
+   * in the middle of the *visible* canvas, with the inspector's width taken
+   * out of the usable area.
+   */
+  function nextSlot(): { x: number; y: number } {
+    if (nodes.length > 0) {
+      const rightmost = nodes.reduce((far, node) =>
+        node.position.x > far.position.x ? node : far,
+      );
+      return { x: rightmost.position.x + NODE_WIDTH + 72, y: rightmost.position.y };
+    }
+
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (!rect) return { x: 140, y: 160 };
+    const usableWidth = rect.width - (selected ? INSPECTOR_WIDTH : 0);
+    return screenToFlowPosition({
+      x: rect.left + usableWidth / 2 - NODE_WIDTH / 2,
+      y: rect.top + rect.height / 2 - 40,
+    });
+  }
+
+  function addNode(spec: NodeSpec, position: { x: number; y: number }) {
+    const id = makeNodeId(spec.type, new Set(nodes.map((node) => node.id)));
+    setNodes((current) => [
+      ...current,
+      {
+        id,
+        type: "basivo",
+        position,
+        data: {
+          label: spec.label,
+          nodeType: spec.type,
+          config: initialConfig(spec),
+          ports: spec.ports,
+          isTrigger: spec.is_trigger,
+        },
+      },
+    ]);
+    setSelected(id);
+    markDirty();
+  }
+
+  function updateSelected(patch: (node: FlowNode) => FlowNode) {
+    setNodes((current) => current.map((node) => (node.id === selected ? patch(node) : node)));
+    markDirty();
+  }
+
+  function deleteSelected() {
+    setNodes((current) => current.filter((node) => node.id !== selected));
+    setEdges((current) =>
+      current.filter((edge) => edge.source !== selected && edge.target !== selected),
+    );
+    setSelected(null);
+    markDirty();
+  }
+
+  async function save(): Promise<boolean> {
+    setBusy("save");
+    setBanner(null);
+    try {
+      const saved = await api.patch<FlowDetail>(base, { graph: toGraph(nodes, edges) });
+      setFlow(saved);
+      setDirty(false);
+      setBanner({ tone: "ok", text: `Saved as version ${saved.version}.` });
+      return true;
+    } catch (err) {
+      setBanner({
+        tone: "bad",
+        text: err instanceof ApiError ? err.message : "Could not save this flow.",
+      });
+      return false;
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function validate() {
+    // Validation runs server-side against the *saved* graph, so saving first is
+    // not a convenience — it is what makes the answer be about what you see.
+    if (dirty && !(await save())) return;
+    setBusy("validate");
+    try {
+      // This endpoint answers 200 with `{valid, problems}` rather than raising:
+      // a rejected graph is a normal answer to "is this valid?", not a failed
+      // request. Treating any non-throw as success was exactly the bug this
+      // had — an HTTP node with no URL reported "This flow will run", which is
+      // the one thing a validate button must never get wrong.
+      const result = await api.post<{ valid: boolean; problems: string[] }>(`${base}/validate`);
+      const list = result.valid ? [] : (result.problems ?? []);
+      setProblems(list);
+      setNodes((current) => attachProblems(current, list));
+      setBanner(
+        list.length === 0
+          ? { tone: "ok", text: "This flow will run." }
+          : { tone: "bad", text: `${list.length} problem${list.length === 1 ? "" : "s"}.` },
+      );
+    } catch (err) {
+      // Publish and run *do* raise 422 carrying the same payload, so the
+      // fallback path stays.
+      const list = extractProblems(err);
+      setProblems(list);
+      setNodes((current) => attachProblems(current, list));
+      setBanner({
+        tone: "bad",
+        text: list.length
+          ? `${list.length} problem${list.length === 1 ? "" : "s"}.`
+          : err instanceof ApiError
+            ? err.message
+            : "Could not validate this flow.",
+      });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function publish() {
+    if (dirty && !(await save())) return;
+    setBusy("publish");
+    try {
+      await api.post(`${base}/publish`);
+      const detail = await api.get<FlowDetail>(base);
+      setFlow(detail);
+      setProblems([]);
+      setNodes((current) => attachProblems(current, []));
+      setBanner({ tone: "ok", text: `Published version ${detail.version}.` });
+    } catch (err) {
+      const list = extractProblems(err);
+      setProblems(list);
+      setNodes((current) => attachProblems(current, list));
+      setBanner({
+        tone: "bad",
+        text: list.length
+          ? `Cannot publish: ${list.length} problem${list.length === 1 ? "" : "s"}.`
+          : err instanceof ApiError
+            ? err.message
+            : "Could not publish.",
+      });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function testRun() {
+    if (dirty && !(await save())) return;
+    setBusy("run");
+    setRun(null);
+    setNodes((current) =>
+      current.map((node) => ({
+        ...node,
+        data: { ...node.data, runStatus: undefined, runDetail: undefined },
+      })),
+    );
+    try {
+      const result = await api.post<RunDetail>(`${base}/run`, { input: {} });
+      setRun(result);
+      const byId = new Map(result.nodes.map((execution) => [execution.node_id, execution]));
+      setNodes((current) =>
+        current.map((node) => {
+          const execution = byId.get(node.id);
+          return {
+            ...node,
+            data: {
+              ...node.data,
+              runStatus:
+                execution && execution.status !== "pending"
+                  ? (execution.status as FlowNode["data"]["runStatus"])
+                  : undefined,
+              runDetail: execution ? detailFor(execution) : undefined,
+            },
+          };
+        }),
+      );
+      setBanner(
+        result.status === "succeeded"
+          ? { tone: "ok", text: `Run succeeded in ${duration(result.duration_ms)}.` }
+          : { tone: "bad", text: result.error ?? `Run ${result.status}.` },
+      );
+    } catch (err) {
+      const list = extractProblems(err);
+      if (list.length) {
+        setProblems(list);
+        setNodes((current) => attachProblems(current, list));
+      }
+      setBanner({
+        tone: "bad",
+        text: list.length
+          ? "This flow cannot run yet — see the flagged nodes."
+          : err instanceof ApiError
+            ? err.message
+            : "Could not start the run.",
+      });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  if (loadError) return <Alert>{loadError}</Alert>;
+  if (!flow || !specs) return <PageLoader label="Opening flow" />;
+
+  const selectedNode = nodes.find((node) => node.id === selected) ?? null;
+  const selectedSpec = selectedNode ? specMap.get(selectedNode.data.nodeType) : undefined;
+
+  return (
+    <div className="flex h-dvh flex-col bg-ink-950">
+      <header className="flex flex-none flex-wrap items-center gap-3 border-b border-ink-800/70 px-4 py-2.5">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2.5">
+            <Link to="/app/flows" className="text-ink-500 transition-colors hover:text-ink-200">
+              <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none">
+                <path
+                  d="M14 7l-5 5 5 5"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </Link>
+            <h1 className="truncate text-lg font-semibold text-ink-100">{flow.name}</h1>
+            <span className="rounded-md border border-ink-700 px-1.5 py-0.5 text-[0.66rem] text-ink-400">
+              v{flow.version}
+            </span>
+            {dirty ? (
+              <span className="text-xs" style={{ color: "var(--status-warn)" }}>
+                Unsaved changes
+              </span>
+            ) : flow.published_version_id ? (
+              <span className="text-xs" style={{ color: "var(--status-good)" }}>
+                Published
+              </span>
+            ) : (
+              <span className="text-xs text-ink-500">Draft</span>
+            )}
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <ThemeToggle compact />
+          <Button variant="ghost" onClick={() => void validate()} loading={busy === "validate"}>
+            Validate
+          </Button>
+          <Button variant="secondary" onClick={() => void testRun()} loading={busy === "run"}>
+            Test run
+          </Button>
+          <Button variant="secondary" onClick={() => void save()} loading={busy === "save"} disabled={!dirty}>
+            Save
+          </Button>
+          <Button onClick={() => void publish()} loading={busy === "publish"}>
+            Publish
+          </Button>
+        </div>
+      </header>
+
+      {banner && (
+        <motion.div
+          initial={{ opacity: 0, y: -4 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="flex-none px-4 pt-3"
+        >
+          <Alert tone={banner.tone === "ok" ? "success" : undefined}>
+            {banner.text}
+            {problems.length > 0 && (
+              <ul className="mt-2 list-disc space-y-1 pl-4 text-xs">
+                {problems.map((problem) => (
+                  <li key={problem}>{problem}</li>
+                ))}
+              </ul>
+            )}
+          </Alert>
+        </motion.div>
+      )}
+
+      <div className="flex min-h-0 flex-1 overflow-hidden">
+        <Palette specs={specs} onAdd={(spec) => addNode(spec, nextSlot())} />
+
+        <div
+          ref={canvasRef}
+          className="relative flex min-w-0 flex-1 flex-col"
+          onDragOver={(event) => {
+            event.preventDefault();
+            event.dataTransfer.dropEffect = "move";
+          }}
+          onDrop={(event) => {
+            event.preventDefault();
+            const type = event.dataTransfer.getData("application/basivo-node");
+            const spec = specMap.get(type);
+            if (!spec) return;
+            addNode(
+              spec,
+              screenToFlowPosition({ x: event.clientX, y: event.clientY }),
+            );
+          }}
+        >
+          <div className="relative min-h-0 flex-1">
+          <ReactFlow
+            nodes={nodes}
+            edges={edges}
+            nodeTypes={NODE_TYPES}
+            onNodesChange={handleNodesChange}
+            onEdgesChange={(changes) => {
+              onEdgesChange(changes);
+              markDirty();
+            }}
+            onConnect={onConnect}
+            onNodeClick={(_, node) => setSelected(node.id)}
+            onPaneClick={() => setSelected(null)}
+            fitView
+            // Without a cap, opening a flow with one node zooms that node to
+            // fill the viewport — the graph looks broken and the text renders
+            // at poster size. `fitView` optimises for filling space; a builder
+            // wants a readable, familiar scale.
+            fitViewOptions={{ maxZoom: 1, padding: 0.35 }}
+            minZoom={0.25}
+            maxZoom={1.75}
+            defaultEdgeOptions={{
+              type: "smoothstep",
+              style: { stroke: "var(--color-ink-500)", strokeWidth: 2 },
+            }}
+            className="bg-ink-950 [&_.react-flow__attribution]:!bg-transparent [&_.react-flow__attribution]:!text-ink-600 [&_.react-flow__attribution_a]:!text-ink-600"
+          >
+            <Background color="var(--canvas-dot)" gap={22} />
+            <Controls className="!border-ink-700 !bg-ink-850 [&_button]:!border-ink-700 [&_button]:!bg-ink-850 [&_button]:!fill-ink-300" />
+          </ReactFlow>
+
+          {nodes.length === 0 && (
+            <div className="pointer-events-none absolute inset-0 grid place-items-center">
+              <div className="text-center">
+                <p className="text-ink-300">Drag a trigger onto the canvas to begin.</p>
+                <p className="mx-auto mt-1.5 max-w-xs text-xs leading-relaxed text-ink-500">
+                  Every flow needs exactly one trigger — the thing that decides
+                  when it runs — and at least one node after it.
+                </p>
+              </div>
+            </div>
+          )}
+          </div>
+
+          {run && <RunSummary run={run} onClose={() => setRun(null)} />}
+        </div>
+
+        {selectedNode && selectedSpec && (
+          <Inspector
+            spec={selectedSpec}
+            name={selectedNode.data.label}
+            config={selectedNode.data.config}
+            problem={selectedNode.data.problem}
+            onRename={(name) =>
+              updateSelected((node) => ({ ...node, data: { ...node.data, label: name } }))
+            }
+            onChange={(config) =>
+              updateSelected((node) => ({ ...node, data: { ...node.data, config } }))
+            }
+            onDelete={deleteSelected}
+            onClose={() => setSelected(null)}
+          />
+        )}
+      </div>
+
+    </div>
+  );
+}
+
+/* --------------------------------------------------------------- palette --- */
+
+function Palette({ specs, onAdd }: { specs: NodeSpec[]; onAdd: (spec: NodeSpec) => void }) {
+  const groups = useMemo(() => groupSpecs(specs), [specs]);
+
+  return (
+    <div className="w-[210px] flex-none overflow-y-auto border-r border-ink-800/70 bg-ink-900/50 p-3">
+      {groups.map((group) => (
+        <div key={group.heading} className="mb-4">
+          <p className="mb-1.5 px-1 text-[0.66rem] font-medium tracking-[0.12em] text-ink-500 uppercase">
+            {group.heading}
+          </p>
+          <ul className="space-y-1">
+            {group.specs.map((spec) => (
+              <li key={spec.type}>
+                <button
+                  draggable
+                  onDragStart={(event) =>
+                    event.dataTransfer.setData("application/basivo-node", spec.type)
+                  }
+                  onClick={() => onAdd(spec)}
+                  title={spec.description}
+                  className="w-full cursor-grab rounded-lg border border-ink-700/60 bg-ink-850/60 px-2.5 py-2 text-left transition-colors hover:border-ink-600 active:cursor-grabbing"
+                >
+                  <span className="block truncate text-xs text-ink-200">{spec.label}</span>
+                  <span className="block truncate font-mono text-[0.62rem] text-ink-500">
+                    {spec.type}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+      <p className="px-1 text-[0.66rem] leading-relaxed text-ink-600">
+        Drag onto the canvas, or click to drop one at the top left.
+      </p>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------ run result --- */
+
+function RunSummary({ run, onClose }: { run: RunDetail; onClose: () => void }) {
+  const ordered = [...run.nodes].sort((a, b) =>
+    (a.started_at ?? "").localeCompare(b.started_at ?? ""),
+  );
+
+  return (
+    <motion.div
+      initial={{ height: 0, opacity: 0 }}
+      animate={{ height: "auto", opacity: 1 }}
+      className="max-h-56 flex-none overflow-y-auto border-t border-ink-800/70 bg-ink-900/60"
+    >
+      <div className="p-4">
+        <div className="mb-3 flex flex-wrap items-center gap-3">
+          <p className="text-sm font-medium text-ink-100">Last test run</p>
+          <span className="font-mono text-xs text-ink-500">{run.id.slice(0, 8)}</span>
+          <span className="ml-auto font-mono text-xs text-ink-300">
+            {duration(run.duration_ms)}
+          </span>
+          <button
+            onClick={onClose}
+            aria-label="Hide run report"
+            className="rounded-lg p-1 text-ink-500 transition-colors hover:bg-ink-800 hover:text-ink-200"
+          >
+            <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none">
+              <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="1.8" />
+            </svg>
+          </button>
+        </div>
+
+        <ul className="space-y-1.5">
+          {ordered.map((execution) => (
+            <li
+              key={`${execution.node_id}-${execution.attempt}`}
+              className="flex items-center gap-3 text-xs"
+            >
+              <span
+                className="h-1.5 w-1.5 flex-none rounded-full"
+                style={{ backgroundColor: toneOf(execution.status) }}
+              />
+              <span className="w-40 truncate font-mono text-ink-300">{execution.node_id}</span>
+              <span className="w-20 flex-none" style={{ color: toneOf(execution.status) }}>
+                {execution.status}
+              </span>
+              {execution.attempt > 1 && (
+                <span style={{ color: "var(--status-warn)" }}>attempt {execution.attempt}</span>
+              )}
+              <span className="ml-auto flex-none font-mono text-ink-400">
+                {duration(execution.duration_ms)}
+              </span>
+              {execution.error && (
+                <span className="w-full truncate font-mono" style={{ color: "var(--status-bad)" }}>
+                  {execution.error}
+                </span>
+              )}
+            </li>
+          ))}
+        </ul>
+      </div>
+    </motion.div>
+  );
+}
+
+function toneOf(status: string): string {
+  if (status === "succeeded") return "var(--status-good)";
+  if (status === "failed") return "var(--status-bad)";
+  if (status === "skipped") return "var(--color-ink-400)";
+  return "var(--series)";
+}
+
+function detailFor(execution: NodeExecution): string | undefined {
+  if (execution.status === "failed") return execution.error?.slice(0, 40);
+  if (execution.duration_ms !== null) return duration(execution.duration_ms);
+  return undefined;
+}
+
+/**
+ * Pull the problem list out of a 422.
+ *
+ * `validate_graph` collects every problem rather than raising on the first, so
+ * that the editor can flag them all in one pass. Losing the list here and
+ * showing "invalid" would throw away the part that makes it useful.
+ */
+function extractProblems(error: unknown): string[] {
+  if (!(error instanceof ApiError)) return [];
+  const problems = (error.body as { problems?: unknown } | undefined)?.problems;
+  return Array.isArray(problems) ? problems.map(String) : [];
+}

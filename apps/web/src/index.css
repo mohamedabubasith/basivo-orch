@@ -33,6 +33,83 @@
   --animate-grid: grid-drift 24s linear infinite;
 }
 
+/* --------------------------------------------------------------- theming ---
+ *
+ * The ink scale is used positionally everywhere — 950 is the furthest back,
+ * 100 is the brightest text — so light mode is that scale re-pointed rather
+ * than a second set of class names. Every component inherits it for free, and
+ * there is no way for one screen to be themed and another not.
+ *
+ * Dark is the default because that is the product's identity. The system
+ * preference is honoured on a first visit; an explicit choice wins over it.
+ */
+:root {
+  --status-good: #059669;
+  --status-warn: #d97706;
+  --status-bad: #e11d48;
+  --series: #818cf8;
+  --series-dim: #3f4468;
+  --canvas-dot: #1d2233;
+}
+
+:root[data-theme="light"] {
+  --color-ink-950: #ffffff;
+  --color-ink-900: #f6f7fb;
+  --color-ink-850: #ffffff;
+  --color-ink-800: #eceff6;
+  --color-ink-700: #dfe3ed;
+  --color-ink-600: #c6ccdb;
+  --color-ink-500: #98a0b6;
+  --color-ink-400: #6b7490;
+  --color-ink-300: #4a5270;
+  --color-ink-200: #262d43;
+  --color-ink-100: #0d1120;
+
+  --color-brand-500: #4f46e5;
+  --color-brand-400: #4f46e5;
+  --color-brand-300: #6366f1;
+  --color-accent-500: #0891b2;
+  --color-accent-400: #0e7490;
+
+  /* Re-stepped for a light surface and validated there — the dark trio sits
+     too light against white to carry 3:1. */
+  --status-good: #047857;
+  --status-warn: #d97706;
+  --status-bad: #9f1239;
+  --series: #4f46e5;
+  --series-dim: #c7d2fe;
+  --canvas-dot: #dfe3ed;
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]):not([data-theme="light"]) {
+    --color-ink-950: #ffffff;
+    --color-ink-900: #f6f7fb;
+    --color-ink-850: #ffffff;
+    --color-ink-800: #eceff6;
+    --color-ink-700: #dfe3ed;
+    --color-ink-600: #c6ccdb;
+    --color-ink-500: #98a0b6;
+    --color-ink-400: #6b7490;
+    --color-ink-300: #4a5270;
+    --color-ink-200: #262d43;
+    --color-ink-100: #0d1120;
+
+    --color-brand-500: #4f46e5;
+    --color-brand-400: #4f46e5;
+    --color-brand-300: #6366f1;
+    --color-accent-500: #0891b2;
+    --color-accent-400: #0e7490;
+
+    --status-good: #047857;
+    --status-warn: #d97706;
+    --status-bad: #9f1239;
+    --series: #4f46e5;
+    --series-dim: #c7d2fe;
+    --canvas-dot: #dfe3ed;
+  }
+}
+
 @keyframes marquee {
   from { transform: translateX(0); }
   to { transform: translateX(-50%); }

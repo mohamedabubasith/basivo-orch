@@ -17,15 +17,15 @@
  */
 
 //: Single series hue.
-export const SERIES = "#818cf8";
+export const SERIES = "var(--series)";
 //: The recessive step, for rows that are context rather than the story.
-export const SERIES_DIM = "#3d4560";
+export const SERIES_DIM = "var(--series-dim)";
 
 //: Reserved status palette. Never reused for a non-status series.
 export const STATUS = {
-  good: "#059669",
-  warn: "#d97706",
-  bad: "#e11d48",
+  good: "var(--status-good)",
+  warn: "var(--status-warn)",
+  bad: "var(--status-bad)",
 } as const;
 
 export type StatusTone = keyof typeof STATUS;

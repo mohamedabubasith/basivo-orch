@@ -9,6 +9,7 @@
 
 import { motion } from "motion/react";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { Link, useNavigate } from "react-router-dom";
 
 import { ApiError, api } from "../../lib/api";
 import { useWorkspace } from "../../lib/workspace";
@@ -31,6 +32,7 @@ export function Flows() {
   const [flows, setFlows] = useState<Flow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const navigate = useNavigate();
 
   const load = useCallback(async () => {
     if (!orgId) return;
@@ -64,13 +66,7 @@ export function Flows() {
       {error && <Alert>{error}</Alert>}
 
       {creating && (
-        <NewFlow
-          orgId={orgId!}
-          onCreated={() => {
-            setCreating(false);
-            void load();
-          }}
-        />
+        <NewFlow orgId={orgId!} onCreated={(id) => navigate(`/app/flows/${id}`)} />
       )}
 
       {flows.length === 0 && !creating ? (
@@ -94,7 +90,10 @@ export function Flows() {
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: Math.min(index * 0.03, 0.25), duration: 0.25 }}
             >
-              <div className="surface flex flex-wrap items-center gap-4 rounded-2xl p-5">
+              <Link
+                to={`/app/flows/${flow.id}`}
+                className="surface flex flex-wrap items-center gap-4 rounded-2xl p-5 transition-colors hover:border-ink-500"
+              >
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-3">
                     <p className="truncate font-medium text-ink-100">{flow.name}</p>
@@ -114,7 +113,7 @@ export function Flows() {
                     Updated <RelativeTime value={flow.updated_at} />
                   </p>
                 </div>
-              </div>
+              </Link>
             </motion.li>
           ))}
         </ul>
@@ -123,7 +122,7 @@ export function Flows() {
   );
 }
 
-function NewFlow({ orgId, onCreated }: { orgId: string; onCreated: () => void }) {
+function NewFlow({ orgId, onCreated }: { orgId: string; onCreated: (id: string) => void }) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [busy, setBusy] = useState(false);
@@ -134,11 +133,13 @@ function NewFlow({ orgId, onCreated }: { orgId: string; onCreated: () => void })
     setBusy(true);
     setError(null);
     try {
-      await api.post(`/api/v1/orgs/${orgId}/flows`, {
+      const created = await api.post<{ id: string }>(`/api/v1/orgs/${orgId}/flows`, {
         name: name.trim(),
         description: description.trim() || null,
       });
-      onCreated();
+      // Straight into the canvas. The list has nothing more to say about a
+      // flow that was created one second ago.
+      onCreated(created.id);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not create the flow.");
       setBusy(false);

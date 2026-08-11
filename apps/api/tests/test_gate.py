@@ -33,7 +33,7 @@ from fastapi import HTTPException  # noqa: E402
 from basivo_orch.auth.authz import Permission, require  # noqa: E402
 from basivo_orch.auth.models import User  # noqa: E402
 from basivo_orch.config import get_settings  # noqa: E402
-from basivo_orch.gate import current_app_user  # noqa: E402
+from basivo_orch.gate import current_app_user, gate_is_active  # noqa: E402
 
 
 def make_user(*, verified: bool) -> User:
@@ -58,7 +58,8 @@ async def test_confirmed_user_passes():
     assert await current_app_user(user) is user
 
 
-async def test_unconfirmed_user_is_refused():
+async def test_unconfirmed_user_is_refused(monkeypatch):
+    monkeypatch.setattr("basivo_orch.gate.email_is_deliverable", lambda: True)
     with pytest.raises(HTTPException) as raised:
         await current_app_user(make_user(verified=False))
 
@@ -74,6 +75,34 @@ async def test_gate_can_be_turned_off_for_a_deployment_without_mail(monkeypatch)
 
     user = make_user(verified=False)
     assert await current_app_user(user) is user
+
+
+async def test_gate_stands_down_when_email_cannot_be_delivered(monkeypatch):
+    """The regression that locked a real account out of its own workspace.
+
+    With the gate on and no webhook configured, sign-in worked, the wall
+    appeared, and "resend" reported success because the API answers 202 whether
+    or not anything was sent. Nothing could ever arrive, so the account was
+    stuck. Demanding proof the user has no way to produce is an outage wearing
+    a security control's clothes.
+    """
+    monkeypatch.setenv("REQUIRE_VERIFIED_EMAIL", "true")
+    monkeypatch.setattr("basivo_orch.gate.email_is_deliverable", lambda: False)
+    get_settings.cache_clear()
+
+    assert gate_is_active() is False
+    user = make_user(verified=False)
+    assert await current_app_user(user) is user
+
+
+async def test_gate_enforces_once_email_works(monkeypatch):
+    monkeypatch.setenv("REQUIRE_VERIFIED_EMAIL", "true")
+    monkeypatch.setattr("basivo_orch.gate.email_is_deliverable", lambda: True)
+    get_settings.cache_clear()
+
+    assert gate_is_active() is True
+    with pytest.raises(HTTPException):
+        await current_app_user(make_user(verified=False))
 
 
 def test_require_is_actually_behind_the_gate():

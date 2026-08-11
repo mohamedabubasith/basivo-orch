@@ -7,10 +7,12 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "typecheck": "tsc -b --force"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.3",
+    "@xyflow/react": "^12.11.2",
     "motion": "^13.0.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",

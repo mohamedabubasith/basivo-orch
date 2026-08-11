@@ -42,13 +42,30 @@ export class ApiError extends Error {
   readonly status: number;
   readonly code?: string;
   readonly retryAfter?: number;
+  /**
+   * The parsed error body, when there was one.
+   *
+   * `message` is the prose a person reads, but some endpoints answer with
+   * structure a caller is meant to act on — a rejected graph returns
+   * `problems: [...]`, every problem at once, so an editor can flag them all
+   * in one pass. Flattening that to a sentence would throw away the part that
+   * makes it useful.
+   */
+  readonly body?: unknown;
 
-  constructor(status: number, message: string, code?: string, retryAfter?: number) {
+  constructor(
+    status: number,
+    message: string,
+    code?: string,
+    retryAfter?: number,
+    body?: unknown,
+  ) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.code = code;
     this.retryAfter = retryAfter;
+    this.body = body;
   }
 
   /** True when the user can fix this by changing what they typed. */
@@ -157,8 +174,10 @@ async function toError(response: Response): Promise<ApiError> {
   let detail = response.statusText || "Request failed";
   let code: string | undefined;
 
+  let parsed: unknown;
   try {
     const data = await response.json();
+    parsed = data;
     const raw = data?.detail ?? data?.message;
     if (typeof raw === "string") {
       detail = raw;
@@ -193,7 +212,7 @@ async function toError(response: Response): Promise<ApiError> {
       : "Too many attempts. Please wait a moment and try again.";
   }
 
-  return new ApiError(response.status, detail, code, retryAfter);
+  return new ApiError(response.status, detail, code, retryAfter, parsed);
 }
 
 export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {

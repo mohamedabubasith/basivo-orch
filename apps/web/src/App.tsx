@@ -1,9 +1,11 @@
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 
 import { AuthProvider } from "./lib/auth";
+import { ThemeProvider } from "./lib/theme";
 import { Landing } from "./routes/Landing";
 import { ApiKeys } from "./routes/app/ApiKeys";
 import { AppShell, RequireAuth, RequireVerified } from "./routes/app/AppShell";
+import { Builder } from "./routes/app/Builder";
 import { Dashboard } from "./routes/app/Dashboard";
 import { EmailGate } from "./routes/app/EmailGate";
 import { Flows } from "./routes/app/Flows";
@@ -52,6 +54,12 @@ function AppRoutes() {
         <Route path="/confirm-email" element={<EmailGate />} />
 
         <Route element={<RequireVerified />}>
+          {/* Outside <AppShell> on purpose: the canvas takes the whole
+              viewport rather than sitting in the same max-width column as a
+              settings form, with the sidebar eating the axis a graph needs
+              most. It carries its own way back. */}
+          <Route path="/app/flows/:flowId" element={<Builder />} />
+
           <Route path="/app" element={<AppShell />}>
             <Route index element={<Dashboard />} />
             <Route path="flows" element={<Flows />} />
@@ -70,9 +78,11 @@ function AppRoutes() {
 export default function App() {
   return (
     <BrowserRouter>
-      <AuthProvider>
-        <AppRoutes />
-      </AuthProvider>
+      <ThemeProvider>
+        <AuthProvider>
+          <AppRoutes />
+        </AuthProvider>
+      </ThemeProvider>
     </BrowserRouter>
   );
 }

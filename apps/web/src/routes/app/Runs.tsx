@@ -139,7 +139,7 @@ export function Runs() {
                 {run.error && (
                   <p
                     className="mt-2.5 truncate border-t border-ink-700/50 pt-2.5 font-mono text-xs"
-                    style={{ color: "#e11d48" }}
+                    style={{ color: "var(--status-bad)" }}
                     title={run.error}
                   >
                     {run.error}

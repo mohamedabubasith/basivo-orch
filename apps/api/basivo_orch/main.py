@@ -16,6 +16,7 @@ from basivo_orch.config import get_settings
 from basivo_orch.db import dispose_engine
 from basivo_orch.flows.events import RedisClient
 from basivo_orch.flows.router import external_router, management_router
+from basivo_orch.gate import gate_is_active, warn_if_gate_is_inert
 from basivo_orch.logging import configure_logging, get_logger
 
 log = get_logger(__name__)
@@ -40,6 +41,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         client = None
     app.state.redis = client
 
+    warn_if_gate_is_inert()
     log.info("service.start", environment=settings.ENVIRONMENT, version=__version__)
     yield
 
@@ -131,7 +133,10 @@ def create_app() -> FastAPI:
         return {
             "app_name": settings.APP_NAME,
             "version": __version__,
-            "require_verified_email": settings.REQUIRE_VERIFIED_EMAIL,
+            # What is actually enforced, not what was merely asked for. The
+            # gate stands down when mail cannot be delivered, and a UI that
+            # showed a wall the API is not applying would strand people.
+            "require_verified_email": gate_is_active(),
         }
 
     return app

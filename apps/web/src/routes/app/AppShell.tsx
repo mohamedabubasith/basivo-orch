@@ -21,6 +21,7 @@ import { loadConfig } from "../../lib/config";
 import { cx } from "../../lib/cx";
 import { WorkspaceProvider, useWorkspace } from "../../lib/workspace";
 import { Alert, Button, Field, Logo, PageLoader } from "../../components/ui";
+import { ThemeToggle } from "../../components/ThemeToggle";
 
 /* ------------------------------------------------------------------ gates --- */
 
@@ -356,6 +357,12 @@ function SidebarContent({ collapsed, onToggle }: { collapsed: boolean; onToggle?
         ))}
       </nav>
 
+      {!collapsed && (
+        <div className="flex-none px-3 pb-3">
+          <ThemeToggle />
+        </div>
+      )}
+
       <AccountBlock collapsed={collapsed} />
 
       {onToggle && (
@@ -477,8 +484,8 @@ function AccountBlock({ collapsed }: { collapsed: boolean }) {
           <>
             <span className="min-w-0 flex-1 text-left">
               <span className="block truncate text-sm text-ink-200">{user?.email}</span>
-              <span className="block text-xs" style={{ color: "#059669" }}>
-                Email confirmed
+              <span className="block text-xs" style={{ color: "var(--status-good)" }}>
+                {user?.is_verified ? "Email confirmed" : "Email unconfirmed"}
               </span>
             </span>
             <svg viewBox="0 0 24 24" className="h-4 w-4 flex-none text-ink-500" {...stroke}>

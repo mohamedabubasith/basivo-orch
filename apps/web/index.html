@@ -25,6 +25,20 @@
       property="og:description"
       content="Visual agent workflows with run logs as a first-class feature."
     />
+      <script>
+      // Applied before first paint. Doing this in React would render the
+      // default theme and correct it a frame later — the flash every themed
+      // app is judged by. Kept tiny and dependency-free on purpose.
+      (function () {
+        try {
+          var choice = localStorage.getItem("basivo.theme");
+          if (choice === "light" || choice === "dark") {
+            document.documentElement.setAttribute("data-theme", choice);
+            document.documentElement.style.colorScheme = choice;
+          }
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

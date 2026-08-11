@@ -284,7 +284,7 @@ export function Logo({ className }: { className?: string }) {
       <svg viewBox="0 0 32 32" className="h-7 w-7" aria-hidden="true">
         <defs>
           <linearGradient id={gradient} x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0%" stopColor="#818cf8" />
+            <stop offset="0%" stopColor="var(--series)" />
             <stop offset="100%" stopColor="#22d3ee" />
           </linearGradient>
         </defs>
