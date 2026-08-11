@@ -10,7 +10,7 @@ _src_path: https://github.com/mohamedabubasith/basivo-auth.git
 access_token_ttl_seconds: 900
 database: postgres
 deploy_target: none
-email_provider: smtp
+email_provider: webhook
 feature_magic_link: false
 feature_orgs: true
 feature_otp: true

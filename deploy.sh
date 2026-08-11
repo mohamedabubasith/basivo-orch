@@ -68,7 +68,11 @@ instance_ip() {
 }
 
 on_box() {
-    ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 "ubuntu@$(instance_ip)" "$@"
+    # -n matters. Without it ssh reads this script's stdin and forwards it to
+    # the remote command, so a scripted `echo "..." | ./deploy.sh destroy`
+    # loses its confirmation phrase to the backup's ssh before the prompt is
+    # ever reached. Nothing here needs stdin.
+    ssh -n -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 "ubuntu@$(instance_ip)" "$@"
 }
 
 # --- commands --------------------------------------------------------------
