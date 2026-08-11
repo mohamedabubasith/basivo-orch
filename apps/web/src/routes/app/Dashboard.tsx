@@ -214,6 +214,10 @@ export function Dashboard() {
                 emptyLabel="Not enough executions to rate reliability yet"
                 data={data.nodes
                   .filter((n) => n.failure_rate !== null)
+                  // Sorted by failure rate, not by runtime. This panel's job is
+                  // "what is broken"; leading with a healthy node because it
+                  // happens to be slow buries the answer.
+                  .sort((a, b) => (b.failure_rate ?? 0) - (a.failure_rate ?? 0))
                   .slice(0, 8)
                   .map<BarDatum>((node) => ({
                     key: node.node_id,
