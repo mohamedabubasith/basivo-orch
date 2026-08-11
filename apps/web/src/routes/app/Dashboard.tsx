@@ -1,12 +1,11 @@
 import { motion } from "motion/react";
 import { useCallback, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
 
-import { api } from "../../lib/api";
+import { ApiError, api } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
 import { BarList, Panel, StatTile, StatusPip, type BarDatum } from "../../components/charts";
 import { formatMs, formatPercent } from "../../lib/viz";
-import { Badge, Button, Card, Spinner } from "../../components/ui";
+import { Alert, Badge, Button, Card, Field, Spinner } from "../../components/ui";
 
 interface NodeStat {
   node_id: string;
@@ -147,7 +146,13 @@ export function Dashboard() {
         </Card>
       )}
 
-      {data && !hasRuns && <EmptyState verified={user?.is_verified ?? false} />}
+      {/* A brand-new account has no workspace, so there is nothing to load
+          analytics for. Without this the page rendered completely blank —
+          loading finished, data stayed null, and every condition below was
+          false. */}
+      {!loading && !org && <NoWorkspace onCreated={(id) => { setOrg(id); void load(id, days); }} />}
+
+      {data && !hasRuns && <EmptyState />}
 
       {data && hasRuns && runs && (
         <>
@@ -307,7 +312,71 @@ export function Dashboard() {
   );
 }
 
-function EmptyState({ verified }: { verified: boolean }) {
+function NoWorkspace({ onCreated }: { onCreated: (id: string) => void }) {
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function create(event: React.FormEvent) {
+    event.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      const slug =
+        name
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/^-|-$/g, "")
+          .slice(0, 40) || `workspace-${Date.now().toString(36)}`;
+      const org = await api.post<{ id: string }>("/orgs", { name: name.trim(), slug });
+      onCreated(org.id);
+    } catch (err) {
+      setError(
+        err instanceof ApiError ? err.message : "Could not create the workspace. Try again.",
+      );
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card className="mx-auto max-w-lg p-8 text-center">
+      <div className="mx-auto mb-4 grid h-12 w-12 place-items-center rounded-2xl border border-ink-700/70 bg-ink-850">
+        <svg viewBox="0 0 24 24" className="h-5 w-5 text-brand-300" fill="none" aria-hidden="true">
+          <path
+            d="M3 7a2 2 0 012-2h4l2 2h7a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7Z"
+            stroke="currentColor"
+            strokeWidth="1.6"
+            strokeLinejoin="round"
+          />
+        </svg>
+      </div>
+      <h2 className="text-lg font-semibold text-ink-100">Create your workspace</h2>
+      <p className="mx-auto mt-2 max-w-sm text-sm leading-relaxed text-ink-400">
+        Flows, runs and API keys all belong to a workspace. You need one before
+        there is anything to measure.
+      </p>
+
+      <form onSubmit={create} className="mx-auto mt-6 max-w-sm space-y-3 text-left">
+        {error && <Alert>{error}</Alert>}
+        <Field
+          label="Workspace name"
+          name="workspace"
+          required
+          autoFocus
+          disabled={busy}
+          placeholder="Acme Engineering"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+        />
+        <Button type="submit" full loading={busy} disabled={!name.trim()}>
+          Create workspace
+        </Button>
+      </form>
+    </Card>
+  );
+}
+
+function EmptyState() {
   return (
     <div className="space-y-6">
       <Card className="p-10 text-center">
@@ -333,20 +402,6 @@ function EmptyState({ verified }: { verified: boolean }) {
         </p>
       </Card>
 
-      {!verified && (
-        <Card className="flex flex-col items-start justify-between gap-4 p-5 sm:flex-row sm:items-center">
-          <div>
-            <p className="font-medium text-ink-100">Confirm your email</p>
-            <p className="mt-1 text-sm text-ink-400">
-              It unlocks notifications and password recovery. You can keep using
-              your account meanwhile.
-            </p>
-          </div>
-          <Link to="/app/security" className="flex-none">
-            <Button variant="secondary">Account settings</Button>
-          </Link>
-        </Card>
-      )}
     </div>
   );
 }

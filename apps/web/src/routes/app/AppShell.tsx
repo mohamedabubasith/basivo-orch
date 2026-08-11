@@ -1,10 +1,11 @@
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
-import { NavLink, Navigate, Outlet, useLocation } from "react-router-dom";
+import { Link, NavLink, Navigate, Outlet, useLocation } from "react-router-dom";
 
 import { useAuth } from "../../lib/auth";
 import { cx } from "../../lib/cx";
 import { Logo, PageLoader } from "../../components/ui";
+import { VerifyBanner } from "../../components/VerifyBanner";
 
 /**
  * Gate for everything behind sign-in.
@@ -130,9 +131,21 @@ export function AppShell() {
                 >
                   <div className="border-b border-ink-700/60 px-3 py-2">
                     <p className="truncate text-sm text-ink-200">{user?.email}</p>
-                    <p className="mt-0.5 text-xs text-ink-500">
-                      {user?.is_verified ? "Email confirmed" : "Email unconfirmed"}
-                    </p>
+                    {user?.is_verified ? (
+                      <p className="mt-0.5 text-xs" style={{ color: "#059669" }}>
+                        Email confirmed
+                      </p>
+                    ) : (
+                      // A status with nowhere to go is just a complaint.
+                      <Link
+                        to="/app/security"
+                        onClick={() => setMenuOpen(false)}
+                        className="mt-0.5 inline-block text-xs underline decoration-dotted underline-offset-2"
+                        style={{ color: "#d97706" }}
+                      >
+                        Email unconfirmed — confirm it
+                      </Link>
+                    )}
                   </div>
                   <button
                     role="menuitem"
@@ -149,6 +162,9 @@ export function AppShell() {
       </header>
 
       <main className="mx-auto max-w-6xl px-5 py-10">
+        {/* Above the page rather than inside it, so it is visible wherever the
+            user lands and cannot be missed by going straight to a sub-page. */}
+        <VerifyBanner />
         <Outlet />
       </main>
     </div>
