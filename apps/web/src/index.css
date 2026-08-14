@@ -50,6 +50,7 @@
   --series: #818cf8;
   --series-dim: #3f4468;
   --canvas-dot: #1d2233;
+  --canvas-line: #171c2b;
   /* The builder canvas, deliberately its own token rather than reusing
      ink-950. In light mode ink-950 is pure white — identical to every card
      sitting on top of it — so the canvas had no depth at all and nodes read
@@ -100,6 +101,7 @@
   --series: #4f46e5;
   --series-dim: #c7d2fe;
   --canvas-dot: #aeb9d2;
+  --canvas-line: #c6cede;
   --canvas-bg: #e3e8f2;
 }
 
@@ -132,6 +134,7 @@
     --series: #4f46e5;
     --series-dim: #c7d2fe;
     --canvas-dot: #aeb9d2;
+    --canvas-line: #c6cede;
     --canvas-bg: #e3e8f2;
   }
 }

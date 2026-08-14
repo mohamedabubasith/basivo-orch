@@ -142,7 +142,10 @@ class AgentConfig(BaseModel):
     prompt: str = Field(
         default="{{ input }}",
         max_length=20000,
-        description="The user message. Supports {{ references }}.",
+        description=(
+            "The user message. Supports {{ references }} — chain agents by "
+            "using {{ input.text }}, the upstream agent's reply."
+        ),
     )
 
     # -- sampling ------------------------------------------------------------

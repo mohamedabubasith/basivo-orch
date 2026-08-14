@@ -20,9 +20,10 @@
 
 import { motion } from "motion/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, Link as RouterLink, useNavigate, useParams } from "react-router-dom";
 import {
   Background,
+  BackgroundVariant,
   Controls,
   ReactFlow,
   ReactFlowProvider,
@@ -38,6 +39,7 @@ import "@xyflow/react/dist/style.css";
 
 import { ApiError, api } from "../../lib/api";
 import { cx } from "../../lib/cx";
+import { loadConfig } from "../../lib/config";
 import { WorkspaceProvider, useWorkspace } from "../../lib/workspace";
 import { ThemeToggle } from "../../components/ThemeToggle";
 import { Alert, Button, PageLoader } from "../../components/ui";
@@ -125,6 +127,25 @@ function BuilderInner() {
   const [problems, setProblems] = useState<string[]>([]);
   const [run, setRun] = useState<RunDetail | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [testPanelOpen, setTestPanelOpen] = useState(false);
+  const [testInput, setTestInput] = useState<string>("");
+  const [endpointsOpen, setEndpointsOpen] = useState(false);
+  const [publicBase, setPublicBase] = useState<string>("");
+
+  useEffect(() => {
+    void loadConfig().then((config) => setPublicBase(config.public_base_url ?? ""));
+  }, []);
+
+  // The payload someone crafts to exercise a flow is worth keeping — retyping
+  // it on every visit is how test inputs degenerate to {}.
+  useEffect(() => {
+    if (!flowId) return;
+    try {
+      setTestInput(localStorage.getItem(`basivo.testinput.${flowId}`) ?? "{}");
+    } catch {
+      setTestInput("{}");
+    }
+  }, [flowId]);
 
   const canvasRef = useRef<HTMLDivElement>(null);
   const { screenToFlowPosition } = useReactFlow();
@@ -384,7 +405,26 @@ function BuilderInner() {
   }
 
   async function testRun() {
+    // What gets sent is exactly what the panel shows — no hidden default. A
+    // run button that silently posts {} is how "for test I didn't know what
+    // you were doing" happens.
+    let parsed: unknown = {};
+    if (testInput.trim()) {
+      try {
+        parsed = JSON.parse(testInput);
+      } catch {
+        setBanner({ tone: "bad", text: "The test input is not valid JSON." });
+        return;
+      }
+    }
+    try {
+      localStorage.setItem(`basivo.testinput.${flowId}`, testInput);
+    } catch {
+      // Persistence is a convenience; running matters more.
+    }
+
     if (dirty && !(await save())) return;
+    setTestPanelOpen(false);
     setBusy("run");
     setRun(null);
     setNodes((current) =>
@@ -394,7 +434,7 @@ function BuilderInner() {
       })),
     );
     try {
-      const result = await api.post<RunDetail>(`${base}/run`, { input: {} });
+      const result = await api.post<RunDetail>(`${base}/run`, { input: parsed });
       setRun(result);
       const byId = new Map(result.nodes.map((execution) => [execution.node_id, execution]));
       setNodes((current) =>
@@ -482,15 +522,59 @@ function BuilderInner() {
           <Button variant="ghost" onClick={() => void validate()} loading={busy === "validate"}>
             Validate
           </Button>
-          <Button variant="secondary" onClick={() => void testRun()} loading={busy === "run"}>
-            Test run
-          </Button>
+          <div className="relative">
+            <Button
+              variant="secondary"
+              onClick={() => setTestPanelOpen((open) => !open)}
+              loading={busy === "run"}
+            >
+              Test run
+            </Button>
+            {testPanelOpen && (
+              <div className="surface absolute top-full right-0 z-30 mt-2 w-96 rounded-2xl p-4 shadow-xl shadow-black/40">
+                <p className="text-sm font-medium text-ink-100">Run with this input</p>
+                <p className="mt-1 text-xs leading-relaxed text-ink-500">
+                  Sent as the trigger payload — the first node reads it as{" "}
+                  <code className="text-ink-400">{"{{ input }}"}</code>. Runs the
+                  latest saved version.
+                </p>
+                <textarea
+                  value={testInput}
+                  onChange={(event) => setTestInput(event.target.value)}
+                  rows={6}
+                  spellCheck={false}
+                  placeholder='{"name": "Ada"}'
+                  className="mt-3 w-full resize-y rounded-lg border border-ink-700 bg-ink-950/60 px-2.5 py-2 font-mono text-xs text-ink-100 outline-none focus:border-brand-400"
+                />
+                <div className="mt-3 flex justify-end gap-2">
+                  <Button variant="ghost" onClick={() => setTestPanelOpen(false)}>
+                    Cancel
+                  </Button>
+                  <Button onClick={() => void testRun()}>Run now</Button>
+                </div>
+              </div>
+            )}
+          </div>
           <Button variant="secondary" onClick={() => void save()} loading={busy === "save"} disabled={!dirty}>
             Save
           </Button>
           <Button onClick={() => void publish()} loading={busy === "publish"}>
             Publish
           </Button>
+          {flow.published_version_id && (
+            <div className="relative">
+              <Button variant="secondary" onClick={() => setEndpointsOpen((open) => !open)}>
+                Endpoints
+              </Button>
+              {endpointsOpen && (
+                <EndpointsPanel
+                  base={publicBase}
+                  flowId={flow.id}
+                  onClose={() => setEndpointsOpen(false)}
+                />
+              )}
+            </div>
+          )}
           <button
             onClick={() => void deleteFlow()}
             aria-label="Delete this flow"
@@ -593,7 +677,14 @@ function BuilderInner() {
             style={{ "--xy-background-color": "var(--canvas-bg)" } as React.CSSProperties}
             className="[&_.react-flow__attribution]:!bg-transparent [&_.react-flow__attribution]:!text-ink-600 [&_.react-flow__attribution_a]:!text-ink-600"
           >
-            <Background color="var(--canvas-dot)" gap={22} />
+            {/* Lines, not dots — a boxed grid reads as a drafting surface,
+                and it is what every peer tool trains people to expect. */}
+            <Background
+              variant={BackgroundVariant.Lines}
+              gap={26}
+              color="var(--canvas-line)"
+              style={{ opacity: 0.55 }}
+            />
             <Controls className="!border-ink-700 !bg-ink-850 [&_button]:!border-ink-700 [&_button]:!bg-ink-850 [&_button]:!fill-ink-300" />
           </ReactFlow>
 
@@ -620,6 +711,9 @@ function BuilderInner() {
             config={selectedNode.data.config}
             problem={selectedNode.data.problem}
             orgId={orgId}
+            flowId={flow.id}
+            publicBase={publicBase}
+            isPublished={Boolean(flow.published_version_id)}
             onRename={(name) =>
               updateSelected((node) => ({ ...node, data: { ...node.data, label: name } }))
             }
@@ -633,6 +727,136 @@ function BuilderInner() {
       </div>
 
     </div>
+  );
+}
+
+/* ------------------------------------------------------------- endpoints --- */
+
+/**
+ * The production URLs a published flow answers on — printed, not implied.
+ *
+ * Publishing used to end with "Published version N." and nothing else: the
+ * whole point of publishing is that some other system can now call this flow,
+ * and the UI never said where or how. This is that answer, copyable: the
+ * blocking endpoint, the SSE stream, the auth header, and a curl that works
+ * once a real key is pasted in.
+ */
+function EndpointsPanel({
+  base,
+  flowId,
+  onClose,
+}: {
+  base: string;
+  flowId: string;
+  onClose: () => void;
+}) {
+  const runUrl = `${base}/flows/${flowId}/run`;
+  const streamUrl = `${base}/flows/${flowId}/run/stream`;
+  const curl = [
+    `curl -X POST ${runUrl} \\`,
+    `  -H "Authorization: Bearer bsv_YOUR_API_KEY" \\`,
+    `  -H "Content-Type: application/json" \\`,
+    `  -d '{"input": {"name": "Ada"}}'`,
+  ].join("\n");
+
+  return (
+    <div className="surface absolute top-full right-0 z-30 mt-2 w-[440px] rounded-2xl p-4 shadow-xl shadow-black/40">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-medium text-ink-100">Call this flow</p>
+          <p className="mt-1 text-xs leading-relaxed text-ink-500">
+            Runs the <em>published</em> version. Authenticate with an{" "}
+            <RouterLink
+              to="/app/api-keys"
+              className="text-brand-400 underline decoration-dotted underline-offset-2"
+            >
+              API key
+            </RouterLink>{" "}
+            in <code className="text-ink-400">Authorization: Bearer</code> or{" "}
+            <code className="text-ink-400">X-API-Key</code>.
+          </p>
+        </div>
+        <button
+          onClick={onClose}
+          aria-label="Close endpoints"
+          className="rounded-lg p-1.5 text-ink-500 transition-colors hover:bg-ink-800 hover:text-ink-200"
+        >
+          <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none">
+            <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="1.8" />
+          </svg>
+        </button>
+      </div>
+
+      <div className="mt-4 space-y-3">
+        <CopyRow label="Run (blocking)" value={runUrl} />
+        <CopyRow label="Run (SSE stream)" value={streamUrl} />
+        <div>
+          <p className="mb-1 text-[0.68rem] font-medium text-ink-400">Example</p>
+          <div className="relative">
+            <pre className="overflow-x-auto rounded-lg border border-ink-700/70 bg-ink-950/60 p-3 font-mono text-[0.7rem] leading-relaxed text-ink-300">
+              {curl}
+            </pre>
+            <CopyButton value={curl} className="absolute top-2 right-2" />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CopyRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <p className="mb-1 text-[0.68rem] font-medium text-ink-400">{label}</p>
+      <div className="flex items-center gap-1.5">
+        <code className="min-w-0 flex-1 truncate rounded-lg border border-ink-700/70 bg-ink-950/60 px-2.5 py-2 font-mono text-[0.72rem] text-ink-200">
+          {value}
+        </code>
+        <CopyButton value={value} />
+      </div>
+    </div>
+  );
+}
+
+function CopyButton({ value, className = "" }: { value: string; className?: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      aria-label="Copy"
+      title="Copy"
+      onClick={() => {
+        void navigator.clipboard?.writeText(value);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1200);
+      }}
+      className={cx(
+        "flex-none rounded-lg border border-ink-700 p-2 text-ink-400 transition-colors hover:border-brand-400 hover:text-ink-100",
+        className,
+      )}
+    >
+      {copied ? (
+        <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" aria-hidden="true">
+          <path
+            d="M5 12.5 10 17.5 19 7"
+            stroke="var(--status-good)"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      ) : (
+        <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" aria-hidden="true">
+          <rect x="9" y="9" width="11" height="11" rx="2" stroke="currentColor" strokeWidth="1.6" />
+          <path
+            d="M5 15V6a2 2 0 0 1 2-2h9"
+            stroke="currentColor"
+            strokeWidth="1.6"
+            strokeLinecap="round"
+          />
+        </svg>
+      )}
+    </button>
   );
 }
 
@@ -720,6 +944,12 @@ function RunSummary({ run, onClose }: { run: RunDetail; onClose: () => void }) {
         <div className="mb-3 flex flex-wrap items-center gap-3">
           <p className="text-sm font-medium text-ink-100">Last test run</p>
           <span className="font-mono text-xs text-ink-500">{run.id.slice(0, 8)}</span>
+          <Link
+            to={`/app/runs/${run.id}`}
+            className="ml-1 text-xs text-brand-400 underline decoration-dotted underline-offset-2 hover:text-brand-300"
+          >
+            Open full log →
+          </Link>
           <span className="ml-auto font-mono text-xs text-ink-300">
             {duration(run.duration_ms)}
           </span>

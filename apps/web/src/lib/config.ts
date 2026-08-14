@@ -14,6 +14,8 @@ export interface PublicConfig {
   app_name: string;
   version: string;
   require_verified_email: boolean;
+  /** Where a published flow answers — the server's own idea of its address. */
+  public_base_url?: string;
 }
 
 const FALLBACK: PublicConfig = {

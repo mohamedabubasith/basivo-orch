@@ -135,6 +135,11 @@ def create_app() -> FastAPI:
         return {
             "app_name": settings.APP_NAME,
             "version": __version__,
+            # For the UI to print real, copyable production URLs — the run and
+            # stream endpoints a published flow answers on. Derived from the
+            # server's own config so a reverse proxy or a custom domain is
+            # reflected instead of guessed at from the browser's origin.
+            "public_base_url": str(auth_settings.public_base_url).rstrip("/"),
             # What is actually enforced, not what was merely asked for. The
             # gate stands down when mail cannot be delivered, and a UI that
             # showed a wall the API is not applying would strand people.

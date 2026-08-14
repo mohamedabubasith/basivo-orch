@@ -17,6 +17,7 @@ import { useEffect, useState } from "react";
 
 import { api } from "../lib/api";
 import { cx } from "../lib/cx";
+import { NodeIconChip } from "./nodeIcons";
 import { PROVIDERS } from "./providers";
 import { ToolEditor } from "./ToolEditor";
 import type { NodeSpec } from "./specs";
@@ -110,6 +111,9 @@ export function Inspector({
   config,
   problem,
   orgId,
+  flowId,
+  publicBase,
+  isPublished,
   onRename,
   onChange,
   onDelete,
@@ -121,6 +125,12 @@ export function Inspector({
   problem?: string;
   /** Only needed for the Agent node's credential picker. */
   orgId?: string | null;
+  /** For nodes whose config is about being called from outside — the webhook
+      trigger prints its own invocation URL rather than making the user hunt
+      for it. */
+  flowId?: string;
+  publicBase?: string;
+  isPublished?: boolean;
   onRename: (name: string) => void;
   onChange: (config: Record<string, unknown>) => void;
   onDelete: () => void;
@@ -140,9 +150,10 @@ export function Inspector({
   }
 
   return (
-    <aside className="flex h-full w-[340px] flex-none flex-col border-l border-ink-800/70 bg-ink-900/60">
-      <div className="flex items-start justify-between gap-3 border-b border-ink-800/70 p-4">
-        <div className="min-w-0">
+    <aside className="flex h-full w-[356px] flex-none flex-col border-l border-ink-800/70 bg-ink-900/60">
+      <div className="flex items-center gap-3 border-b border-ink-800/70 p-4">
+        <NodeIconChip type={spec.type} size={8} />
+        <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-medium text-ink-100">{spec.label}</p>
           <p className="truncate font-mono text-[0.68rem] text-ink-500">{spec.type}</p>
         </div>
@@ -169,6 +180,27 @@ export function Inspector({
           </p>
         )}
 
+        {spec.type === "trigger.webhook" && (
+          <div className="rounded-lg border border-ink-700/70 bg-ink-950/40 p-3">
+            <p className="text-[0.68rem] font-medium text-ink-300">This webhook's URL</p>
+            {isPublished ? (
+              <code className="mt-1.5 block truncate rounded-md bg-ink-950/60 px-2 py-1.5 font-mono text-[0.68rem] text-ink-200">
+                POST {publicBase}/flows/{flowId}/run
+              </code>
+            ) : (
+              <p className="mt-1 text-[0.68rem] leading-relaxed text-ink-500">
+                Appears after you publish — an unpublished flow has no stable
+                URL for callers to depend on.
+              </p>
+            )}
+            <p className="mt-1.5 text-[0.68rem] leading-relaxed text-ink-500">
+              Callers authenticate with an API key; the request body arrives as{" "}
+              <code className="text-ink-400">{"{{ input }}"}</code>. Full
+              examples are under the Endpoints button above.
+            </p>
+          </div>
+        )}
+
         <Labelled label="Name" hint="Shown on the canvas and in the run log.">
           <input
             value={name}
@@ -184,7 +216,12 @@ export function Inspector({
             required={field.required}
             hint={field.description}
           >
-            {isAgent && field.key === "provider" ? (
+            {spec.type === "trigger.webhook" && field.key === "methods" ? (
+              <MethodPicker
+                value={Array.isArray(config.methods) ? (config.methods as string[]) : ["POST"]}
+                onChange={(methods) => set("methods", methods)}
+              />
+            ) : isAgent && field.key === "provider" ? (
               <select
                 value={String(config.provider ?? PROVIDERS[0].value)}
                 onChange={(event) => set("provider", event.target.value)}
@@ -247,7 +284,7 @@ function Labelled({
 }) {
   return (
     <div>
-      <label className="mb-1.5 block text-xs font-medium text-ink-300">
+      <label className="mb-1.5 block text-[0.7rem] font-medium tracking-wide text-ink-300">
         {label}
         {required && <span style={{ color: "var(--status-warn)" }}> *</span>}
       </label>
@@ -628,5 +665,49 @@ function CodeArea({ value, onChange }: { value: string; onChange: (value: string
         "resize-y font-mono text-[0.78rem] leading-relaxed whitespace-pre",
       )}
     />
+  );
+}
+
+
+/**
+ * HTTP methods as checkboxes. The generic form rendered this list-of-enums as
+ * a JSON textarea — asking someone to type ["POST","PUT"] by hand, quotes and
+ * all, to answer a five-option multiple choice.
+ */
+function MethodPicker({
+  value,
+  onChange,
+}: {
+  value: string[];
+  onChange: (methods: string[]) => void;
+}) {
+  const ALL = ["GET", "POST", "PUT", "PATCH", "DELETE"];
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {ALL.map((method) => {
+        const active = value.includes(method);
+        return (
+          <button
+            key={method}
+            type="button"
+            aria-pressed={active}
+            onClick={() => {
+              const next = active ? value.filter((m) => m !== method) : [...value, method];
+              // Zero methods is a webhook nothing can call; refuse the last
+              // uncheck rather than saving a config that can never fire.
+              if (next.length > 0) onChange(next);
+            }}
+            className={cx(
+              "rounded-lg border px-2.5 py-1.5 font-mono text-[0.7rem] transition-colors",
+              active
+                ? "border-brand-400 bg-brand-500/15 text-ink-100"
+                : "border-ink-700 text-ink-400 hover:border-ink-500",
+            )}
+          >
+            {method}
+          </button>
+        );
+      })}
+    </div>
   );
 }
