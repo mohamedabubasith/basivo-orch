@@ -56,6 +56,7 @@ class WebhookTriggerNode(Node):
     category = "trigger"
     is_trigger = True
     config_model = WebhookTriggerConfig
+    output_paths = ("body", "headers", "query", "method")
 
     async def run(self, config: WebhookTriggerConfig, ctx: NodeContext) -> NodeResult:
         payload = ctx.trigger.get("payload", {})
@@ -95,6 +96,7 @@ class ScheduleTriggerNode(Node):
     category = "trigger"
     is_trigger = True
     config_model = ScheduleTriggerConfig
+    output_paths = ("fired_at",)
 
     async def run(self, config: ScheduleTriggerConfig, ctx: NodeContext) -> NodeResult:
         return NodeResult(output={"fired_at": ctx.trigger.get("fired_at")})

@@ -18,6 +18,7 @@ export interface NodeSpec {
   category: string;
   is_trigger: boolean;
   ports: string[];
+  output_paths: string[];
   config_schema: Record<string, unknown>;
 }
 

@@ -55,6 +55,7 @@ import {
   type FlowNode,
   type Graph,
 } from "../../builder/graph";
+import { buildSuggestions } from "../../builder/suggestions";
 import { groupSpecs, initialConfig, loadSpecs, type NodeSpec } from "../../builder/specs";
 import { duration } from "./bits";
 
@@ -482,6 +483,9 @@ function BuilderInner() {
 
   const selectedNode = nodes.find((node) => node.id === selected) ?? null;
   const selectedSpec = selectedNode ? specMap.get(selectedNode.data.nodeType) : undefined;
+  const selectedSuggestions = selectedNode
+    ? buildSuggestions(selectedNode.id, nodes, edges, specMap)
+    : [];
 
   return (
     <div className="flex h-dvh flex-col bg-ink-950">
@@ -714,6 +718,7 @@ function BuilderInner() {
             flowId={flow.id}
             publicBase={publicBase}
             isPublished={Boolean(flow.published_version_id)}
+            suggestions={selectedSuggestions}
             onRename={(name) =>
               updateSelected((node) => ({ ...node, data: { ...node.data, label: name } }))
             }

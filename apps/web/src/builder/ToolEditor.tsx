@@ -17,6 +17,8 @@ import { AnimatePresence, motion } from "motion/react";
 import { useState } from "react";
 
 import { cx } from "../lib/cx";
+import type { Suggestion } from "./suggestions";
+import { TemplateInput } from "./TemplateInput";
 
 /** Mirrors `ToolDefinition` in `basivo_orch/flows/nodes/agent.py`. */
 export interface ToolValue {
@@ -99,9 +101,11 @@ function emptyTool(existing: ToolValue[]): ToolValue {
 export function ToolEditor({
   value,
   onChange,
+  suggestions = [],
 }: {
   value: unknown;
   onChange: (tools: ToolValue[]) => void;
+  suggestions?: Suggestion[];
 }) {
   const tools: ToolValue[] = Array.isArray(value) ? (value as ToolValue[]) : [];
   const [open, setOpen] = useState<number | null>(null);
@@ -235,12 +239,24 @@ export function ToolEditor({
                           </option>
                         ))}
                       </select>
-                      <input
-                        value={tool.url}
-                        placeholder="https://api.example.com/x?q={{ tool.city }}"
-                        onChange={(event) => update(index, { url: event.target.value })}
-                        className={cx(SMALL_INPUT, "font-mono")}
-                      />
+                      <div className="min-w-0 flex-1">
+                        <TemplateInput
+                          value={tool.url}
+                          placeholder="https://api.example.com/x?q={{ tool.city }}"
+                          onChange={(url) => update(index, { url })}
+                          suggestions={[
+                            // The model's own arguments join the flow data —
+                            // named rows from this very tool's parameter table.
+                            ...schemaToParameters(tool.input_schema).flatMap((parameter) =>
+                              parameter.name.trim()
+                                ? [{ token: `tool.${parameter.name.trim()}`, hint: "tool argument" }]
+                                : [],
+                            ),
+                            ...suggestions,
+                          ]}
+                          mono
+                        />
+                      </div>
                     </div>
                     <p className="text-[0.64rem] leading-relaxed text-ink-500">
                       The model&rsquo;s arguments are available as{" "}

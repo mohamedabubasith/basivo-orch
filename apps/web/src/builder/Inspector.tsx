@@ -18,6 +18,8 @@ import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 import { cx } from "../lib/cx";
 import { NodeIconChip } from "./nodeIcons";
+import type { Suggestion } from "./suggestions";
+import { TemplateInput } from "./TemplateInput";
 import { PROVIDERS } from "./providers";
 import { ToolEditor } from "./ToolEditor";
 import type { NodeSpec } from "./specs";
@@ -114,6 +116,7 @@ export function Inspector({
   flowId,
   publicBase,
   isPublished,
+  suggestions = [],
   onRename,
   onChange,
   onDelete,
@@ -131,6 +134,8 @@ export function Inspector({
   flowId?: string;
   publicBase?: string;
   isPublished?: boolean;
+  /** What {{ … }} can refer to from this node — see suggestions.ts. */
+  suggestions?: Suggestion[];
   onRename: (name: string) => void;
   onChange: (config: Record<string, unknown>) => void;
   onDelete: () => void;
@@ -243,7 +248,16 @@ export function Inspector({
             ) : spec.type === "code.python" && field.key === "code" ? (
               <CodeArea value={String(config.code ?? "")} onChange={(v) => set("code", v)} />
             ) : isAgent && field.key === "tools" ? (
-              <ToolEditor value={config.tools} onChange={(tools) => set("tools", tools)} />
+              <ToolEditor value={config.tools} onChange={(tools) => set("tools", tools)} suggestions={suggestions} />
+            ) : isAgent && (field.key === "prompt" || field.key === "system") ? (
+              <TemplateInput
+                multiline
+                rows={field.key === "prompt" ? 5 : 3}
+                value={String(config[field.key] ?? "")}
+                onChange={(v) => set(field.key, v)}
+                suggestions={suggestions}
+                placeholder={field.key === "prompt" ? "{{ input.text }}" : "You are…"}
+              />
             ) : isAgent && field.key === "model" ? (
               <ModelPicker
                 orgId={orgId}
@@ -252,7 +266,12 @@ export function Inspector({
                 onChange={(v) => set("model", v)}
               />
             ) : (
-              <FieldInput field={field} value={config[field.key]} onChange={(v) => set(field.key, v)} />
+              <FieldInput
+                field={field}
+                value={config[field.key]}
+                onChange={(v) => set(field.key, v)}
+                suggestions={suggestions}
+              />
             )}
           </Labelled>
         ))}
@@ -334,10 +353,12 @@ function FieldInput({
   field,
   value,
   onChange,
+  suggestions = [],
 }: {
   field: SchemaField;
   value: unknown;
   onChange: (value: unknown) => void;
+  suggestions?: Suggestion[];
 }) {
   if (field.enum) {
     return (
@@ -406,11 +427,14 @@ function FieldInput({
   }
 
   return (
-    <input
+    <TemplateInput
       value={value === undefined || value === null ? "" : String(value)}
-      placeholder={field.default === undefined || field.default === null ? "" : String(field.default)}
-      onChange={(event) => onChange(event.target.value)}
-      className={cx(INPUT, "font-mono text-[0.8rem]")}
+      placeholder={
+        field.default === undefined || field.default === null ? "" : String(field.default)
+      }
+      onChange={(v) => onChange(v)}
+      suggestions={suggestions}
+      mono
     />
   );
 }

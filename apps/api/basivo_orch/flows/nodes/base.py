@@ -142,6 +142,12 @@ class Node(ABC):
     is_trigger: ClassVar[bool] = False
     #: Ports other than the default, for branching nodes.
     ports: ClassVar[tuple[str, ...]] = (DEFAULT_PORT,)
+    #: Dotted paths into this node's output that are stable enough to suggest
+    #: in the editor's template autocomplete — `("body", "usage.cost_usd")`
+    #: becomes `{{ input.body }}` / `{{ nodes.<id>.output.usage.cost_usd }}`.
+    #: Empty for nodes whose output shape is the author's own (code, manual
+    #: trigger): suggesting made-up paths is worse than suggesting none.
+    output_paths: ClassVar[tuple[str, ...]] = ()
 
     config_model: ClassVar[ConfigModel]
 
@@ -167,6 +173,7 @@ class Node(ABC):
             "category": cls.category,
             "is_trigger": cls.is_trigger,
             "ports": list(cls.ports),
+            "output_paths": list(cls.output_paths),
             "config_schema": cls.config_model.model_json_schema(),
         }
 

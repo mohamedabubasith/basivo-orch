@@ -105,6 +105,7 @@ class HttpRequestNode(Node):
     tier = 1
     category = "utility"
     config_model = HttpRequestConfig
+    output_paths = ("status", "headers", "body")
 
     max_attempts = 3
     retry_backoff_seconds = 1.0

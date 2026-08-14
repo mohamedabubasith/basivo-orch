@@ -83,6 +83,7 @@ class ConditionNode(Node):
     category = "utility"
     ports = (TRUE_PORT, FALSE_PORT)
     config_model = ConditionConfig
+    output_paths = ("result", "comparisons")
 
     async def run(self, config: ConditionConfig, ctx: NodeContext) -> NodeResult:
         context = ctx.template_context()

@@ -185,6 +185,15 @@ class AgentNode(Node):
     tier = 2
     category = "ai"
     config_model = AgentConfig
+    output_paths = (
+        "text",
+        "json",
+        "stop_reason",
+        "tool_calls",
+        "usage.input_tokens",
+        "usage.output_tokens",
+        "usage.cost_usd",
+    )
 
     max_attempts = 2
     retry_backoff_seconds = 2.0

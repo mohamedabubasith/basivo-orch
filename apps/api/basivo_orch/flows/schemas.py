@@ -154,6 +154,10 @@ class NodeTypeRead(BaseModel):
     category: str
     is_trigger: bool
     ports: list[str]
+    #: Suggestable paths into this node's output — the editor's template
+    #: autocomplete is built from these. Must be listed here or FastAPI's
+    #: response_model filtering silently strips them from the palette.
+    output_paths: list[str]
     config_schema: dict[str, Any]
 
 
