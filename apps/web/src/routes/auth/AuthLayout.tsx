@@ -27,8 +27,8 @@ export function AuthLayout({
 
       <div className="relative flex flex-col">
         <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden lg:hidden">
-          <div className="grid-bg absolute inset-0 opacity-[0.12] [mask-image:radial-gradient(ellipse_at_50%_0%,black_20%,transparent_70%)]" />
-          <div className="absolute -top-24 left-1/2 h-72 w-96 -translate-x-1/2 rounded-full bg-brand-500/14 blur-[90px]" />
+          <div className="grid-bg absolute inset-0 [mask-image:radial-gradient(ellipse_at_50%_0%,black_20%,transparent_70%)]" />
+          <div className="absolute -top-24 left-1/2 h-72 w-96 -translate-x-1/2 rounded-full bg-brand-500 decor-glow blur-[90px]" />
         </div>
 
         <header className="relative px-6 py-6 sm:px-10">

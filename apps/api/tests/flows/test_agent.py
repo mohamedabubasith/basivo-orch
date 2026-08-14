@@ -17,13 +17,7 @@ import pytest
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
 from pydantic_ai.models.function import FunctionModel
 
-from basivo_orch.flows.nodes.agent import (
-    AgentConfig,
-    AgentNode,
-    ToolDefinition,
-    _construct_provider,
-    _parse_json,
-)
+from basivo_orch.flows.nodes.agent import AgentConfig, AgentNode, ToolDefinition, _parse_json
 from basivo_orch.flows.nodes.base import NodeContext, NodeError
 
 
@@ -216,33 +210,3 @@ def test_parse_json_handles_fenced_and_bare_json():
 def test_parse_json_raises_a_readable_error_on_garbage():
     with pytest.raises(NodeError):
         _parse_json("not json at all")
-
-
-def test_construct_provider_only_passes_kwargs_the_constructor_accepts():
-    """Bedrock authenticates by AWS signature, not a bearer key — a stored
-    credential's `api_key` must not be forced onto a constructor that has no
-    such parameter."""
-
-    class FakeBedrockLikeProvider:
-        def __init__(self, region_name: str = "us-east-1") -> None:
-            self.region_name = region_name
-
-    provider = _construct_provider(
-        FakeBedrockLikeProvider,
-        api_key="sk-should-be-ignored",
-        base_url="",
-        options={"region_name": "eu-west-1"},
-    )
-    assert provider.region_name == "eu-west-1"
-    assert not hasattr(provider, "api_key")
-
-
-def test_construct_provider_passes_api_key_when_accepted():
-    class FakeKeyedProvider:
-        def __init__(self, api_key: str = "") -> None:
-            self.api_key = api_key
-
-    provider = _construct_provider(
-        FakeKeyedProvider, api_key="sk-live-123", base_url="", options={}
-    )
-    assert provider.api_key == "sk-live-123"

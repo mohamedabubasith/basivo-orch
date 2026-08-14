@@ -46,7 +46,6 @@ never into `NodeExecution.input_summary`.
 from __future__ import annotations
 
 import importlib
-import inspect
 import json
 import time
 from typing import Any, Literal
@@ -55,11 +54,12 @@ from pydantic import BaseModel, Field
 from pydantic_ai import Agent, ModelHTTPError, UnexpectedModelBehavior, UsageLimitExceeded
 from pydantic_ai.messages import ToolCallPart
 from pydantic_ai.models import Model
-from pydantic_ai.providers import Provider, infer_provider_class
+from pydantic_ai.providers import infer_provider_class
 from pydantic_ai.settings import ModelSettings
 from pydantic_ai.tools import Tool
 from pydantic_ai.usage import UsageLimits
 
+from basivo_orch.credentials.provider_client import construct_provider
 from basivo_orch.flows.nodes.base import Node, NodeContext, NodeError, NodeResult
 from basivo_orch.flows.nodes.http import assert_public_url
 from basivo_orch.flows.templating import render_value
@@ -349,40 +349,12 @@ async def _build_model(config: AgentConfig, ctx: NodeContext) -> Model:
         options = credential.options
 
     provider_cls = infer_provider_class(config.provider)
-    provider = _construct_provider(
-        provider_cls, api_key=api_key, base_url=base_url, options=options
-    )
+    provider = construct_provider(provider_cls, api_key=api_key, base_url=base_url, options=options)
 
     module_name, class_name = PROVIDER_MODEL_MODULE[config.provider]
 
     model_cls = getattr(importlib.import_module(module_name), class_name)
     return model_cls(config.model, provider=provider)
-
-
-def _construct_provider(
-    provider_cls: type[Provider[Any]], *, api_key: str, base_url: str, options: dict[str, Any]
-) -> Provider[Any]:
-    """Build a `Provider` from what a stored credential actually has.
-
-    Constructors differ by provider — Bedrock authenticates by AWS signature,
-    not a bearer key, and several accept a `base_url` while others don't — so
-    kwargs are filtered to what each constructor declares rather than assumed
-    uniform. A key that has nowhere to go (an unrecognised constructor
-    parameter) is silently dropped by this filter; that is preferable to a
-    `TypeError` that names the field but not the fix, and an agent that fails
-    on its first real call because auth was never applied says so unambiguously
-    through the provider SDK's own error.
-    """
-    accepted = set(inspect.signature(provider_cls.__init__).parameters)
-    kwargs: dict[str, Any] = {}
-    if api_key and "api_key" in accepted:
-        kwargs["api_key"] = api_key
-    if base_url and "base_url" in accepted:
-        kwargs["base_url"] = base_url
-    for key, value in options.items():
-        if key in accepted:
-            kwargs[key] = value
-    return provider_cls(**kwargs)
 
 
 # ---------------------------------------------------------------------------

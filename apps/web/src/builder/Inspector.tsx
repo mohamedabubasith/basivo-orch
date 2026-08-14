@@ -18,6 +18,7 @@ import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 import { cx } from "../lib/cx";
 import { PROVIDERS } from "./providers";
+import { ToolEditor } from "./ToolEditor";
 import type { NodeSpec } from "./specs";
 
 interface CredentialOption {
@@ -201,6 +202,15 @@ export function Inspector({
                 provider={String(config.provider ?? PROVIDERS[0].value)}
                 value={String(config.credential_id ?? "")}
                 onChange={(v) => set("credential_id", v)}
+              />
+            ) : isAgent && field.key === "tools" ? (
+              <ToolEditor value={config.tools} onChange={(tools) => set("tools", tools)} />
+            ) : isAgent && field.key === "model" ? (
+              <ModelPicker
+                orgId={orgId}
+                credentialId={String(config.credential_id ?? "")}
+                value={String(config.model ?? "")}
+                onChange={(v) => set("model", v)}
               />
             ) : (
               <FieldInput field={field} value={config[field.key]} onChange={(v) => set(field.key, v)} />
@@ -480,6 +490,99 @@ function CredentialPicker({
             Add one
           </a>
           , or leave this on the server's key if one is configured.
+        </p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The Agent node's model field: a live dropdown when it can be, free text
+ * when it cannot.
+ *
+ * The list comes from the selected credential's own provider account —
+ * `GET /credentials/{id}/models` — so it shows the models *that key* can
+ * actually call, not a hardcoded list that goes stale the week a provider
+ * ships something new. With no credential selected, or a provider whose
+ * catalog cannot be fetched (`supported: false`), it stays a plain text
+ * input; every provider accepts a typed model id regardless.
+ */
+function ModelPicker({
+  orgId,
+  credentialId,
+  value,
+  onChange,
+}: {
+  orgId?: string | null;
+  credentialId: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  const [models, setModels] = useState<string[] | null>(null);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    setModels(null);
+    setFetchError(null);
+    if (!orgId || !credentialId) return;
+    let cancelled = false;
+    setLoading(true);
+    api
+      .get<{ supported: boolean; models: string[]; error: string | null }>(
+        `/api/v1/orgs/${orgId}/credentials/${credentialId}/models`,
+      )
+      .then((result) => {
+        if (cancelled) return;
+        if (result.supported && !result.error) setModels(result.models);
+        else if (result.error) setFetchError(result.error);
+      })
+      .catch(() => !cancelled && setFetchError("Could not fetch the model list."))
+      .finally(() => !cancelled && setLoading(false));
+    return () => {
+      cancelled = true;
+    };
+  }, [orgId, credentialId]);
+
+  if (models && models.length > 0) {
+    return (
+      <div>
+        <select value={value} onChange={(event) => onChange(event.target.value)} className={INPUT}>
+          {/* A saved model that the key can no longer see (renamed, retired,
+              or configured before the credential) must not be silently
+              swapped for the first list entry — keep it selectable and let
+              the run surface the provider's own error if it is truly gone. */}
+          {value && !models.includes(value) && <option value={value}>{value} (saved)</option>}
+          {models.map((model) => (
+            <option key={model} value={model}>
+              {model}
+            </option>
+          ))}
+        </select>
+        <p className="mt-1 text-[0.68rem] leading-relaxed text-ink-500">
+          {models.length} models available to this credential.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <input
+        value={value}
+        placeholder="e.g. claude-sonnet-5"
+        onChange={(event) => onChange(event.target.value)}
+        className={cx(INPUT, "font-mono text-[0.8rem]")}
+      />
+      {loading && <p className="mt-1 text-[0.68rem] text-ink-500">Fetching model list…</p>}
+      {fetchError && (
+        <p className="mt-1 text-[0.68rem]" style={{ color: "var(--status-warn)" }}>
+          Model list unavailable: {fetchError.slice(0, 120)}
+        </p>
+      )}
+      {!loading && !fetchError && !credentialId && (
+        <p className="mt-1 text-[0.68rem] text-ink-500">
+          Pick a credential above to load its live model list.
         </p>
       )}
     </div>

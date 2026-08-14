@@ -193,12 +193,12 @@ export function Hero() {
     >
       {/* ambient background */}
       <div aria-hidden="true" className="pointer-events-none absolute inset-0">
-        <div className="grid-bg absolute inset-0 opacity-[0.18] [mask-image:radial-gradient(ellipse_at_50%_0%,black_25%,transparent_70%)]" />
-        <div className="absolute -top-40 left-1/2 h-[520px] w-[820px] -translate-x-1/2 rounded-full bg-brand-500/18 blur-[120px] animate-pulse-slow" />
-        <div className="absolute top-32 right-[8%] h-[320px] w-[320px] rounded-full bg-accent-500/12 blur-[100px]" />
+        <div className="grid-bg absolute inset-0 [mask-image:radial-gradient(ellipse_at_50%_0%,black_25%,transparent_70%)]" />
+        <div className="absolute -top-40 left-1/2 h-[520px] w-[820px] -translate-x-1/2 rounded-full bg-brand-500 decor-glow blur-[120px] animate-pulse-slow" />
+        <div className="absolute top-32 right-[8%] h-[320px] w-[320px] rounded-full bg-accent-500 decor-glow blur-[100px]" />
         {/* Follows the pointer. Decorative, and disabled under reduced motion. */}
         <motion.div
-          className="absolute h-[340px] w-[340px] rounded-full bg-accent-500/10 blur-[90px] motion-reduce:hidden"
+          className="absolute h-[340px] w-[340px] rounded-full bg-accent-500 decor-glow blur-[90px] motion-reduce:hidden"
           style={{
             left: useTransform(glowX, (v) => `calc(${v}% - 170px)`),
             top: useTransform(glowY, (v) => `calc(${v}% - 170px)`),
@@ -474,7 +474,7 @@ export function CTA() {
           <div className="surface relative overflow-hidden rounded-3xl px-8 py-14 text-center">
             <div
               aria-hidden="true"
-              className="pointer-events-none absolute -top-24 left-1/2 h-64 w-[560px] -translate-x-1/2 rounded-full bg-brand-500/20 blur-[90px]"
+              className="pointer-events-none absolute -top-24 left-1/2 h-64 w-[560px] -translate-x-1/2 rounded-full bg-brand-500 decor-glow blur-[90px]"
             />
             <div className="relative">
               <h2 className="text-3xl font-semibold tracking-tight text-balance text-ink-100 sm:text-4xl">

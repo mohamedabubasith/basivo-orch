@@ -19,9 +19,20 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from basivo_orch.auth.authz import OrgContext, Permission, require
-from basivo_orch.credentials.crypto import encrypt
+from basivo_orch.credentials.crypto import decrypt, encrypt
+from basivo_orch.credentials.model_catalog import (
+    ModelFetchFailed,
+    ModelFetchNotSupported,
+    fetch_models,
+)
 from basivo_orch.credentials.models import Credential
-from basivo_orch.credentials.schemas import PROVIDERS, CredentialCreate, CredentialRead
+from basivo_orch.credentials.schemas import (
+    PROVIDERS,
+    CredentialCreate,
+    CredentialRead,
+    CredentialTestRequest,
+    ModelListResponse,
+)
 from basivo_orch.db import get_async_session
 
 router = APIRouter(tags=["credentials"])
@@ -108,3 +119,74 @@ async def list_providers(
 ) -> list[str]:
     """Every provider the Agent node can authenticate against."""
     return PROVIDERS
+
+
+@router.post("/orgs/{organization_id}/credentials/test", response_model=ModelListResponse)
+async def test_credential(
+    payload: CredentialTestRequest,
+    context: OrgContext = Depends(require(Permission.CREDENTIAL_CREATE)),
+) -> ModelListResponse:
+    """Does this key actually work? Fired before anything is saved.
+
+    Fetching a provider's model catalog needs exactly what running an agent
+    against it needs — a working key — so the two questions share one call:
+    if the list comes back, the key is good. Requires create permission, not
+    just read, since it makes a real outbound request using a candidate
+    secret the caller just typed.
+    """
+    if payload.provider not in PROVIDERS:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Unknown provider {payload.provider!r}. Choose one of: {', '.join(PROVIDERS)}.",
+        )
+    try:
+        models = await fetch_models(
+            payload.provider,
+            api_key=payload.api_key,
+            base_url=payload.base_url or "",
+            options=payload.options,
+        )
+        return ModelListResponse(supported=True, models=models)
+    except ModelFetchNotSupported:
+        return ModelListResponse(supported=False)
+    except ModelFetchFailed as exc:
+        return ModelListResponse(supported=True, error=str(exc))
+
+
+@router.get(
+    "/orgs/{organization_id}/credentials/{credential_id}/models",
+    response_model=ModelListResponse,
+)
+async def credential_models(
+    credential_id: uuid.UUID,
+    context: OrgContext = Depends(require(Permission.CREDENTIAL_READ)),
+    session: AsyncSession = Depends(get_async_session),
+) -> ModelListResponse:
+    """The live model list for an already-saved credential.
+
+    Read permission is enough here — unlike `test`, this never sees a secret
+    the caller typed; it decrypts one that was already stored, the same trust
+    level as running an Agent node that references it.
+    """
+    result = await session.execute(
+        select(Credential).where(
+            Credential.id == credential_id,
+            Credential.organization_id == context.organization_id,
+        )
+    )
+    record = result.scalar_one_or_none()
+    if record is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No such credential.")
+
+    try:
+        models = await fetch_models(
+            record.provider,
+            api_key=decrypt(record.secret_encrypted),
+            base_url=record.base_url or "",
+            options=record.options,
+        )
+        return ModelListResponse(supported=True, models=models)
+    except ModelFetchNotSupported:
+        return ModelListResponse(supported=False)
+    except ModelFetchFailed as exc:
+        return ModelListResponse(supported=True, error=str(exc))

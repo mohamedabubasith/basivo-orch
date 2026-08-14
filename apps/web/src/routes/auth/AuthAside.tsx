@@ -44,9 +44,9 @@ export function AuthAside() {
   return (
     <aside className="relative hidden overflow-hidden border-r border-ink-800/70 lg:block">
       <div aria-hidden="true" className="pointer-events-none absolute inset-0">
-        <div className="grid-bg absolute inset-0 opacity-[0.16] animate-grid [mask-image:radial-gradient(ellipse_at_30%_40%,black_20%,transparent_75%)]" />
-        <div className="absolute -top-32 -left-24 h-[420px] w-[520px] rounded-full bg-brand-500/16 blur-[110px] animate-pulse-slow" />
-        <div className="absolute right-[-10%] bottom-[-10%] h-[360px] w-[420px] rounded-full bg-accent-500/12 blur-[100px]" />
+        <div className="grid-bg absolute inset-0 animate-grid [mask-image:radial-gradient(ellipse_at_30%_40%,black_20%,transparent_75%)]" />
+        <div className="absolute -top-32 -left-24 h-[420px] w-[520px] rounded-full bg-brand-500 decor-glow blur-[110px] animate-pulse-slow" />
+        <div className="absolute right-[-10%] bottom-[-10%] h-[360px] w-[420px] rounded-full bg-accent-500 decor-glow blur-[100px]" />
       </div>
 
       <div className="relative flex h-full flex-col justify-between p-10 xl:p-14">

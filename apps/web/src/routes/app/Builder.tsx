@@ -184,6 +184,8 @@ function BuilderInner() {
             ...connection,
             id: edgeId(connection.source, connection.target, connection.sourceHandle),
             type: "smoothstep",
+            animated: true,
+            style: { stroke: "var(--series)", strokeWidth: 2, opacity: 0.55 },
           },
           current,
         ),
@@ -535,9 +537,25 @@ function BuilderInner() {
             maxZoom={1.75}
             defaultEdgeOptions={{
               type: "smoothstep",
-              style: { stroke: "var(--color-ink-500)", strokeWidth: 2 },
+              animated: true,
+              // The series colour rather than a neutral grey: this line *is*
+              // the thing carrying data from one node to the next, so it gets
+              // the hue reserved for identity rather than chrome.
+              style: { stroke: "var(--series)", strokeWidth: 2, opacity: 0.55 },
             }}
-            className="bg-ink-950 [&_.react-flow__attribution]:!bg-transparent [&_.react-flow__attribution]:!text-ink-600 [&_.react-flow__attribution_a]:!text-ink-600"
+            // Not a `bg-*` utility: @xyflow/react's own stylesheet puts an
+            // explicit `background-color: var(--xy-background-color, ...)`
+            // directly on `.react-flow` — the exact same class a Tailwind
+            // utility here would target, so it was a specificity tie, and
+            // that library's CSS is injected (as part of this route's lazy
+            // chunk) after Tailwind's, winning ties by source order. Their
+            // own rule already reads `--xy-background-color` first, which is
+            // the supported override point, so setting that custom property
+            // wins without a specificity fight — confirmed by the fact that a
+            // competing class here rendered pure white in light mode with no
+            // visible error.
+            style={{ "--xy-background-color": "var(--canvas-bg)" } as React.CSSProperties}
+            className="[&_.react-flow__attribution]:!bg-transparent [&_.react-flow__attribution]:!text-ink-600 [&_.react-flow__attribution_a]:!text-ink-600"
           >
             <Background color="var(--canvas-dot)" gap={22} />
             <Controls className="!border-ink-700 !bg-ink-850 [&_button]:!border-ink-700 [&_button]:!bg-ink-850 [&_button]:!fill-ink-300" />

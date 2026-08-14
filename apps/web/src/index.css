@@ -50,9 +50,30 @@
   --series: #818cf8;
   --series-dim: #3f4468;
   --canvas-dot: #1d2233;
+  /* The builder canvas, deliberately its own token rather than reusing
+     ink-950. In light mode ink-950 is pure white — identical to every card
+     sitting on top of it — so the canvas had no depth at all and nodes read
+     as paper cutouts floating on a blank page. Dark mode has no such problem
+     (ink-950 already reads as "the back of the room"), so it stays the same
+     value there. */
+  --canvas-bg: #06070c;
+
+  /* Decorative glow blobs and the grid pattern were tuned once, at a fixed
+     Tailwind opacity fraction (`bg-brand-500/16`, `.grid-bg opacity-[0.16]`),
+     against a near-black background — where a soft, low-opacity tint reads as
+     a visible glow. The same fraction against a near-white background is
+     nearly invisible: light adds to light instead of standing out from it.
+     Every landing/auth screen used the same baked-in fractions, so the
+     washed-out look was systemic, not a one-off — fixed once here rather than
+     patched fraction-by-fraction in four files. */
+  --decor-glow: 0.16;
+  --decor-grid: 0.16;
 }
 
 :root[data-theme="light"] {
+  --decor-glow: 0.42;
+  --decor-grid: 0.5;
+
   --color-ink-950: #ffffff;
   --color-ink-900: #f6f7fb;
   --color-ink-850: #ffffff;
@@ -78,11 +99,15 @@
   --status-bad: #9f1239;
   --series: #4f46e5;
   --series-dim: #c7d2fe;
-  --canvas-dot: #dfe3ed;
+  --canvas-dot: #c7cee0;
+  --canvas-bg: #eef0f6;
 }
 
 @media (prefers-color-scheme: light) {
   :root:not([data-theme="dark"]):not([data-theme="light"]) {
+    --decor-glow: 0.42;
+    --decor-grid: 0.5;
+
     --color-ink-950: #ffffff;
     --color-ink-900: #f6f7fb;
     --color-ink-850: #ffffff;
@@ -106,7 +131,8 @@
     --status-bad: #9f1239;
     --series: #4f46e5;
     --series-dim: #c7d2fe;
-    --canvas-dot: #dfe3ed;
+    --canvas-dot: #c7cee0;
+    --canvas-bg: #eef0f6;
   }
 }
 
@@ -177,6 +203,19 @@
       linear-gradient(to right, color-mix(in oklab, var(--color-ink-600) 40%, transparent) 1px, transparent 1px),
       linear-gradient(to bottom, color-mix(in oklab, var(--color-ink-600) 40%, transparent) 1px, transparent 1px);
     background-size: 60px 60px;
+    /* Was a fixed Tailwind opacity fraction per call site, tuned once against
+       a dark background. Themed here instead — see the `--decor-grid` note
+       at its definition — so a call site no longer has to carry its own
+       per-theme opacity fraction. */
+    opacity: var(--decor-grid);
+  }
+
+  /* For the glow blobs behind hero/auth copy. Give the element a *solid*
+     brand/accent background colour (no `/NN` alpha suffix — that would bake
+     in exactly the fixed-fraction problem this exists to fix) and this class
+     for the opacity, so the same blob is tuned per theme from one place. */
+  .decor-glow {
+    opacity: var(--decor-glow);
   }
 }
 

@@ -139,6 +139,12 @@ export function Credentials() {
   );
 }
 
+interface TestResult {
+  supported: boolean;
+  models: string[];
+  error: string | null;
+}
+
 function NewCredential({ orgId, onCreated }: { orgId: string; onCreated: () => void }) {
   const [name, setName] = useState("");
   const [provider, setProvider] = useState(PROVIDERS[0].value);
@@ -146,6 +152,37 @@ function NewCredential({ orgId, onCreated }: { orgId: string; onCreated: () => v
   const [baseUrl, setBaseUrl] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [testing, setTesting] = useState(false);
+  const [tested, setTested] = useState<TestResult | null>(null);
+
+  // A result describes one exact (provider, key, url) combination; keeping it
+  // on screen after any of those change would show a verdict about a
+  // credential that no longer exists.
+  function invalidateTest() {
+    setTested(null);
+  }
+
+  async function testConnection() {
+    setTesting(true);
+    setTested(null);
+    try {
+      setTested(
+        await api.post<TestResult>(`/api/v1/orgs/${orgId}/credentials/test`, {
+          provider,
+          api_key: apiKey,
+          base_url: baseUrl.trim() || null,
+        }),
+      );
+    } catch (err) {
+      setTested({
+        supported: true,
+        models: [],
+        error: err instanceof ApiError ? err.message : "The test request did not go through.",
+      });
+    } finally {
+      setTesting(false);
+    }
+  }
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -182,7 +219,10 @@ function NewCredential({ orgId, onCreated }: { orgId: string; onCreated: () => v
           <label className="mb-1.5 block text-sm font-medium text-ink-300">Provider</label>
           <select
             value={provider}
-            onChange={(event) => setProvider(event.target.value)}
+            onChange={(event) => {
+              setProvider(event.target.value);
+              invalidateTest();
+            }}
             className="w-full rounded-lg border border-ink-700 bg-ink-950/60 px-3 py-2.5 text-sm text-ink-100 outline-none focus:border-brand-400"
           >
             {PROVIDERS.map((option) => (
@@ -200,18 +240,60 @@ function NewCredential({ orgId, onCreated }: { orgId: string; onCreated: () => v
           autoComplete="off"
           placeholder="Pasted once — never shown again"
           value={apiKey}
-          onChange={(event) => setApiKey(event.target.value)}
+          onChange={(event) => {
+            setApiKey(event.target.value);
+            invalidateTest();
+          }}
         />
         <Field
           label="Base URL"
           name="base_url"
           placeholder="Optional — for a proxy, gateway or self-hosted endpoint"
           value={baseUrl}
-          onChange={(event) => setBaseUrl(event.target.value)}
+          onChange={(event) => {
+            setBaseUrl(event.target.value);
+            invalidateTest();
+          }}
         />
-        <Button type="submit" loading={busy} disabled={!name.trim() || !apiKey.trim()}>
-          Save credential
-        </Button>
+        {tested && !tested.supported && (
+          <Alert tone="info">
+            This provider has no model-list endpoint to test against — the key
+            will be verified on the Agent node&rsquo;s first real call instead.
+          </Alert>
+        )}
+        {tested?.supported && tested.error && (
+          <Alert>
+            The key was rejected: <span className="font-mono text-xs">{tested.error}</span>
+          </Alert>
+        )}
+        {tested?.supported && !tested.error && (
+          <Alert tone="success">
+            Connected. {tested.models.length} model{tested.models.length === 1 ? "" : "s"}{" "}
+            available
+            {tested.models.length > 0 && (
+              <span className="text-xs">
+                {" "}
+                — e.g. {tested.models.slice(0, 3).join(", ")}
+                {tested.models.length > 3 ? ", …" : ""}
+              </span>
+            )}
+          </Alert>
+        )}
+
+        <div className="flex gap-2">
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => void testConnection()}
+            loading={testing}
+            disabled={!apiKey.trim()}
+          >
+            Test connection
+          </Button>
+          <Button type="submit" loading={busy} disabled={!name.trim() || !apiKey.trim()}>
+            Save credential
+          </Button>
+        </div>
       </form>
     </Card>
   );

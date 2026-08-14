@@ -2,17 +2,21 @@
  * One node on the canvas.
  *
  * It carries three layers of state that have to stay distinguishable at a
- * glance: what the node *is* (an icon and a name), whether it is *valid* (a
- * problem from the last validate), and what it *did* (the last run). Those are
- * different questions, so they get different channels — a ring for validity, a
- * labelled footer for run status — and a red node is never ambiguous between
- * "misconfigured" and "failed at 3am".
+ * glance: what the node *is* (an icon, a name, and now a per-type accent
+ * running through icon, hairline and card wash together, so a glance across a
+ * busy canvas reads "trigger / call / decision / AI" before any label is
+ * legible), whether it is *valid* (a problem from the last validate), and what
+ * it *did* (the last run). Those are different questions, so they get
+ * different channels — a ring for validity, a labelled footer for run status —
+ * and a red node is never ambiguous between "misconfigured" and "failed at
+ * 3am".
  *
  * Run status never travels as colour alone: every state carries an icon and a
  * word. The colours are theme variables rather than literals so the card is
  * legible on a white canvas too.
  */
 
+import { motion } from "motion/react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 
 import { cx } from "../lib/cx";
@@ -27,6 +31,22 @@ const STATUS = {
 
 /** Handle labels. The default port needs none — there is nothing to disambiguate. */
 const PORT_LABEL: Record<string, string> = { out: "", true: "true", false: "false" };
+
+/**
+ * One accent per node type, not just "trigger or not". A canvas with a dozen
+ * nodes is scanned by colour long before anyone reads a label — a decision
+ * point, an AI call and a plain HTTP request should not all be the same hue.
+ */
+const ACCENT: Record<string, string> = {
+  "trigger.manual": "var(--color-accent-500)",
+  "trigger.webhook": "var(--color-accent-500)",
+  "trigger.schedule": "var(--color-accent-500)",
+  "http.request": "var(--series)",
+  "logic.condition": "var(--status-warn)",
+  "data.set": "var(--status-good)",
+  "agent.llm": "var(--color-brand-300)",
+};
+const DEFAULT_ACCENT = "var(--series)";
 
 const ICONS: Record<string, React.ReactNode> = {
   "trigger.manual": <path d="M8 5.5v13l11-6.5-11-6.5Z" />,
@@ -62,6 +82,14 @@ const ICONS: Record<string, React.ReactNode> = {
       <path d="M5 12c0 1.5 3.1 2.8 7 2.8s7-1.3 7-2.8" />
     </>
   ),
+  // A chip with radiating points — reads as "a model", distinct from the
+  // plain rounded-square every other node fell back to before this existed.
+  "agent.llm": (
+    <>
+      <rect x="7" y="7" width="10" height="10" rx="2.5" />
+      <path d="M12 2.5v2.3M12 19.2v2.3M2.5 12h2.3M19.2 12h2.3M5 5l1.6 1.6M17.4 17.4 19 19M19 5l-1.6 1.6M6.6 17.4 5 19" />
+    </>
+  ),
 };
 
 const FALLBACK_ICON = (
@@ -74,19 +102,32 @@ const FALLBACK_ICON = (
 export function FlowNodeCard({ data, selected }: NodeProps<FlowNode>) {
   const status = data.runStatus ? STATUS[data.runStatus] : null;
   const ports = data.ports.length > 0 ? data.ports : ["out"];
-  const accent = data.isTrigger ? "var(--color-accent-500)" : "var(--series)";
+  const accent = ACCENT[data.nodeType] ?? DEFAULT_ACCENT;
 
   return (
-    <div
+    <motion.div
+      // Plays once, on mount only — a node just dropped onto the canvas
+      // arrives with a little life in it, but a node merely re-rendering
+      // because its run status changed does not replay this and jump.
+      initial={{ opacity: 0, scale: 0.86 }}
+      animate={{ opacity: 1, scale: 1 }}
+      transition={{ type: "spring", stiffness: 420, damping: 28 }}
+      whileHover={{ y: -2 }}
       className={cx(
-        "group relative w-[248px] rounded-2xl border bg-ink-850 transition-all duration-150",
-        "shadow-[0_1px_2px_rgba(0,0,0,0.16),0_8px_24px_-12px_rgba(0,0,0,0.5)]",
+        "group relative w-[248px] rounded-2xl border transition-colors duration-150",
+        "shadow-[0_1px_2px_rgba(0,0,0,0.16),0_10px_28px_-14px_rgba(0,0,0,0.55)]",
         selected
           ? "border-brand-400 ring-2 ring-brand-400/25"
           : data.problem
             ? "border-[var(--status-bad)]"
             : "border-ink-600/70 hover:border-ink-500",
       )}
+      style={{
+        // The identity colour runs faintly through the whole card, not only
+        // the icon chip — a flat `bg-ink-850` box with a coloured icon in the
+        // corner read as plain no matter how good the icon was.
+        background: `color-mix(in oklab, ${accent} 5%, var(--color-ink-850))`,
+      }}
     >
       {/* A hairline in the node's accent. Identity you can read at low zoom,
           when the label has stopped being legible. */}
@@ -109,8 +150,12 @@ export function FlowNodeCard({ data, selected }: NodeProps<FlowNode>) {
 
       <div className="flex items-center gap-3 px-3.5 py-3">
         <span
-          className="grid h-9 w-9 flex-none place-items-center rounded-xl"
-          style={{ background: `color-mix(in oklab, ${accent} 16%, transparent)`, color: accent }}
+          className="grid h-9 w-9 flex-none place-items-center rounded-xl ring-1 ring-inset"
+          style={{
+            background: `color-mix(in oklab, ${accent} 18%, transparent)`,
+            color: accent,
+            boxShadow: `0 0 0 1px color-mix(in oklab, ${accent} 22%, transparent)`,
+          }}
           aria-hidden="true"
         >
           <svg
@@ -201,7 +246,7 @@ export function FlowNodeCard({ data, selected }: NodeProps<FlowNode>) {
           </div>
         ))}
       </div>
-    </div>
+    </motion.div>
   );
 }
 
