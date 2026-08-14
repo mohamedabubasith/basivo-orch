@@ -27,6 +27,7 @@ dependencies = [
     "httpx-oauth>=0.16.0",
     "authlib>=1.3.2",
     "qrcode[pil]>=8.0",
+    "pydantic-ai[bedrock,cohere,groq,huggingface,mistral,xai]>=2.27.1",
 ]
 
 [dependency-groups]

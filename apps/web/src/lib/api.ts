@@ -186,6 +186,12 @@ async function toError(response: Response): Promise<ApiError> {
       detail = raw.map((e: { msg?: string }) => e?.msg ?? "Invalid value").join(". ");
     } else if (raw && typeof raw === "object" && typeof raw.reason === "string") {
       detail = raw.reason;
+    } else if (raw && typeof raw === "object" && typeof raw.message === "string") {
+      // The graph-rejection shape: `{"detail": {"message": "...", "problems":
+      // [...]}}`. Without this branch, `err.message` fell through to
+      // `response.statusText` — every failed publish or test run read as the
+      // bare phrase "Unprocessable Entity" instead of why it was rejected.
+      detail = raw.message;
     }
     if (typeof data?.detail === "string") code = data.detail;
   } catch {

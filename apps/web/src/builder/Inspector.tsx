@@ -13,10 +13,19 @@
  * the floor rather than the ceiling.
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
+import { api } from "../lib/api";
 import { cx } from "../lib/cx";
+import { PROVIDERS } from "./providers";
 import type { NodeSpec } from "./specs";
+
+interface CredentialOption {
+  id: string;
+  name: string;
+  provider: string;
+  hint: string;
+}
 
 interface SchemaField {
   key: string;
@@ -44,7 +53,19 @@ export interface JsonSchema {
   additionalProperties?: boolean | JsonSchema;
 }
 
-/** Resolve `$ref`, and collapse the `anyOf: [T, null]` pydantic emits for optionals. */
+/**
+ * Resolve `$ref`, and collapse the `anyOf: [T, null]` pydantic emits for
+ * optionals.
+ *
+ * Pydantic puts `title` and `description` on the *outer* `X | None` wrapper,
+ * not on its concrete branch — `{"anyOf": [{"type": "number"}, {"type":
+ * "null"}], "title": "Temperature"}"`. Keeping only the concrete branch (as an
+ * earlier version of this did) discards that wrapper and with it the title —
+ * every optional field on every node rendered labelled by its raw snake_case
+ * key instead of its name. The outer schema's `title`/`description` win when
+ * present; the concrete branch's are the fallback for the plain, non-optional
+ * case this function also handles.
+ */
 function resolve(schema: JsonSchema, root: JsonSchema): JsonSchema {
   if (schema.$ref) {
     const name = schema.$ref.replace("#/$defs/", "");
@@ -52,7 +73,15 @@ function resolve(schema: JsonSchema, root: JsonSchema): JsonSchema {
   }
   if (schema.anyOf) {
     const concrete = schema.anyOf.find((option) => option.type !== "null");
-    if (concrete) return { ...resolve(concrete, root), default: schema.default };
+    if (concrete) {
+      const resolved = resolve(concrete, root);
+      return {
+        ...resolved,
+        title: schema.title ?? resolved.title,
+        description: schema.description ?? resolved.description,
+        default: schema.default,
+      };
+    }
   }
   return schema;
 }
@@ -79,6 +108,7 @@ export function Inspector({
   name,
   config,
   problem,
+  orgId,
   onRename,
   onChange,
   onDelete,
@@ -88,6 +118,8 @@ export function Inspector({
   name: string;
   config: Record<string, unknown>;
   problem?: string;
+  /** Only needed for the Agent node's credential picker. */
+  orgId?: string | null;
   onRename: (name: string) => void;
   onChange: (config: Record<string, unknown>) => void;
   onDelete: () => void;
@@ -95,6 +127,7 @@ export function Inspector({
 }) {
   const schema = spec.config_schema as JsonSchema;
   const list = fields(schema);
+  const isAgent = spec.type === "agent.llm";
 
   function set(key: string, value: unknown) {
     const next = { ...config };
@@ -150,7 +183,28 @@ export function Inspector({
             required={field.required}
             hint={field.description}
           >
-            <FieldInput field={field} value={config[field.key]} onChange={(v) => set(field.key, v)} />
+            {isAgent && field.key === "provider" ? (
+              <select
+                value={String(config.provider ?? PROVIDERS[0].value)}
+                onChange={(event) => set("provider", event.target.value)}
+                className={INPUT}
+              >
+                {PROVIDERS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            ) : isAgent && field.key === "credential_id" ? (
+              <CredentialPicker
+                orgId={orgId}
+                provider={String(config.provider ?? PROVIDERS[0].value)}
+                value={String(config.credential_id ?? "")}
+                onChange={(v) => set("credential_id", v)}
+              />
+            ) : (
+              <FieldInput field={field} value={config[field.key]} onChange={(v) => set(field.key, v)} />
+            )}
           </Labelled>
         ))}
       </div>
@@ -193,6 +247,39 @@ function Labelled({
 
 const INPUT =
   "w-full rounded-lg border border-ink-700 bg-ink-950/60 px-2.5 py-2 text-sm text-ink-100 outline-none focus:border-brand-400";
+
+/**
+ * A concrete example rather than an empty `[]`. The Agent node's `tools`
+ * field is an array of objects with its own nested schema — the generic
+ * form here does not build a sub-form per tool, so what stands in for one is
+ * a worked example a person can copy and edit, showing every field a tool
+ * can carry: an HTTP call, and the constant-value stub used to fake one.
+ */
+const TOOLS_EXAMPLE = JSON.stringify(
+  [
+    {
+      name: "get_weather",
+      description: "Look up the current weather for a city.",
+      input_schema: {
+        type: "object",
+        properties: { city: { type: "string" } },
+        required: ["city"],
+      },
+      kind: "http",
+      url: "https://api.example.com/weather?city={{ tool.city }}",
+      method: "GET",
+    },
+    {
+      name: "stub_example",
+      description: "Always returns the same value — useful while testing a flow.",
+      input_schema: { type: "object", properties: {} },
+      kind: "constant",
+      value: "ok",
+    },
+  ],
+  null,
+  1,
+);
 
 function FieldInput({
   field,
@@ -247,7 +334,7 @@ function FieldInput({
       <input
         type="number"
         value={value === undefined || value === null ? "" : String(value)}
-        placeholder={field.default === undefined ? "" : String(field.default)}
+        placeholder={field.default === undefined || field.default === null ? "" : String(field.default)}
         onChange={(event) =>
           onChange(event.target.value === "" ? undefined : Number(event.target.value))
         }
@@ -260,13 +347,19 @@ function FieldInput({
   // the eventual answer; until then this is at least honest about what it is,
   // and it refuses to hand back invalid JSON rather than saving a broken config.
   if (field.type === "object" || field.type === "array") {
-    return <JsonInput value={value} placeholder={field.type === "array" ? "[]" : "{}"} onChange={onChange} />;
+    return (
+      <JsonInput
+        value={value}
+        placeholder={field.key === "tools" ? TOOLS_EXAMPLE : field.type === "array" ? "[]" : "{}"}
+        onChange={onChange}
+      />
+    );
   }
 
   return (
     <input
       value={value === undefined || value === null ? "" : String(value)}
-      placeholder={field.default === undefined ? "" : String(field.default)}
+      placeholder={field.default === undefined || field.default === null ? "" : String(field.default)}
       onChange={(event) => onChange(event.target.value)}
       className={cx(INPUT, "font-mono text-[0.8rem]")}
     />
@@ -323,5 +416,72 @@ function JsonInput({
         </p>
       )}
     </>
+  );
+}
+
+/**
+ * The Agent node's credential field.
+ *
+ * A plain text input here would ask someone to paste an id they have never
+ * seen — `credential_id` is a UUID, not something a person picks out of thin
+ * air. This fetches the workspace's saved credentials, filters to ones that
+ * match the selected provider (the API rejects a mismatch at run time — see
+ * `AgentNode._build_model` — so surfacing the same rule here keeps a person
+ * from picking a combination that is going to fail), and falls back to naming
+ * a real path when none exist: use the server's own environment-variable key,
+ * or go create one.
+ */
+function CredentialPicker({
+  orgId,
+  provider,
+  value,
+  onChange,
+}: {
+  orgId?: string | null;
+  provider: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  const [credentials, setCredentials] = useState<CredentialOption[] | null>(null);
+
+  useEffect(() => {
+    if (!orgId) return;
+    let cancelled = false;
+    api
+      .get<CredentialOption[]>(`/api/v1/orgs/${orgId}/credentials`)
+      .then((list) => !cancelled && setCredentials(list))
+      .catch(() => !cancelled && setCredentials([]));
+    return () => {
+      cancelled = true;
+    };
+  }, [orgId]);
+
+  const matching = (credentials ?? []).filter((c) => c.provider === provider);
+
+  return (
+    <div>
+      <select value={value} onChange={(event) => onChange(event.target.value)} className={INPUT}>
+        <option value="">Use the server's own key (no credential)</option>
+        {matching.map((credential) => (
+          <option key={credential.id} value={credential.id}>
+            {credential.name} (…{credential.hint || "????"})
+          </option>
+        ))}
+      </select>
+      {credentials !== null && matching.length === 0 && (
+        <p className="mt-1.5 text-[0.68rem] leading-relaxed text-ink-500">
+          No saved credential for this provider yet.{" "}
+          <a
+            href="/app/credentials"
+            target="_blank"
+            rel="noreferrer"
+            className="text-ink-300 underline decoration-dotted underline-offset-2 hover:text-ink-100"
+          >
+            Add one
+          </a>
+          , or leave this on the server's key if one is configured.
+        </p>
+      )}
+    </div>
   );
 }

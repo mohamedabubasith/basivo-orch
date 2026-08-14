@@ -146,6 +146,16 @@ const NAV: { heading: string; items: NavItem[] }[] = [
         ),
       },
       {
+        to: "/app/credentials",
+        label: "Credentials",
+        icon: (
+          <svg viewBox="0 0 24 24" {...stroke}>
+            <rect x="4" y="10.5" width="16" height="9" rx="2" />
+            <path d="M8 10.5V7a4 4 0 0 1 8 0v3.5" />
+          </svg>
+        ),
+      },
+      {
         to: "/app/security",
         label: "Security",
         icon: (

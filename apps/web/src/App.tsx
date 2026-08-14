@@ -4,11 +4,13 @@ import { AuthProvider } from "./lib/auth";
 import { ThemeProvider } from "./lib/theme";
 import { Landing } from "./routes/Landing";
 import { ApiKeys } from "./routes/app/ApiKeys";
+import { Credentials } from "./routes/app/Credentials";
 import { AppShell, RequireAuth, RequireVerified } from "./routes/app/AppShell";
 import { Builder } from "./routes/app/Builder";
 import { Dashboard } from "./routes/app/Dashboard";
 import { EmailGate } from "./routes/app/EmailGate";
 import { Flows } from "./routes/app/Flows";
+import { RunDetail } from "./routes/app/RunDetail";
 import { Runs } from "./routes/app/Runs";
 import { Security } from "./routes/app/Security";
 import { ForgotPassword } from "./routes/auth/ForgotPassword";
@@ -64,7 +66,9 @@ function AppRoutes() {
             <Route index element={<Dashboard />} />
             <Route path="flows" element={<Flows />} />
             <Route path="runs" element={<Runs />} />
+            <Route path="runs/:runId" element={<RunDetail />} />
             <Route path="api-keys" element={<ApiKeys />} />
+            <Route path="credentials" element={<Credentials />} />
             <Route path="security" element={<Security />} />
           </Route>
         </Route>

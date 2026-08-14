@@ -26,7 +26,14 @@ from basivo_orch.flows import nodes as node_registry
 from basivo_orch.flows.events import EventWriter, RedisClient
 from basivo_orch.flows.graph import Graph, topological_order
 from basivo_orch.flows.models import NodeExecution, NodeStatus, Run, RunStatus
-from basivo_orch.flows.nodes.base import DEFAULT_PORT, NodeContext, NodeError, NodeResult, summarise
+from basivo_orch.flows.nodes.base import (
+    DEFAULT_PORT,
+    NodeContext,
+    NodeError,
+    NodeResult,
+    ResolvedCredential,
+    summarise,
+)
 from basivo_orch.logging import get_logger
 
 log = get_logger(__name__)
@@ -63,6 +70,38 @@ class Engine:
         self.variables: dict[str, Any] = {}
         #: node_id -> set of ports that delivered into it.
         self._arrivals: dict[str, set[str]] = defaultdict(set)
+
+    async def _resolve_credential(self, credential_id: str) -> ResolvedCredential | None:
+        """Decrypt one credential, scoped to this run's workspace.
+
+        Lives on the engine, not the node, because the engine is the one thing
+        that holds a database session — keeping SQL out of node code is what
+        lets a node's config be validated and displayed without ever touching
+        the database.
+        """
+        import uuid as _uuid
+
+        from basivo_orch.credentials.crypto import decrypt
+        from basivo_orch.credentials.models import Credential
+
+        try:
+            credential_uuid = _uuid.UUID(credential_id)
+        except ValueError:
+            return None
+
+        record = await self.session.get(Credential, credential_uuid)
+        if record is None or record.organization_id != self.run.organization_id:
+            return None
+
+        record.last_used_at = datetime.now(UTC)
+        await self.session.commit()
+
+        return ResolvedCredential(
+            provider=record.provider,
+            api_key=decrypt(record.secret_encrypted),
+            base_url=record.base_url,
+            options=record.options,
+        )
 
     async def execute(self) -> Run:
         http = self._http or httpx.AsyncClient(
@@ -247,6 +286,29 @@ class Engine:
                     },
                 )
 
+            async def step(
+                kind: str, data: dict[str, Any], _node: Any = node, _attempt: int = attempt
+            ) -> None:
+                """One structured step inside a node execution.
+
+                Emitted as its own event rather than folded into the node's row:
+                an agent performs several model calls and several tool calls per
+                execution, and a single row cannot say which tool ran, what it
+                cost, or in what order. `run_event` already gives these a
+                gapless order and replay for free.
+                """
+                await self.events.emit(
+                    "node.step",
+                    {
+                        "node": _node.name or _node.id,
+                        "node_id": _node.id,
+                        "node_type": _node.type,
+                        "attempt": _attempt,
+                        "step": kind,
+                        **data,
+                    },
+                )
+
             ctx = NodeContext(
                 run_id=self.run.id,
                 organization_id=self.run.organization_id,
@@ -258,6 +320,8 @@ class Engine:
                 variables=self.variables,
                 trigger=self.run.input or {},
                 progress=progress,
+                step=step,
+                resolve_credential=self._resolve_credential,
                 http=http,
             )
 

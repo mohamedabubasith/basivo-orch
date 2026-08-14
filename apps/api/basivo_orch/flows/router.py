@@ -26,7 +26,7 @@ from basivo_orch.flows import analytics as analytics_module
 from basivo_orch.flows import nodes as node_registry
 from basivo_orch.flows import service
 from basivo_orch.flows.apikeys import ApiCaller, generate_key, require_api_key
-from basivo_orch.flows.events import RedisClient
+from basivo_orch.flows.events import RedisClient, replay
 from basivo_orch.flows.graph import Graph, GraphError
 from basivo_orch.flows.models import ApiKey, Flow, FlowVersion, Run, RunStatus, TriggerKind
 from basivo_orch.flows.schemas import (
@@ -54,9 +54,15 @@ def get_redis(request: Request) -> RedisClient | None:
 
 
 def _graph_error(exc: GraphError) -> HTTPException:
+    # Not `{"detail": "...", "problems": [...]}`: FastAPI wraps whatever is
+    # passed here inside its own top-level `{"detail": ...}` envelope, so a
+    # key here also named "detail" produced a doubled `{"detail": {"detail":
+    # ..., "problems": [...]}}` — a shape the frontend's error parser never
+    # matched, so every failed publish or test run surfaced as the raw HTTP
+    # phrase "Unprocessable Entity" instead of the actual reason.
     return HTTPException(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-        detail={"detail": "This flow cannot run yet.", "problems": exc.problems},
+        detail={"message": "This flow cannot run yet.", "problems": exc.problems},
     )
 
 
@@ -333,6 +339,44 @@ async def read_run(
 ) -> RunDetail:
     """A run and its full node-level log — SOW section 3."""
     return await _run_detail(session, context.organization_id, run_id)
+
+
+@management_router.get("/orgs/{organization_id}/runs/{run_id}/events")
+async def run_events(
+    run_id: uuid.UUID,
+    after: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=5000)] = 2000,
+    context: OrgContext = Depends(require(Permission.RUN_READ)),
+    session: AsyncSession = Depends(get_async_session),
+) -> dict[str, Any]:
+    """The full event log for one run, in order.
+
+    The stream endpoint answers "what is happening"; this answers "what
+    happened", a different question with a different shape. A finished run has
+    no live tail to attach to, and opening an SSE connection just to read
+    history would make the client reimplement ordering and termination to
+    render a page that will never change again.
+
+    This is where per-step agent detail surfaces: every model turn, tool call,
+    token count and cost is a `node.step` event, ordered by the same gapless
+    sequence the live stream uses — see `basivo_orch/flows/nodes/agent.py`.
+    """
+    # Ownership check first: without it, any member of any org could read any
+    # run's events by guessing an id.
+    if (
+        await service.get_run(session, organization_id=context.organization_id, run_id=run_id)
+        is None
+    ):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No such run.")
+
+    events = await replay(session, run_id, after=after, limit=limit)
+    return {
+        "events": [
+            {"seq": event.seq, "type": event.type, "data": event.data, "at": event.created_at}
+            for event in events
+        ],
+        "next_after": events[-1].seq if events else after,
+    }
 
 
 @management_router.get("/orgs/{organization_id}/runs/{run_id}/stream")

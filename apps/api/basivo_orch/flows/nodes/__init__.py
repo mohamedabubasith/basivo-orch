@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from basivo_orch.flows.nodes.agent import AgentNode
 from basivo_orch.flows.nodes.base import (
     DEFAULT_PORT,
     Node,
@@ -34,6 +35,7 @@ _NODES: tuple[type[Node], ...] = (
     HttpRequestNode,
     ConditionNode,
     SetVariablesNode,
+    AgentNode,
 )
 
 REGISTRY: dict[str, type[Node]] = {node.type: node for node in _NODES}

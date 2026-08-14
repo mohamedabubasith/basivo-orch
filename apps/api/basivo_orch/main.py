@@ -13,6 +13,7 @@ from basivo_orch import __version__
 from basivo_orch.auth.router import auth_router, install_auth
 from basivo_orch.auth.settings import get_settings as get_auth_settings
 from basivo_orch.config import get_settings
+from basivo_orch.credentials.router import router as credentials_router
 from basivo_orch.db import dispose_engine
 from basivo_orch.flows.events import RedisClient
 from basivo_orch.flows.router import external_router, management_router
@@ -114,6 +115,7 @@ def create_app() -> FastAPI:
     # The orchestrator's own API. Management is versioned; execution sits at
     # the paths the SOW specifies, because those go into other people's code.
     app.include_router(management_router, prefix=settings.API_V1_PREFIX)
+    app.include_router(credentials_router, prefix=settings.API_V1_PREFIX)
     app.include_router(external_router)
 
     @app.get("/health", tags=["ops"])

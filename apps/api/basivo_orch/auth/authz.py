@@ -119,6 +119,13 @@ class Permission(StrEnum):
     APIKEY_CREATE = "apikey:create"
     APIKEY_REVOKE = "apikey:revoke"
 
+    #: Listing returns names and hints, never the secret — so a member can pick
+    #: a credential for an Agent node without holding the authority to create
+    #: or delete one.
+    CREDENTIAL_READ = "credential:read"
+    CREDENTIAL_CREATE = "credential:create"
+    CREDENTIAL_DELETE = "credential:delete"
+
 
 #: Which permissions each role carries. The single source of truth for authority.
 #:
@@ -145,6 +152,7 @@ ROLE_PERMISSIONS: dict[Role, frozenset[Permission]] = {
             Permission.FLOW_RUN,
             Permission.RUN_READ,
             Permission.RUN_CANCEL,
+            Permission.CREDENTIAL_READ,
         }
     ),
     Role.ADMIN: frozenset(
@@ -169,6 +177,12 @@ ROLE_PERMISSIONS: dict[Role, frozenset[Permission]] = {
             Permission.APIKEY_READ,
             Permission.APIKEY_CREATE,
             Permission.APIKEY_REVOKE,
+            # Credentials are provider secrets. Creating and revoking them is
+            # admin-level for the same reason API keys are: getting it wrong
+            # is not "this run failed", it is "this org's spend is exposed".
+            Permission.CREDENTIAL_READ,
+            Permission.CREDENTIAL_CREATE,
+            Permission.CREDENTIAL_DELETE,
         }
     ),
     Role.OWNER: frozenset(Permission),

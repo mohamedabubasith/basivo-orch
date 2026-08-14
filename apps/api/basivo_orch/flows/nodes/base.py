@@ -30,6 +30,21 @@ DEFAULT_PORT = "out"
 ConfigModel = type[BaseModel]
 
 
+@dataclass(frozen=True, slots=True)
+class ResolvedCredential:
+    """A stored provider credential, decrypted, for the duration of one call.
+
+    Deliberately not the ORM row: a node has no business knowing the storage
+    shape, only that it got a provider name, a secret, and whatever else that
+    provider's SDK constructor wants.
+    """
+
+    provider: str
+    api_key: str
+    base_url: str | None
+    options: dict[str, Any]
+
+
 class NodeError(Exception):
     """A node failed in a way worth reporting to the flow's author.
 
@@ -65,6 +80,25 @@ class NodeContext:
     #: Push a human-readable progress line to anyone streaming this run.
     #: Section 4's SSE contract has a `progress` field; this is what fills it.
     progress: Callable[[str], Awaitable[None]]
+
+    #: Look up a stored credential by id, decrypted and scoped to this run's
+    #: workspace. Returns `None` if it does not exist or belongs to another
+    #: workspace — the two are indistinguishable on purpose, the same way a
+    #: 404 and a cross-tenant read both just fail rather than leaking which.
+    resolve_credential: Callable[[str], Awaitable[ResolvedCredential | None]]
+
+    #: Push a *structured* step to the run's event log.
+    #:
+    #: `progress` carries a sentence for a human watching a stream. It is the
+    #: wrong shape for what happens inside a capability node: an agent makes
+    #: several model calls and several tool calls per execution, and "what did
+    #: it actually do, what did each part cost" cannot be answered by parsing
+    #: prose back out of a log line.
+    #:
+    #: Steps land in `run_event`, which is already append-only with a gapless
+    #: per-run sequence — so the step log is durable, replayable and survives a
+    #: dropped connection, for free. One node execution owns many steps.
+    step: Callable[[str, dict[str, Any]], Awaitable[None]]
 
     http: httpx.AsyncClient
 

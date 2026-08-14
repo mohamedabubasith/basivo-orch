@@ -8,6 +8,7 @@
 
 import { motion } from "motion/react";
 import { useCallback, useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 
 import { api } from "../../lib/api";
 import { cx } from "../../lib/cx";
@@ -28,6 +29,11 @@ interface Run {
   duration_ms: number | null;
 }
 
+interface FlowOption {
+  id: string;
+  name: string;
+}
+
 const FILTERS = [
   { key: "all", label: "All" },
   { key: "failed", label: "Failed" },
@@ -38,15 +44,28 @@ const FILTERS = [
 export function Runs() {
   const { orgId } = useWorkspace();
   const [runs, setRuns] = useState<Run[] | null>(null);
+  const [flows, setFlows] = useState<FlowOption[]>([]);
+  const [flowId, setFlowId] = useState<string>("all");
   const [filter, setFilter] = useState<(typeof FILTERS)[number]["key"]>("all");
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!orgId) return;
+    void api
+      .get<FlowOption[]>(`/api/v1/orgs/${orgId}/flows`)
+      .then(setFlows)
+      .catch(() => setFlows([]));
+  }, [orgId]);
 
   const load = useCallback(async () => {
     if (!orgId) return;
     // `run_status`, not `status`. FastAPI ignores unknown query params rather
     // than rejecting them, so the wrong name here is a filter that silently
     // returns everything and looks like it worked.
-    const query = filter === "all" ? "" : `?run_status=${filter}`;
+    const params = new URLSearchParams();
+    if (filter !== "all") params.set("run_status", filter);
+    if (flowId !== "all") params.set("flow_id", flowId);
+    const query = params.toString() ? `?${params.toString()}` : "";
     try {
       setRuns(await api.get<Run[]>(`/api/v1/orgs/${orgId}/runs${query}`));
       setError(null);
@@ -54,7 +73,7 @@ export function Runs() {
       setError("Could not load runs.");
       setRuns([]);
     }
-  }, [orgId, filter]);
+  }, [orgId, filter, flowId]);
 
   useEffect(() => {
     void load();
@@ -79,8 +98,9 @@ export function Runs() {
         subtitle="Every execution, with what it cost and what went wrong."
       />
 
-      <div className="flex items-center gap-1 self-start rounded-xl border border-ink-700/60 bg-ink-900/50 p-1">
-        {FILTERS.map((option) => (
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex items-center gap-1 self-start rounded-xl border border-ink-700/60 bg-ink-900/50 p-1">
+          {FILTERS.map((option) => (
           <button
             key={option.key}
             onClick={() => setFilter(option.key)}
@@ -96,9 +116,23 @@ export function Runs() {
                 transition={{ type: "spring", stiffness: 380, damping: 30 }}
               />
             )}
-            <span className="relative">{option.label}</span>
-          </button>
-        ))}
+              <span className="relative">{option.label}</span>
+            </button>
+          ))}
+        </div>
+
+        <select
+          value={flowId}
+          onChange={(event) => setFlowId(event.target.value)}
+          className="rounded-xl border border-ink-700/60 bg-ink-900/50 px-3 py-1.5 text-sm text-ink-200 outline-none focus:border-brand-400"
+        >
+          <option value="all">All flows</option>
+          {flows.map((flow) => (
+            <option key={flow.id} value={flow.id}>
+              {flow.name}
+            </option>
+          ))}
+        </select>
       </div>
 
       {error && <Alert>{error}</Alert>}
@@ -124,7 +158,10 @@ export function Runs() {
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: Math.min(index * 0.02, 0.2), duration: 0.22 }}
             >
-              <div className="surface rounded-xl p-4">
+              <Link
+                to={`/app/runs/${run.id}`}
+                className="surface block rounded-xl p-4 transition-colors hover:border-ink-500"
+              >
                 <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
                   <StatusLabel status={run.status} />
                   <span className="font-mono text-xs text-ink-500">{run.id.slice(0, 8)}</span>
@@ -145,7 +182,7 @@ export function Runs() {
                     {run.error}
                   </p>
                 )}
-              </div>
+              </Link>
             </motion.li>
           ))}
         </ul>

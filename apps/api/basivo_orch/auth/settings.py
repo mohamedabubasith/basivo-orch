@@ -163,6 +163,14 @@ class Settings(BaseSettings):
     Set this to the real number — guessing high lets a client forge its own
     address by prepending entries, which defeats every IP-keyed control here."""
 
+    # -- Models ------------------------------------------------------------
+    anthropic_api_key: SecretStr = SecretStr("")
+    """Server-side key for the Agent node.
+
+    Kept here rather than in each node's config so a key is not copied into
+    every flow's graph — graphs are readable by anyone who can read the flow,
+    and a per-node key would be stored in plain JSON in the database."""
+
     # -- Email -------------------------------------------------------------
     email_provider: str = "webhook"
     email_from: str = "no-reply@basivo-orch-api.local"

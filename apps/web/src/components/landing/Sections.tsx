@@ -241,9 +241,10 @@ export function Hero() {
           </h1>
 
           <p className="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-pretty text-ink-300">
-            Build multi-step agent workflows visually. Then see every run,
-            every step, every retry and every token — streamed live and kept,
-            so a failure at 3am is something you can read rather than guess at.
+            Drag nodes onto a canvas to build an agent pipeline, then watch it
+            run live. Which step ran, what tool it called, how many tokens it
+            used, what it cost. When something breaks at 3am, you read what
+            happened instead of guessing.
           </p>
 
           <div className="mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row">
@@ -259,9 +260,7 @@ export function Hero() {
             </a>
           </div>
 
-          <p className="mt-4 text-sm text-ink-500">
-            No credit card. Self-host or cloud.
-          </p>
+          <p className="mt-4 text-sm text-ink-500">Self-host or cloud.</p>
         </motion.div>
 
         <motion.div

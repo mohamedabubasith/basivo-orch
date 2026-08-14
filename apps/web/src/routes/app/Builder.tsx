@@ -37,6 +37,7 @@ import {
 import "@xyflow/react/dist/style.css";
 
 import { ApiError, api } from "../../lib/api";
+import { cx } from "../../lib/cx";
 import { WorkspaceProvider, useWorkspace } from "../../lib/workspace";
 import { ThemeToggle } from "../../components/ThemeToggle";
 import { Alert, Button, PageLoader } from "../../components/ui";
@@ -225,7 +226,21 @@ function BuilderInner() {
     });
   }
 
+  const hasTrigger = nodes.some((node) => node.data.isTrigger);
+
   function addNode(spec: NodeSpec, position: { x: number; y: number }) {
+    // The engine rejects a graph with more than one trigger — see
+    // `validate_graph` in graph.py — because a flow needs exactly one thing
+    // that decides when it runs. Refusing here means the author finds out
+    // when they try to add the second one, not several clicks later when
+    // Validate rejects a graph they thought was finished.
+    if (spec.is_trigger && hasTrigger) {
+      setBanner({
+        tone: "bad",
+        text: "A flow can only have one trigger. Delete the existing one first.",
+      });
+      return;
+    }
     const id = makeNodeId(spec.type, new Set(nodes.map((node) => node.id)));
     setNodes((current) => [
       ...current,
@@ -477,7 +492,7 @@ function BuilderInner() {
       )}
 
       <div className="flex min-h-0 flex-1 overflow-hidden">
-        <Palette specs={specs} onAdd={(spec) => addNode(spec, nextSlot())} />
+        <Palette specs={specs} hasTrigger={hasTrigger} onAdd={(spec) => addNode(spec, nextSlot())} />
 
         <div
           ref={canvasRef}
@@ -491,10 +506,10 @@ function BuilderInner() {
             const type = event.dataTransfer.getData("application/basivo-node");
             const spec = specMap.get(type);
             if (!spec) return;
-            addNode(
-              spec,
-              screenToFlowPosition({ x: event.clientX, y: event.clientY }),
-            );
+            // addNode itself refuses a second trigger, so a drag that gets
+            // this far still cannot land one — this only stops the drop from
+            // silently doing nothing when the palette already blocked the drag.
+            addNode(spec, screenToFlowPosition({ x: event.clientX, y: event.clientY }));
           }}
         >
           <div className="relative min-h-0 flex-1">
@@ -550,6 +565,7 @@ function BuilderInner() {
             name={selectedNode.data.label}
             config={selectedNode.data.config}
             problem={selectedNode.data.problem}
+            orgId={orgId}
             onRename={(name) =>
               updateSelected((node) => ({ ...node, data: { ...node.data, label: name } }))
             }
@@ -568,7 +584,15 @@ function BuilderInner() {
 
 /* --------------------------------------------------------------- palette --- */
 
-function Palette({ specs, onAdd }: { specs: NodeSpec[]; onAdd: (spec: NodeSpec) => void }) {
+function Palette({
+  specs,
+  hasTrigger,
+  onAdd,
+}: {
+  specs: NodeSpec[];
+  hasTrigger: boolean;
+  onAdd: (spec: NodeSpec) => void;
+}) {
   const groups = useMemo(() => groupSpecs(specs), [specs]);
 
   return (
@@ -579,16 +603,28 @@ function Palette({ specs, onAdd }: { specs: NodeSpec[]; onAdd: (spec: NodeSpec) 
             {group.heading}
           </p>
           <ul className="space-y-1">
-            {group.specs.map((spec) => (
+            {group.specs.map((spec) => {
+              // A flow needs exactly one trigger, so once one exists the rest
+              // of the palette's triggers are shown but not offered — visible
+              // for context (this is what started the flow), disabled so a
+              // click or drag cannot produce a rejected graph.
+              const blocked = spec.is_trigger && hasTrigger;
+              return (
               <li key={spec.type}>
                 <button
-                  draggable
+                  draggable={!blocked}
                   onDragStart={(event) =>
                     event.dataTransfer.setData("application/basivo-node", spec.type)
                   }
-                  onClick={() => onAdd(spec)}
-                  title={spec.description}
-                  className="w-full cursor-grab rounded-lg border border-ink-700/60 bg-ink-850/60 px-2.5 py-2 text-left transition-colors hover:border-ink-600 active:cursor-grabbing"
+                  onClick={() => !blocked && onAdd(spec)}
+                  disabled={blocked}
+                  title={blocked ? "A flow can only have one trigger." : spec.description}
+                  className={cx(
+                    "w-full rounded-lg border border-ink-700/60 bg-ink-850/60 px-2.5 py-2 text-left transition-colors",
+                    blocked
+                      ? "cursor-not-allowed opacity-40"
+                      : "cursor-grab hover:border-ink-600 active:cursor-grabbing",
+                  )}
                 >
                   <span className="block truncate text-xs text-ink-200">{spec.label}</span>
                   <span className="block truncate font-mono text-[0.62rem] text-ink-500">
@@ -596,7 +632,8 @@ function Palette({ specs, onAdd }: { specs: NodeSpec[]; onAdd: (spec: NodeSpec) 
                   </span>
                 </button>
               </li>
-            ))}
+              );
+            })}
           </ul>
         </div>
       ))}
@@ -693,6 +730,12 @@ function detailFor(execution: NodeExecution): string | undefined {
  */
 function extractProblems(error: unknown): string[] {
   if (!(error instanceof ApiError)) return [];
-  const problems = (error.body as { problems?: unknown } | undefined)?.problems;
+  // `error.body` is the whole response JSON. FastAPI wraps whatever an
+  // HTTPException's `detail=` carries inside its own top-level `detail` key,
+  // so a rejected graph's problem list is one level deeper than it looks:
+  // `{"detail": {"message": "...", "problems": [...]}}` — see `_graph_error`
+  // in `basivo_orch/flows/router.py`.
+  const body = error.body as { detail?: { problems?: unknown } } | undefined;
+  const problems = body?.detail?.problems;
   return Array.isArray(problems) ? problems.map(String) : [];
 }
