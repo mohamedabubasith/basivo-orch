@@ -333,7 +333,7 @@ function SidebarContent({ collapsed, onToggle }: { collapsed: boolean; onToggle?
                     {({ isActive }) => (
                       <span
                         className={cx(
-                          "relative flex items-center rounded-xl py-2 text-sm transition-colors",
+                          "relative flex items-center rounded-lg py-2 text-sm transition-colors",
                           collapsed ? "justify-center px-2" : "gap-3 px-3",
                           isActive ? "text-ink-100" : "text-ink-400 hover:text-ink-100",
                         )}
@@ -344,14 +344,14 @@ function SidebarContent({ collapsed, onToggle }: { collapsed: boolean; onToggle?
                         {isActive && (
                           <motion.span
                             layoutId="nav-active"
-                            className="absolute inset-0 rounded-xl bg-ink-800"
+                            className="absolute inset-0 rounded-lg border border-[var(--edge)] bg-ink-800"
                             transition={{ type: "spring", stiffness: 400, damping: 34 }}
                           />
                         )}
                         {isActive && !collapsed && (
                           <motion.span
                             layoutId="nav-rail"
-                            className="absolute top-1.5 bottom-1.5 -left-3 w-[3px] rounded-r-full bg-brand-400"
+                            className="absolute top-1/2 -left-1 h-1.5 w-1.5 -translate-y-1/2 rounded-full bg-brand-400"
                             transition={{ type: "spring", stiffness: 400, damping: 34 }}
                           />
                         )}

@@ -30,16 +30,18 @@ export function Button({
   ...rest
 }: ButtonProps) {
   const base =
-    "group relative inline-flex items-center justify-center gap-2 overflow-hidden rounded-xl " +
-    "font-medium transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-55 " +
+    "group relative inline-flex items-center justify-center gap-2 rounded-lg " +
+    "font-medium transition-all duration-150 disabled:cursor-not-allowed disabled:opacity-55 " +
     "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-400";
 
   const variants = {
+    // A crisp solid with a hairline top-light, not a coloured glow — drop
+    // shadows in the button's own hue are the fastest way to look like 2021.
     primary:
-      "bg-brand-500 text-white shadow-lg shadow-brand-500/25 " +
-      "hover:bg-brand-400 hover:shadow-brand-500/40 hover:-translate-y-px active:translate-y-0",
+      "bg-brand-500 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_1px_2px_rgba(0,0,0,0.25)] " +
+      "hover:bg-brand-400 active:bg-brand-500",
     secondary:
-      "surface text-ink-100 hover:border-ink-500 hover:bg-ink-800/80 hover:-translate-y-px active:translate-y-0",
+      "border border-[var(--edge-strong)] bg-ink-850 text-ink-100 hover:bg-ink-800",
     ghost: "text-ink-300 hover:text-ink-100 hover:bg-ink-800/60",
   } as const;
 
@@ -65,16 +67,6 @@ export function Button({
         </span>
       )}
 
-      {/* Sheen on hover. Purely decorative, and pointer-events-none so it can
-          never intercept the click. */}
-      {variant === "primary" && (
-        <span
-          aria-hidden="true"
-          className="pointer-events-none absolute inset-0 -translate-x-full bg-gradient-to-r
-                     from-transparent via-white/20 to-transparent transition-transform
-                     duration-700 group-hover:translate-x-full motion-reduce:hidden"
-        />
-      )}
     </button>
   );
 }
@@ -146,9 +138,9 @@ export const Field = forwardRef<HTMLInputElement, FieldProps>(function Field(
           aria-describedby={describedBy}
           aria-invalid={error ? true : undefined}
           className={cx(
-            "w-full rounded-xl border bg-ink-900/70 px-3.5 py-2.5 text-[0.95rem] text-ink-100",
-            "placeholder:text-ink-500 transition-all duration-200",
-            "focus:border-brand-400 focus:bg-ink-900 focus:ring-4 focus:ring-brand-500/15 focus:outline-none",
+            "w-full rounded-lg border bg-ink-900/70 px-3.5 py-2.5 text-[0.95rem] text-ink-100",
+            "placeholder:text-ink-500 transition-all duration-150",
+            "focus:border-brand-400 focus:bg-ink-900 focus:ring-[3px] focus:ring-brand-500/15 focus:outline-none",
             "disabled:cursor-not-allowed disabled:opacity-60",
             revealable && "pr-11",
             error ? "border-err-500/70" : "border-ink-600/70 hover:border-ink-500",
@@ -255,7 +247,7 @@ export function Alert({
 /* -------------------------------------------------------------- layout --- */
 
 export function Card({ children, className }: { children: ReactNode; className?: string }) {
-  return <div className={cx("surface rounded-2xl", className)}>{children}</div>;
+  return <div className={cx("surface rounded-xl", className)}>{children}</div>;
 }
 
 export function Badge({ children, className }: { children: ReactNode; className?: string }) {
@@ -285,7 +277,7 @@ export function Logo({ className }: { className?: string }) {
         <defs>
           <linearGradient id={gradient} x1="0" y1="0" x2="1" y2="1">
             <stop offset="0%" stopColor="var(--series)" />
-            <stop offset="100%" stopColor="#22d3ee" />
+            <stop offset="100%" stopColor="var(--color-accent-500)" />
           </linearGradient>
         </defs>
         <rect x="2" y="2" width="28" height="28" rx="9" fill={`url(#${gradient})`} opacity="0.16" />

@@ -1,32 +1,38 @@
 @import "tailwindcss";
 
-/* Design tokens. Tailwind v4 reads these straight out of CSS — no JS config. */
+/* Design tokens. Tailwind v4 reads these straight out of CSS — no JS config.
+ *
+ * The scale is positional — 950 is the furthest-back surface, 100 the
+ * brightest text — which is what makes the whole app rethemeable from this
+ * one file. This palette is neutral graphite with one electric violet accent:
+ * the previous navy-tinted dark read as a generic admin template, and blue
+ * greys are the single strongest "dated dashboard" signal there is.
+ */
 @theme {
-  --color-ink-950: #06070c;
-  --color-ink-900: #0a0c14;
-  --color-ink-850: #0f121c;
-  --color-ink-800: #141826;
-  --color-ink-700: #1d2233;
-  --color-ink-600: #2a3145;
-  --color-ink-500: #3d4560;
-  --color-ink-400: #6b7490;
-  --color-ink-300: #9aa2bd;
-  --color-ink-200: #c7cddf;
-  --color-ink-100: #e8ebf4;
+  --color-ink-950: #09090b;
+  --color-ink-900: #0e0e11;
+  --color-ink-850: #131316;
+  --color-ink-800: #1a1a1f;
+  --color-ink-700: #232329;
+  --color-ink-600: #303038;
+  --color-ink-500: #45454f;
+  --color-ink-400: #6e6e7a;
+  --color-ink-300: #9c9ca8;
+  --color-ink-200: #c9c9d3;
+  --color-ink-100: #f1f1f4;
 
-  --color-brand-500: #6366f1;
-  --color-brand-400: #818cf8;
-  --color-brand-300: #a5b4fc;
-  --color-accent-500: #22d3ee;
-  --color-accent-400: #67e8f9;
+  --color-brand-500: #7857ff;
+  --color-brand-400: #937bff;
+  --color-brand-300: #b3a3ff;
+  --color-accent-500: #2dd4bf;
+  --color-accent-400: #5eead4;
 
   --color-ok-500: #34d399;
   --color-warn-500: #fbbf24;
   --color-err-500: #fb7185;
 
-  --font-sans: "Inter var", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
-    sans-serif;
-  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, "SF Mono", Menlo, monospace;
 
   --animate-marquee: marquee 40s linear infinite;
   --animate-pulse-slow: pulse-slow 4s ease-in-out infinite;
@@ -35,107 +41,102 @@
 
 /* --------------------------------------------------------------- theming ---
  *
- * The ink scale is used positionally everywhere — 950 is the furthest back,
- * 100 is the brightest text — so light mode is that scale re-pointed rather
- * than a second set of class names. Every component inherits it for free, and
- * there is no way for one screen to be themed and another not.
- *
- * Dark is the default because that is the product's identity. The system
- * preference is honoured on a first visit; an explicit choice wins over it.
+ * Dark is the default and the identity; light is the same positional scale
+ * re-pointed. An explicit choice sets data-theme; "system" leaves it to the
+ * media query below, which must stay byte-for-byte identical to the
+ * data-theme="light" block.
  */
 :root {
   --status-good: #059669;
   --status-warn: #d97706;
   --status-bad: #e11d48;
-  --series: #818cf8;
-  --series-dim: #3f4468;
-  --canvas-dot: #1d2233;
-  --canvas-line: #171c2b;
-  /* The builder canvas, deliberately its own token rather than reusing
-     ink-950. In light mode ink-950 is pure white — identical to every card
-     sitting on top of it — so the canvas had no depth at all and nodes read
-     as paper cutouts floating on a blank page. Dark mode has no such problem
-     (ink-950 already reads as "the back of the room"), so it stays the same
-     value there. */
-  --canvas-bg: #06070c;
+  --series: #937bff;
+  --series-dim: #3d3654;
+  --canvas-dot: #232329;
+  --canvas-line: #19191e;
+  --canvas-bg: #0b0b0e;
 
-  /* Decorative glow blobs and the grid pattern were tuned once, at a fixed
-     Tailwind opacity fraction (`bg-brand-500/16`, `.grid-bg opacity-[0.16]`),
-     against a near-black background — where a soft, low-opacity tint reads as
-     a visible glow. The same fraction against a near-white background is
-     nearly invisible: light adds to light instead of standing out from it.
-     Every landing/auth screen used the same baked-in fractions, so the
-     washed-out look was systemic, not a one-off — fixed once here rather than
-     patched fraction-by-fraction in four files. */
-  --decor-glow: 0.16;
+  /* Decorative glow/grid opacity is themed, not baked into call sites: a
+     fraction tuned against near-black is invisible against near-white. */
+  --decor-glow: 0.2;
   --decor-grid: 0.16;
+
+  /* Hairlines between surfaces. Alpha over a hue so they sit correctly on
+     every surface level instead of only the one they were sampled against. */
+  --edge: rgba(255, 255, 255, 0.08);
+  --edge-strong: rgba(255, 255, 255, 0.14);
 }
 
 :root[data-theme="light"] {
-  --decor-glow: 0.42;
-  --decor-grid: 0.5;
-
-  --color-ink-950: #ffffff;
-  --color-ink-900: #f6f7fb;
+  --color-ink-950: #fbfbfc;
+  --color-ink-900: #f4f4f6;
   --color-ink-850: #ffffff;
-  --color-ink-800: #eceff6;
-  --color-ink-700: #dfe3ed;
-  --color-ink-600: #c6ccdb;
-  --color-ink-500: #98a0b6;
-  --color-ink-400: #6b7490;
-  --color-ink-300: #4a5270;
-  --color-ink-200: #262d43;
-  --color-ink-100: #0d1120;
+  --color-ink-800: #ececef;
+  --color-ink-700: #dfdfe4;
+  --color-ink-600: #c4c4cc;
+  --color-ink-500: #95959f;
+  --color-ink-400: #6b6b76;
+  --color-ink-300: #4b4b55;
+  --color-ink-200: #28282f;
+  --color-ink-100: #101014;
 
-  --color-brand-500: #4f46e5;
-  --color-brand-400: #4f46e5;
-  --color-brand-300: #6366f1;
-  --color-accent-500: #0891b2;
-  --color-accent-400: #0e7490;
+  --color-brand-500: #6d28d9;
+  --color-brand-400: #7c3aed;
+  --color-brand-300: #8b5cf6;
+  --color-accent-500: #0d9488;
+  --color-accent-400: #0f766e;
 
-  /* Re-stepped for a light surface and validated there — the dark trio sits
-     too light against white to carry 3:1. */
+  /* Validated for a light surface — the dark trio sits too light on white. */
   --status-good: #047857;
   --status-warn: #d97706;
   --status-bad: #9f1239;
-  --series: #4f46e5;
-  --series-dim: #c7d2fe;
-  --canvas-dot: #aeb9d2;
-  --canvas-line: #c6cede;
-  --canvas-bg: #e3e8f2;
+  --series: #6d28d9;
+  --series-dim: #ddd2f7;
+  --canvas-dot: #b9b9c6;
+  --canvas-line: #d9d9e2;
+  --canvas-bg: #ededf1;
+
+  --decor-glow: 0.32;
+  --decor-grid: 0.55;
+
+  --edge: rgba(16, 16, 20, 0.09);
+  --edge-strong: rgba(16, 16, 20, 0.16);
 }
 
 @media (prefers-color-scheme: light) {
   :root:not([data-theme="dark"]):not([data-theme="light"]) {
-    --decor-glow: 0.42;
-    --decor-grid: 0.5;
-
-    --color-ink-950: #ffffff;
-    --color-ink-900: #f6f7fb;
+    --color-ink-950: #fbfbfc;
+    --color-ink-900: #f4f4f6;
     --color-ink-850: #ffffff;
-    --color-ink-800: #eceff6;
-    --color-ink-700: #dfe3ed;
-    --color-ink-600: #c6ccdb;
-    --color-ink-500: #98a0b6;
-    --color-ink-400: #6b7490;
-    --color-ink-300: #4a5270;
-    --color-ink-200: #262d43;
-    --color-ink-100: #0d1120;
+    --color-ink-800: #ececef;
+    --color-ink-700: #dfdfe4;
+    --color-ink-600: #c4c4cc;
+    --color-ink-500: #95959f;
+    --color-ink-400: #6b6b76;
+    --color-ink-300: #4b4b55;
+    --color-ink-200: #28282f;
+    --color-ink-100: #101014;
 
-    --color-brand-500: #4f46e5;
-    --color-brand-400: #4f46e5;
-    --color-brand-300: #6366f1;
-    --color-accent-500: #0891b2;
-    --color-accent-400: #0e7490;
+    --color-brand-500: #6d28d9;
+    --color-brand-400: #7c3aed;
+    --color-brand-300: #8b5cf6;
+    --color-accent-500: #0d9488;
+    --color-accent-400: #0f766e;
 
     --status-good: #047857;
     --status-warn: #d97706;
     --status-bad: #9f1239;
-    --series: #4f46e5;
-    --series-dim: #c7d2fe;
-    --canvas-dot: #aeb9d2;
-    --canvas-line: #c6cede;
-    --canvas-bg: #e3e8f2;
+    --series: #6d28d9;
+    --series-dim: #ddd2f7;
+    --canvas-dot: #b9b9c6;
+    --canvas-line: #d9d9e2;
+    --canvas-bg: #ededf1;
+
+    --decor-glow: 0.32;
+    --decor-grid: 0.55;
+
+    --edge: rgba(16, 16, 20, 0.09);
+    --edge-strong: rgba(16, 16, 20, 0.16);
   }
 }
 
@@ -166,6 +167,17 @@
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
+    font-feature-settings: "cv11", "ss01";
+  }
+
+  /* Numbers that line up. Every metric, duration and token count in the app
+     is a column of digits somewhere; proportional digits make them jitter. */
+  code, pre, .font-mono {
+    font-variant-numeric: tabular-nums;
+  }
+
+  h1, h2, h3 {
+    letter-spacing: -0.02em;
   }
 
   /* A visible focus ring is an accessibility requirement, and on auth screens
@@ -177,8 +189,14 @@
   }
 
   ::selection {
-    background: color-mix(in oklab, var(--color-brand-500) 40%, transparent);
+    background: color-mix(in oklab, var(--color-brand-500) 35%, transparent);
     color: var(--color-ink-100);
+  }
+
+  /* The OS scrollbar is the one stock control that ignores the theme. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-ink-600) transparent;
   }
 }
 
@@ -186,19 +204,23 @@
   .text-gradient {
     background: linear-gradient(
       100deg,
-      var(--color-ink-100) 10%,
+      var(--color-ink-100) 5%,
       var(--color-brand-300) 45%,
-      var(--color-accent-400) 80%
+      var(--color-accent-400) 90%
     );
     background-clip: text;
     -webkit-background-clip: text;
     color: transparent;
   }
 
+  /* The one card recipe. Solid fill plus an alpha hairline — the old version
+     was translucent with backdrop-blur on every card, which is exactly the
+     glassmorphism-everywhere look that now reads as a template. Blur belongs
+     on the two sticky bars, nowhere else. */
   .surface {
-    background: color-mix(in oklab, var(--color-ink-850) 70%, transparent);
-    border: 1px solid color-mix(in oklab, var(--color-ink-600) 55%, transparent);
-    backdrop-filter: blur(12px);
+    background: var(--color-ink-850);
+    border: 1px solid var(--edge);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
   }
 
   .grid-bg {
@@ -206,17 +228,10 @@
       linear-gradient(to right, color-mix(in oklab, var(--color-ink-600) 40%, transparent) 1px, transparent 1px),
       linear-gradient(to bottom, color-mix(in oklab, var(--color-ink-600) 40%, transparent) 1px, transparent 1px);
     background-size: 60px 60px;
-    /* Was a fixed Tailwind opacity fraction per call site, tuned once against
-       a dark background. Themed here instead — see the `--decor-grid` note
-       at its definition — so a call site no longer has to carry its own
-       per-theme opacity fraction. */
     opacity: var(--decor-grid);
   }
 
-  /* For the glow blobs behind hero/auth copy. Give the element a *solid*
-     brand/accent background colour (no `/NN` alpha suffix — that would bake
-     in exactly the fixed-fraction problem this exists to fix) and this class
-     for the opacity, so the same blob is tuned per theme from one place. */
+  /* Glow blobs: solid brand/accent fill + this class; opacity themed above. */
   .decor-glow {
     opacity: var(--decor-glow);
   }

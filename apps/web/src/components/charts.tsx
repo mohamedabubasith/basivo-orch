@@ -29,14 +29,21 @@ export function StatTile({
   icon?: ReactNode;
 }) {
   return (
-    <div className="surface rounded-2xl p-5">
+    <div className="surface relative overflow-hidden rounded-xl p-5">
+      {/* The tile's one allowed flourish: a hairline in the metric's colour. */}
+      <span
+        aria-hidden="true"
+        className="absolute inset-x-4 top-0 h-px"
+        style={{ background: tone ? STATUS[tone] : "var(--series)", opacity: 0.7 }}
+      />
       <div className="flex items-start justify-between gap-3">
         <p className="text-sm text-ink-400">{label}</p>
         {icon}
       </div>
-      {/* A single number is a stat tile, never a one-bar bar chart. */}
+      {/* A single number is a stat tile, never a one-bar bar chart. Tabular
+          numerals so a row of tiles reads as one aligned instrument panel. */}
       <p
-        className="mt-2 text-[2rem] leading-none font-semibold tracking-tight text-ink-100"
+        className="mt-2 text-[2rem] leading-none font-semibold tracking-tight text-ink-100 [font-variant-numeric:tabular-nums]"
         style={tone ? { color: STATUS[tone] } : undefined}
       >
         {value}
@@ -142,7 +149,7 @@ export function Panel({
   className?: string;
 }) {
   return (
-    <section className={cx("surface rounded-2xl p-6", className)}>
+    <section className={cx("surface rounded-xl p-6", className)}>
       <div className="mb-5 flex items-start justify-between gap-4">
         <div>
           <h2 className="text-base font-semibold text-ink-100">{title}</h2>
