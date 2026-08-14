@@ -18,6 +18,7 @@ import { useNavigate } from "react-router-dom";
 
 import { ApiError, api } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
+import { Backdrop } from "../../components/Backdrop";
 import { Alert, Button, Logo, Spinner } from "../../components/ui";
 
 export function EmailGate() {
@@ -60,7 +61,8 @@ export function EmailGate() {
   }
 
   return (
-    <div className="grid-bg grid min-h-dvh place-items-center px-5 py-16">
+    <div className="relative grid min-h-dvh place-items-center overflow-hidden px-5 py-16">
+      <Backdrop />
       <motion.div
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}

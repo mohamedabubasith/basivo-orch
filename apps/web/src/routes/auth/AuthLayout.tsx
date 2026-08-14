@@ -2,6 +2,7 @@ import { motion, useReducedMotion } from "motion/react";
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 
+import { Backdrop } from "../../components/Backdrop";
 import { Logo } from "../../components/ui";
 
 /**
@@ -31,14 +32,7 @@ export function AuthLayout({
 
   return (
     <div className="relative flex min-h-dvh flex-col overflow-hidden">
-      {/* Backdrop: the boxed grid fading from the top, one brand glow behind
-          the card, one accent glow low. Decoration stays behind everything
-          and under 3 elements — a backdrop, not a light show. */}
-      <div aria-hidden="true" className="pointer-events-none absolute inset-0">
-        <div className="grid-bg absolute inset-0 [mask-image:radial-gradient(ellipse_at_50%_-10%,black_25%,transparent_70%)]" />
-        <div className="absolute -top-40 left-1/2 h-[380px] w-[640px] -translate-x-1/2 rounded-full bg-brand-500 decor-glow blur-[130px]" />
-        <div className="absolute right-[-8%] bottom-[-18%] h-[300px] w-[420px] rounded-full bg-accent-500 decor-glow blur-[120px]" />
-      </div>
+      <Backdrop />
 
       <main className="relative flex flex-1 items-center justify-center px-5 py-12">
         <motion.div

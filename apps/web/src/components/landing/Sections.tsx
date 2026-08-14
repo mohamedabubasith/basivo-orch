@@ -1,6 +1,5 @@
 import {
   motion,
-  useMotionValue,
   useReducedMotion,
   useScroll,
   useSpring,
@@ -10,6 +9,7 @@ import {
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 
+import { Backdrop } from "../Backdrop";
 import { Badge, Button, Logo } from "../ui";
 import { LogStream } from "./LogStream";
 
@@ -178,33 +178,11 @@ export function Hero() {
   const panelY: MotionValue<number> = useTransform(scrollY, [0, 600], [0, reduceMotion ? 0 : 60]);
   const panelOpacity = useTransform(scrollY, [0, 500], [1, reduceMotion ? 1 : 0.72]);
 
-  const glowX = useMotionValue(50);
-  const glowY = useMotionValue(0);
-
   return (
     <section
       className="relative overflow-hidden pt-32 pb-20"
-      onPointerMove={(event) => {
-        if (reduceMotion) return;
-        const box = event.currentTarget.getBoundingClientRect();
-        glowX.set(((event.clientX - box.left) / box.width) * 100);
-        glowY.set(((event.clientY - box.top) / box.height) * 100);
-      }}
     >
-      {/* ambient background */}
-      <div aria-hidden="true" className="pointer-events-none absolute inset-0">
-        <div className="grid-bg absolute inset-0 [mask-image:radial-gradient(ellipse_at_50%_0%,black_25%,transparent_70%)]" />
-        <div className="absolute -top-40 left-1/2 h-[520px] w-[820px] -translate-x-1/2 rounded-full bg-brand-500 decor-glow blur-[120px] animate-pulse-slow" />
-        <div className="absolute top-32 right-[8%] h-[320px] w-[320px] rounded-full bg-accent-500 decor-glow blur-[100px]" />
-        {/* Follows the pointer. Decorative, and disabled under reduced motion. */}
-        <motion.div
-          className="absolute h-[340px] w-[340px] rounded-full bg-accent-500 decor-glow blur-[90px] motion-reduce:hidden"
-          style={{
-            left: useTransform(glowX, (v) => `calc(${v}% - 170px)`),
-            top: useTransform(glowY, (v) => `calc(${v}% - 170px)`),
-          }}
-        />
-      </div>
+      <Backdrop />
 
       <div className="relative mx-auto max-w-6xl px-5">
         <motion.div
@@ -474,7 +452,7 @@ export function CTA() {
           <div className="surface relative overflow-hidden rounded-3xl px-8 py-14 text-center">
             <div
               aria-hidden="true"
-              className="pointer-events-none absolute -top-24 left-1/2 h-64 w-[560px] -translate-x-1/2 rounded-full bg-brand-500 decor-glow blur-[90px]"
+              className="pointer-events-none absolute -top-24 left-1/2 h-64 w-[560px] -translate-x-1/2 rounded-full bg-ink-100 opacity-[0.04] blur-[110px]"
             />
             <div className="relative">
               <h2 className="text-3xl font-semibold tracking-tight text-balance text-ink-100 sm:text-4xl">

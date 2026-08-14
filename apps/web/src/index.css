@@ -37,6 +37,9 @@
   --animate-marquee: marquee 40s linear infinite;
   --animate-pulse-slow: pulse-slow 4s ease-in-out infinite;
   --animate-grid: grid-drift 24s linear infinite;
+  --animate-aurora-1: aurora-1 26s ease-in-out infinite alternate;
+  --animate-aurora-2: aurora-2 32s ease-in-out infinite alternate;
+  --animate-aurora-3: aurora-3 22s ease-in-out infinite alternate;
 }
 
 /* --------------------------------------------------------------- theming ---
@@ -153,6 +156,33 @@
 @keyframes grid-drift {
   from { background-position: 0 0; }
   to { background-position: 0 60px; }
+}
+
+/* The aurora: three blurred fields drifting on long, offset paths. Transform
+   and opacity only — the two properties compositors animate for free — so a
+   living background costs no layout or paint work. Durations are deliberately
+   mismatched (26/32/22s) so the composition never visibly loops. */
+@keyframes aurora-1 {
+  from { transform: translate3d(-8%, -6%, 0) scale(1) rotate(0deg); }
+  to { transform: translate3d(10%, 8%, 0) scale(1.25) rotate(20deg); }
+}
+
+@keyframes aurora-2 {
+  from { transform: translate3d(6%, 10%, 0) scale(1.15) rotate(0deg); }
+  to { transform: translate3d(-10%, -8%, 0) scale(0.9) rotate(-16deg); }
+}
+
+@keyframes aurora-3 {
+  from { transform: translate3d(0, 6%, 0) scale(0.95); opacity: 0.7; }
+  to { transform: translate3d(-6%, -10%, 0) scale(1.2); opacity: 1; }
+}
+
+/* A pulse of light travelling along an SVG path. Every beam path declares
+   pathLength="1000", so one keyframe drives every shape regardless of its
+   real geometry: the dash is the lit segment, the offset walks it end to end. */
+@keyframes beam-travel {
+  from { stroke-dashoffset: 1000; }
+  to { stroke-dashoffset: -1000; }
 }
 
 @layer base {
