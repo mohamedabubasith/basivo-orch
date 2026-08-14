@@ -11,6 +11,7 @@ Two routers, because there are two audiences with different credentials:
 
 from __future__ import annotations
 
+import hmac
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, Literal
@@ -29,6 +30,7 @@ from basivo_orch.flows.apikeys import ApiCaller, generate_key, require_api_key
 from basivo_orch.flows.events import RedisClient, replay
 from basivo_orch.flows.graph import Graph, GraphError
 from basivo_orch.flows.models import ApiKey, Flow, FlowVersion, Run, RunStatus, TriggerKind
+from basivo_orch.flows.nodes.triggers import WebhookTriggerConfig
 from basivo_orch.flows.schemas import (
     ApiKeyCreate,
     ApiKeyCreated,
@@ -497,6 +499,29 @@ async def _published(
     return flow, version, Graph.model_validate(version.graph)
 
 
+def _verify_webhook_secret(graph: Graph, presented: str | None) -> None:
+    """The webhook trigger's edge check — before a run row exists.
+
+    The API key already authenticates *an* external caller; this authenticates
+    *the* caller the flow's author expected. The two differ the moment a key
+    leaks into a CI log or a partner's config: the secret is a second factor
+    the author can rotate per flow without reissuing the workspace's key.
+    Compared constant-time — a secret whose check leaks its prefix through
+    timing is a secret with a countdown.
+    """
+    trigger = next((node for node in graph.nodes if node.type == "trigger.webhook"), None)
+    if trigger is None:
+        return
+    config = WebhookTriggerConfig.model_validate(trigger.config)
+    if not config.require_signature:
+        return
+    if not presented or not hmac.compare_digest(presented, config.secret):
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED,
+            "This flow requires the X-Webhook-Secret header, and it did not match.",
+        )
+
+
 @external_router.post("/{flow_id}/run")
 async def run_flow(
     flow_id: uuid.UUID,
@@ -507,6 +532,7 @@ async def run_flow(
         Query(description="sync blocks until the run finishes; async returns 202 immediately."),
     ] = "sync",
     prefer: Annotated[str | None, Header()] = None,
+    x_webhook_secret: Annotated[str | None, Header(alias="X-Webhook-Secret")] = None,
     caller: ApiCaller = Depends(require_api_key),
     session: AsyncSession = Depends(get_async_session),
     redis_client: RedisClient | None = Depends(get_redis),
@@ -520,6 +546,7 @@ async def run_flow(
     `?mode=async` or `Prefer: respond-async` returns 202 with a run id.
     """
     flow, version, graph = await _published(session, caller, flow_id)
+    _verify_webhook_secret(graph, x_webhook_secret)
 
     run, created = await service.create_run(
         session,
@@ -564,12 +591,14 @@ def _accepted(flow_id: uuid.UUID, run: Run) -> RunAccepted:
 async def run_flow_streaming(
     flow_id: uuid.UUID,
     payload: RunRequest,
+    x_webhook_secret: Annotated[str | None, Header(alias="X-Webhook-Secret")] = None,
     caller: ApiCaller = Depends(require_api_key),
     session: AsyncSession = Depends(get_async_session),
     redis_client: RedisClient | None = Depends(get_redis),
 ) -> StreamingResponse:
     """Start a run and stream its progress as Server-Sent Events."""
     flow, version, graph = await _published(session, caller, flow_id)
+    _verify_webhook_secret(graph, x_webhook_secret)
 
     run, created = await service.create_run(
         session,

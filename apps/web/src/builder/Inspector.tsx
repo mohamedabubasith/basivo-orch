@@ -199,7 +199,15 @@ export function Inspector({
               </p>
             )}
             <p className="mt-1.5 text-[0.68rem] leading-relaxed text-ink-500">
-              Callers authenticate with an API key; the request body arrives as{" "}
+              Callers authenticate with an API key
+              {Boolean(config.require_signature) && (
+                <>
+                  {" "}
+                  and must also send the secret below as{" "}
+                  <code className="text-ink-400">X-Webhook-Secret</code>
+                </>
+              )}
+              ; the request body arrives as{" "}
               <code className="text-ink-400">{"{{ input }}"}</code>. Full
               examples are under the Endpoints button above.
             </p>
@@ -379,23 +387,32 @@ function FieldInput({
   if (field.type === "boolean") {
     const checked = Boolean(value ?? field.default);
     return (
-      <button
-        type="button"
-        role="switch"
-        aria-checked={checked}
-        onClick={() => onChange(!checked)}
-        className={cx(
-          "relative h-6 w-11 rounded-full transition-colors",
-          checked ? "bg-brand-500" : "bg-ink-700",
-        )}
-      >
-        <span
+      <div className="flex items-center gap-2.5">
+        <button
+          type="button"
+          role="switch"
+          aria-checked={checked}
+          onClick={() => onChange(!checked)}
           className={cx(
-            "absolute top-1 h-4 w-4 rounded-full bg-white transition-transform",
-            checked ? "translate-x-6" : "translate-x-1",
+            "relative h-6 w-11 flex-none rounded-full border transition-colors",
+            // ink-600 + an ink-100 knob, not ink-700 + white: in light mode
+            // ink-700 is #dfe3ed and a white knob on it is invisible — the
+            // switch read as an empty pill with no state at all.
+            checked ? "border-brand-500 bg-brand-500" : "border-ink-500 bg-ink-600",
           )}
-        />
-      </button>
+        >
+          <span
+            className={cx(
+              "absolute top-[3px] h-4 w-4 rounded-full transition-transform",
+              checked ? "translate-x-6 bg-white" : "translate-x-1 bg-ink-100",
+            )}
+          />
+        </button>
+        {/* The state in a word, so the toggle is never a colour-only guess. */}
+        <span className={cx("text-xs", checked ? "text-ink-200" : "text-ink-500")}>
+          {checked ? "On" : "Off"}
+        </span>
+      </div>
     );
   }
 

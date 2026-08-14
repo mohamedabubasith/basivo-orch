@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from basivo_orch.flows.nodes.base import Node, NodeContext, NodeResult
 
@@ -42,10 +42,24 @@ class WebhookTriggerConfig(BaseModel):
     model_config = {"extra": "forbid"}
 
     methods: list[WebhookMethod] = Field(default_factory=lambda: list(DEFAULT_WEBHOOK_METHODS))
-    #: When set, the inbound request must carry this shared secret. Checked at
-    #: the edge, before a run is created, so an unauthenticated caller cannot
-    #: fill the run table by spraying the endpoint.
+    #: Demand `X-Webhook-Secret` on every inbound call, checked at the edge —
+    #: before a run is created — so a caller who has the URL but not the secret
+    #: cannot fill the run table by spraying it. Enforced in the external
+    #: router; see `verify_webhook_secret`.
     require_signature: bool = False
+    secret: str = Field(
+        default="",
+        max_length=200,
+        description="Sent by callers as the X-Webhook-Secret header.",
+    )
+
+    @model_validator(mode="after")
+    def _secret_when_required(self) -> WebhookTriggerConfig:
+        # A switch with nothing behind it: validation is where that gets
+        # caught, not the first 3am call that sails through unchecked.
+        if self.require_signature and not self.secret.strip():
+            raise ValueError("require_signature is on but no secret is set.")
+        return self
 
 
 class WebhookTriggerNode(Node):

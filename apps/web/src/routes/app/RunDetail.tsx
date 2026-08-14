@@ -1,27 +1,44 @@
 /**
  * One run, in full: every node execution, and every step inside it.
  *
- * Two different questions live on this page. `nodes` (from `RunDetail`)
- * answers "what ran, in what order, with what outcome" — the shape the SOW's
- * per-node log always had. `events` (from the new `/runs/{id}/events`
- * endpoint) answers the finer question this product exists to answer for an
- * agent step: which model call happened, which tool it invoked, what that
- * tool returned, how many tokens each turn cost. A node execution is one row;
- * an agent's events inside it are a sequence, and flattening that sequence
- * into the row would lose the order and the per-turn cost.
+ * This page is the product's claim made visible. Three layers, from coarse to
+ * fine: the run (its input and final output, verbatim), each node (status,
+ * attempt, duration, tokens, cost — and its recorded input and output, which
+ * is the part every other tool hides), and inside an agent node, every model
+ * turn and tool call as ordered steps.
+ *
+ * Node input/output arrive as `summarise()` envelopes — `{kind, preview,
+ * keys|length}` — because payloads can be megabytes and the log table must
+ * not become the biggest thing in the database. The UI unwraps the envelope:
+ * the preview is shown as data, the envelope becomes a badge ("object · 14
+ * keys"), and truncation is said out loud rather than passed off as the whole
+ * value.
+ *
+ * Failed nodes arrive pre-expanded: the person opening this page at 3am came
+ * to read exactly that one.
  */
 
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
 import { api } from "../../lib/api";
+import { cx } from "../../lib/cx";
 import { useWorkspace } from "../../lib/workspace";
 import { Alert, Card, PageLoader } from "../../components/ui";
 import { StatusPip } from "../../components/charts";
+import { NodeIconChip } from "../../builder/nodeIcons";
 import { PageHeader, RelativeTime, duration } from "./bits";
 
 type RunStatus = "pending" | "running" | "succeeded" | "failed" | "cancelled";
 type NodeStatus = "pending" | "running" | "succeeded" | "failed" | "skipped";
+
+interface Summary {
+  kind: string;
+  preview?: unknown;
+  value?: unknown;
+  keys?: number;
+  length?: number;
+}
 
 interface NodeExecution {
   node_id: string;
@@ -29,6 +46,8 @@ interface NodeExecution {
   node_name: string | null;
   status: NodeStatus;
   attempt: number;
+  input_summary: Summary | null;
+  output_summary: Summary | null;
   error: string | null;
   duration_ms: number | null;
   cost_usd: number | null;
@@ -89,16 +108,13 @@ export function RunDetail() {
   // A run still in flight is still writing events; poll until it settles
   // rather than leaving the page looking finished while work continues.
   useEffect(() => {
-    if (!run || run.status === "succeeded" || run.status === "failed" || run.status === "cancelled") {
-      return;
-    }
+    if (!run || ["succeeded", "failed", "cancelled"].includes(run.status)) return;
     const timer = setInterval(() => void load(), 2500);
     return () => clearInterval(timer);
   }, [run, load]);
 
   if (error) return <Alert>{error}</Alert>;
   if (!run || events === null) return <PageLoader label="Loading run" />;
-
 
   return (
     <div className="space-y-6">
@@ -136,61 +152,25 @@ export function RunDetail() {
             {run.error}
           </p>
         )}
+
+        {/* The run's own boundary values, verbatim — not summaries. */}
+        <div className="mt-4 grid gap-3 lg:grid-cols-2">
+          <JsonBlock title="Run input" value={run.input} />
+          <JsonBlock title="Final output" value={run.output} empty="No output — the run did not finish." />
+        </div>
       </Card>
 
       <div>
         <h2 className="mb-3 text-sm font-medium text-ink-300">Nodes</h2>
         <ul className="space-y-2">
           {run.nodes.map((node) => (
-            <li key={`${node.node_id}-${node.attempt}`} className="surface rounded-xl p-4">
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-                <NodeStatusLabel status={node.status} />
-                <span className="font-medium text-ink-100">{node.node_name ?? node.node_id}</span>
-                <span className="font-mono text-xs text-ink-500">{node.node_type}</span>
-                {node.attempt > 1 && (
-                  <span className="text-xs" style={{ color: "var(--status-warn)" }}>
-                    attempt {node.attempt}
-                  </span>
-                )}
-                <span className="ml-auto font-mono text-xs text-ink-300">
-                  {duration(node.duration_ms)}
-                </span>
-              </div>
-
-              {(node.tokens_in !== null || node.cost_usd !== null) && (
-                <div className="mt-2.5 flex flex-wrap gap-x-5 gap-y-1 border-t border-ink-700/50 pt-2.5 text-xs text-ink-400">
-                  {node.tokens_in !== null && (
-                    <span>
-                      <span className="text-ink-500">tokens in</span>{" "}
-                      <span className="font-mono text-ink-200">{node.tokens_in.toLocaleString()}</span>
-                    </span>
-                  )}
-                  {node.tokens_out !== null && (
-                    <span>
-                      <span className="text-ink-500">tokens out</span>{" "}
-                      <span className="font-mono text-ink-200">{node.tokens_out.toLocaleString()}</span>
-                    </span>
-                  )}
-                  {node.cost_usd !== null && (
-                    <span>
-                      <span className="text-ink-500">cost</span>{" "}
-                      <span className="font-mono text-ink-200">${node.cost_usd.toFixed(4)}</span>
-                    </span>
-                  )}
-                </div>
-              )}
-
-              {node.error && (
-                <p
-                  className="mt-2.5 border-t border-ink-700/50 pt-2.5 font-mono text-xs leading-relaxed"
-                  style={{ color: "var(--status-bad)" }}
-                >
-                  {node.error}
-                </p>
-              )}
-
-              <NodeSteps nodeId={node.node_id} events={events} />
-            </li>
+            <NodeRow
+              key={`${node.node_id}-${node.attempt}`}
+              node={node}
+              events={events}
+              // The failed node is the reason this page is open.
+              defaultOpen={node.status === "failed"}
+            />
           ))}
         </ul>
       </div>
@@ -198,26 +178,185 @@ export function RunDetail() {
   );
 }
 
-/**
- * The steps that happened inside one node — an agent's model calls and tool
- * calls, in order. Not shown for nodes with no steps: an HTTP node or a
- * condition has nothing here, and an empty "Steps" section under every row
- * would be noise repeated for every node in every run.
- */
-function NodeSteps({ nodeId, events }: { nodeId: string; events: RunEvent[] }) {
+/* ---------------------------------------------------------------- node row --- */
+
+function NodeRow({
+  node,
+  events,
+  defaultOpen,
+}: {
+  node: NodeExecution;
+  events: RunEvent[];
+  defaultOpen: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
   const steps = events.filter(
-    (event) => event.data.node_id === nodeId && event.type.startsWith("node.step"),
+    (event) => event.data.node_id === node.node_id && event.type === "node.step",
   );
-  if (steps.length === 0) return null;
 
   return (
-    <div className="mt-3 space-y-1.5 border-t border-ink-700/50 pt-3">
-      {steps.map((event) => (
-        <StepRow key={event.seq} event={event} />
-      ))}
+    <li className="surface overflow-hidden rounded-xl">
+      <button
+        onClick={() => setOpen((value) => !value)}
+        className="flex w-full flex-wrap items-center gap-x-4 gap-y-2 p-4 text-left transition-colors hover:bg-ink-850/40"
+      >
+        <NodeIconChip type={node.node_type} size={8} />
+        <div className="min-w-0 flex-1">
+          <p className="truncate font-medium text-ink-100">{node.node_name ?? node.node_id}</p>
+          <p className="truncate font-mono text-[0.65rem] text-ink-500">{node.node_type}</p>
+        </div>
+        <NodeStatusLabel status={node.status} />
+        {node.attempt > 1 && (
+          <span className="text-xs" style={{ color: "var(--status-warn)" }}>
+            attempt {node.attempt}
+          </span>
+        )}
+        {node.tokens_in !== null && (
+          <span className="font-mono text-xs text-ink-400">
+            {node.tokens_in.toLocaleString()}→{(node.tokens_out ?? 0).toLocaleString()} tok
+          </span>
+        )}
+        {node.cost_usd !== null && (
+          <span className="font-mono text-xs text-ink-300">${node.cost_usd.toFixed(4)}</span>
+        )}
+        <span className="font-mono text-xs text-ink-300">{duration(node.duration_ms)}</span>
+        <svg
+          viewBox="0 0 24 24"
+          className={cx("h-4 w-4 flex-none text-ink-500 transition-transform", open && "rotate-180")}
+          fill="none"
+          aria-hidden="true"
+        >
+          <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+        </svg>
+      </button>
+
+      {open && (
+        <div className="space-y-3 border-t border-ink-700/60 p-4">
+          {node.error && (
+            <p
+              className="rounded-lg border p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap"
+              style={{
+                borderColor: "color-mix(in oklab, var(--status-bad) 40%, transparent)",
+                color: "var(--status-bad)",
+              }}
+            >
+              {node.error}
+            </p>
+          )}
+
+          <div className="grid gap-3 lg:grid-cols-2">
+            <SummaryBlock title="Input" summary={node.input_summary} />
+            <SummaryBlock title="Output" summary={node.output_summary} />
+          </div>
+
+          {steps.length > 0 && (
+            <div>
+              <p className="mb-1.5 text-[0.7rem] font-medium tracking-wide text-ink-400">
+                Steps — every model turn and tool call, in order
+              </p>
+              <div className="space-y-1.5">
+                {steps.map((event) => (
+                  <StepRow key={event.seq} event={event} />
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </li>
+  );
+}
+
+/* ------------------------------------------------------------- data blocks --- */
+
+/**
+ * A node's recorded input or output: a `summarise()` envelope, unwrapped.
+ * The badge carries what the envelope knows (type, size, truncation); the
+ * body shows the preview as data rather than as a nested curiosity.
+ */
+function SummaryBlock({ title, summary }: { title: string; summary: Summary | null }) {
+  if (summary === null) {
+    return <JsonBlock title={title} value={null} empty="Nothing recorded." />;
+  }
+
+  const badgeParts: string[] = [summary.kind];
+  if (typeof summary.keys === "number") badgeParts.push(`${summary.keys} keys`);
+  if (typeof summary.length === "number") badgeParts.push(`${summary.length.toLocaleString()} long`);
+
+  const body = summary.preview !== undefined ? summary.preview : summary.value;
+  const truncated =
+    typeof summary.length === "number" &&
+    typeof body === "string" &&
+    body.length < summary.length;
+
+  return (
+    <JsonBlock
+      title={title}
+      badge={badgeParts.join(" · ")}
+      value={body}
+      footnote={
+        truncated
+          ? "Preview truncated — the full value was larger than the log keeps."
+          : undefined
+      }
+    />
+  );
+}
+
+function JsonBlock({
+  title,
+  badge,
+  value,
+  empty = "—",
+  footnote,
+}: {
+  title: string;
+  badge?: string;
+  value: unknown;
+  empty?: string;
+  footnote?: string;
+}) {
+  const [copied, setCopied] = useState(false);
+  const isEmpty =
+    value === null ||
+    value === undefined ||
+    (typeof value === "object" && value !== null && Object.keys(value).length === 0);
+  const text = isEmpty ? "" : typeof value === "string" ? value : JSON.stringify(value, null, 2);
+
+  return (
+    <div className="min-w-0">
+      <div className="mb-1 flex items-baseline gap-2">
+        <p className="text-[0.7rem] font-medium tracking-wide text-ink-400">{title}</p>
+        {badge && <span className="font-mono text-[0.62rem] text-ink-500">{badge}</span>}
+        {!isEmpty && (
+          <button
+            type="button"
+            onClick={() => {
+              void navigator.clipboard?.writeText(text);
+              setCopied(true);
+              setTimeout(() => setCopied(false), 1200);
+            }}
+            className="ml-auto text-[0.62rem] text-ink-500 underline decoration-dotted underline-offset-2 hover:text-ink-200"
+          >
+            {copied ? "Copied" : "Copy"}
+          </button>
+        )}
+      </div>
+      {isEmpty ? (
+        <p className="rounded-lg border border-ink-700/50 bg-ink-950/40 px-3 py-2.5 text-xs text-ink-600">
+          {empty}
+        </p>
+      ) : (
+        <pre className="max-h-72 overflow-auto rounded-lg border border-ink-700/50 bg-ink-950/40 p-3 font-mono text-[0.7rem] leading-relaxed whitespace-pre-wrap text-ink-200">
+          {text}
+        </pre>
+      )}
+      {footnote && <p className="mt-1 text-[0.62rem] text-ink-500">{footnote}</p>}
     </div>
   );
 }
+
+/* ------------------------------------------------------------------- steps --- */
 
 const STEP_LABEL: Record<string, { label: string; tone: "good" | "warn" | "bad" | "neutral" }> = {
   "agent.started": { label: "Agent started", tone: "neutral" },
@@ -253,7 +392,10 @@ function StepRow({ event }: { event: RunEvent }) {
         {step === "tool.result" && (
           <>
             <span className="font-mono text-ink-200">{String(data.tool)}</span>
-            <span className={data.ok ? "text-ink-500" : ""} style={data.ok ? undefined : { color: "var(--status-bad)" }}>
+            <span
+              className={data.ok ? "text-ink-500" : ""}
+              style={data.ok ? undefined : { color: "var(--status-bad)" }}
+            >
               {data.ok ? "ok" : "failed"}
             </span>
             {typeof data.duration_ms === "number" && (
@@ -304,6 +446,8 @@ function StepRow({ event }: { event: RunEvent }) {
     </div>
   );
 }
+
+/* ----------------------------------------------------------------- labels --- */
 
 function Field({
   label,
