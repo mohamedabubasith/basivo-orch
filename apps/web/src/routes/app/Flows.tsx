@@ -49,6 +49,21 @@ export function Flows() {
     void load();
   }, [load]);
 
+  async function remove(flow: Flow) {
+    if (
+      !confirm(
+        `Delete "${flow.name}"? Its run history goes with it, and anything calling its published URL starts getting 404s. This cannot be undone.`,
+      )
+    )
+      return;
+    try {
+      await api.del(`/api/v1/orgs/${orgId}/flows/${flow.id}`);
+      await load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not delete that flow.");
+    }
+  }
+
   if (flows === null) return <PageLoader label="Loading flows" />;
 
   return (
@@ -90,30 +105,48 @@ export function Flows() {
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: Math.min(index * 0.03, 0.25), duration: 0.25 }}
             >
-              <Link
-                to={`/app/flows/${flow.id}`}
-                className="surface flex flex-wrap items-center gap-4 rounded-2xl p-5 transition-colors hover:border-ink-500"
-              >
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-3">
-                    <p className="truncate font-medium text-ink-100">{flow.name}</p>
-                    {flow.published_version_id ? (
-                      <StatusPip tone="good">Published</StatusPip>
-                    ) : (
-                      <StatusPip tone="warn">Draft</StatusPip>
-                    )}
+              <div className="surface flex items-center gap-2 rounded-2xl transition-colors hover:border-ink-500">
+                <Link
+                  to={`/app/flows/${flow.id}`}
+                  className="flex min-w-0 flex-1 flex-wrap items-center gap-4 p-5"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-3">
+                      <p className="truncate font-medium text-ink-100">{flow.name}</p>
+                      {flow.published_version_id ? (
+                        <StatusPip tone="good">Published</StatusPip>
+                      ) : (
+                        <StatusPip tone="warn">Draft</StatusPip>
+                      )}
+                    </div>
+                    <p className="mt-1 truncate text-sm text-ink-400">
+                      {flow.description || <span className="text-ink-600">No description</span>}
+                    </p>
                   </div>
-                  <p className="mt-1 truncate text-sm text-ink-400">
-                    {flow.description || <span className="text-ink-600">No description</span>}
-                  </p>
-                </div>
-                <div className="text-right text-xs text-ink-500">
-                  <p className="font-mono">{flow.slug}</p>
-                  <p className="mt-1">
-                    Updated <RelativeTime value={flow.updated_at} />
-                  </p>
-                </div>
-              </Link>
+                  <div className="text-right text-xs text-ink-500">
+                    <p className="font-mono">{flow.slug}</p>
+                    <p className="mt-1">
+                      Updated <RelativeTime value={flow.updated_at} />
+                    </p>
+                  </div>
+                </Link>
+                <button
+                  onClick={() => void remove(flow)}
+                  aria-label={`Delete flow ${flow.name}`}
+                  title="Delete this flow"
+                  className="mr-4 flex-none rounded-lg border border-ink-700 p-2.5 text-ink-500 transition-colors hover:border-[var(--status-bad)] hover:text-[var(--status-bad)]"
+                >
+                  <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" aria-hidden="true">
+                    <path
+                      d="M4.5 6.5h15M9.5 6V4.8c0-.7.6-1.3 1.3-1.3h2.4c.7 0 1.3.6 1.3 1.3V6M7 6.5l.8 12a1.6 1.6 0 0 0 1.6 1.5h5.2a1.6 1.6 0 0 0 1.6-1.5l.8-12M10 10.5v6M14 10.5v6"
+                      stroke="currentColor"
+                      strokeWidth="1.6"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </button>
+              </div>
             </motion.li>
           ))}
         </ul>

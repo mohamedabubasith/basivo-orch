@@ -203,6 +203,8 @@ export function Inspector({
                 value={String(config.credential_id ?? "")}
                 onChange={(v) => set("credential_id", v)}
               />
+            ) : spec.type === "code.python" && field.key === "code" ? (
+              <CodeArea value={String(config.code ?? "")} onChange={(v) => set("code", v)} />
             ) : isAgent && field.key === "tools" ? (
               <ToolEditor value={config.tools} onChange={(tools) => set("tools", tools)} />
             ) : isAgent && field.key === "model" ? (
@@ -586,5 +588,45 @@ function ModelPicker({
         </p>
       )}
     </div>
+  );
+}
+
+
+/**
+ * The code node's editor: a real writing surface, not a one-line input.
+ *
+ * Not a full CodeMirror — that is a heavyweight dependency for a beta whose
+ * code blocks are a screenful — but the things that make a textarea unusable
+ * for code are fixed: monospace, tall, no spellcheck/autocorrect mangling,
+ * and Tab inserts indentation instead of throwing focus to the next field,
+ * which is the single behaviour that makes people give up on textarea code.
+ */
+function CodeArea({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  return (
+    <textarea
+      value={value}
+      rows={16}
+      spellCheck={false}
+      autoCorrect="off"
+      autoCapitalize="off"
+      placeholder={'def main(data):\n    # data has: input, nodes, vars, trigger\n    return {"ok": True}'}
+      onChange={(event) => onChange(event.target.value)}
+      onKeyDown={(event) => {
+        if (event.key !== "Tab") return;
+        event.preventDefault();
+        const target = event.currentTarget;
+        const { selectionStart, selectionEnd } = target;
+        const next = value.slice(0, selectionStart) + "    " + value.slice(selectionEnd);
+        onChange(next);
+        // The value update is async through React; restore the caret after it.
+        requestAnimationFrame(() => {
+          target.selectionStart = target.selectionEnd = selectionStart + 4;
+        });
+      }}
+      className={cx(
+        INPUT,
+        "resize-y font-mono text-[0.78rem] leading-relaxed whitespace-pre",
+      )}
+    />
   );
 }

@@ -20,7 +20,7 @@
 
 import { motion } from "motion/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   Background,
   Controls,
@@ -42,6 +42,7 @@ import { WorkspaceProvider, useWorkspace } from "../../lib/workspace";
 import { ThemeToggle } from "../../components/ThemeToggle";
 import { Alert, Button, PageLoader } from "../../components/ui";
 import { FlowNodeCard } from "../../builder/FlowNodeCard";
+import { NodeIconChip } from "../../builder/nodeIcons";
 import { Inspector } from "../../builder/Inspector";
 import {
   attachProblems,
@@ -109,6 +110,7 @@ export function Builder() {
 
 function BuilderInner() {
   const { flowId } = useParams<{ flowId: string }>();
+  const navigate = useNavigate();
   const { orgId } = useWorkspace();
   const base = `/api/v1/orgs/${orgId}/flows/${flowId}`;
 
@@ -363,6 +365,24 @@ function BuilderInner() {
     }
   }
 
+  async function deleteFlow() {
+    if (
+      !confirm(
+        `Delete "${flow?.name ?? "this flow"}"? Its run history goes with it, and anything calling its published URL starts getting 404s. This cannot be undone.`,
+      )
+    )
+      return;
+    try {
+      await api.del(base);
+      navigate("/app/flows");
+    } catch (err) {
+      setBanner({
+        tone: "bad",
+        text: err instanceof ApiError ? err.message : "Could not delete this flow.",
+      });
+    }
+  }
+
   async function testRun() {
     if (dirty && !(await save())) return;
     setBusy("run");
@@ -471,6 +491,22 @@ function BuilderInner() {
           <Button onClick={() => void publish()} loading={busy === "publish"}>
             Publish
           </Button>
+          <button
+            onClick={() => void deleteFlow()}
+            aria-label="Delete this flow"
+            title="Delete this flow"
+            className="rounded-lg border border-ink-700 p-2.5 text-ink-500 transition-colors hover:border-[var(--status-bad)] hover:text-[var(--status-bad)]"
+          >
+            <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" aria-hidden="true">
+              <path
+                d="M4.5 6.5h15M9.5 6V4.8c0-.7.6-1.3 1.3-1.3h2.4c.7 0 1.3.6 1.3 1.3V6M7 6.5l.8 12a1.6 1.6 0 0 0 1.6 1.5h5.2a1.6 1.6 0 0 0 1.6-1.5l.8-12M10 10.5v6M14 10.5v6"
+                stroke="currentColor"
+                strokeWidth="1.6"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
         </div>
       </header>
 
@@ -614,7 +650,7 @@ function Palette({
   const groups = useMemo(() => groupSpecs(specs), [specs]);
 
   return (
-    <div className="w-[210px] flex-none overflow-y-auto border-r border-ink-800/70 bg-ink-900/50 p-3">
+    <div className="w-[228px] flex-none overflow-y-auto border-r border-ink-800/70 bg-ink-900/50 p-3">
       {groups.map((group) => (
         <div key={group.heading} className="mb-4">
           <p className="mb-1.5 px-1 text-[0.66rem] font-medium tracking-[0.12em] text-ink-500 uppercase">
@@ -638,15 +674,20 @@ function Palette({
                   disabled={blocked}
                   title={blocked ? "A flow can only have one trigger." : spec.description}
                   className={cx(
-                    "w-full rounded-lg border border-ink-700/60 bg-ink-850/60 px-2.5 py-2 text-left transition-colors",
+                    "flex w-full items-center gap-2.5 rounded-xl border border-ink-700/60 bg-ink-850/60 px-2.5 py-2 text-left transition-all",
                     blocked
                       ? "cursor-not-allowed opacity-40"
-                      : "cursor-grab hover:border-ink-600 active:cursor-grabbing",
+                      : "cursor-grab hover:-translate-y-px hover:border-ink-500 hover:shadow-md active:cursor-grabbing",
                   )}
                 >
-                  <span className="block truncate text-xs text-ink-200">{spec.label}</span>
-                  <span className="block truncate font-mono text-[0.62rem] text-ink-500">
-                    {spec.type}
+                  <NodeIconChip type={spec.type} size={7} />
+                  <span className="min-w-0">
+                    <span className="block truncate text-xs font-medium text-ink-200">
+                      {spec.label}
+                    </span>
+                    <span className="block truncate font-mono text-[0.62rem] text-ink-500">
+                      {spec.type}
+                    </span>
                   </span>
                 </button>
               </li>

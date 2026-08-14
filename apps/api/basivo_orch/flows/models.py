@@ -169,7 +169,13 @@ class Run(Base):
         ForeignKey("flow.id", ondelete="CASCADE"), index=True
     )
     flow_version_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("flow_version.id", ondelete="RESTRICT")
+        # CASCADE, not RESTRICT. A run only loses its version when the whole
+        # flow is deleted — versions are append-only otherwise — and RESTRICT
+        # made that deletion impossible for any flow that had ever run: the
+        # ORM deletes versions first (the `versions` relationship cascades),
+        # runs still referenced them, and every flow delete 500'd. Run history
+        # is meaningless without its flow, so it goes with it.
+        ForeignKey("flow_version.id", ondelete="CASCADE")
     )
     organization_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("organization.id", ondelete="CASCADE"), index=True

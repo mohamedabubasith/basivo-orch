@@ -132,21 +132,43 @@ async function ensureCsrf(): Promise<string | null> {
  */
 let inFlightRefresh: Promise<boolean> | null = null;
 
+/**
+ * The promise above serialises refreshes within one tab — and that is not
+ * enough. Every open tab has its own copy of this module, so two tabs whose
+ * access tokens expire together (they do: both were minted at sign-in) each
+ * post the same refresh cookie. The first rotates it; the second is now a
+ * replay, reuse detection fires, every token is revoked, and the user is
+ * signed out of their own session for the crime of having two tabs open —
+ * reliably, at exactly the access-token TTL after signing in.
+ *
+ * The Web Locks API is the cross-tab mutex the browser actually provides:
+ * the second tab waits, then refreshes with the *rotated* cookie (cookies are
+ * shared per-origin, so it automatically presents the new one), which is an
+ * ordinary rotation rather than a replay. Browsers without `navigator.locks`
+ * fall back to the old per-tab behaviour — degraded, not broken.
+ */
+function refreshOnce(): Promise<boolean> {
+  return fetch(`${API_BASE}/auth/refresh`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+  })
+    .then((r) => {
+      captureCsrf(r);
+      return r.ok;
+    })
+    .catch(() => false);
+}
+
 export function refresh(): Promise<boolean> {
   if (!inFlightRefresh) {
-    inFlightRefresh = fetch(`${API_BASE}/auth/refresh`, {
-      method: "POST",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
-    })
-      .then((r) => {
-        captureCsrf(r);
-        return r.ok;
-      })
-      .catch(() => false)
-      .finally(() => {
-        inFlightRefresh = null;
-      });
+    inFlightRefresh = (
+      typeof navigator !== "undefined" && navigator.locks
+        ? navigator.locks.request("basivo.session.refresh", refreshOnce)
+        : refreshOnce()
+    ).finally(() => {
+      inFlightRefresh = null;
+    });
   }
   return inFlightRefresh;
 }
