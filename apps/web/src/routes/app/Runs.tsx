@@ -94,6 +94,7 @@ export function Runs() {
   return (
     <div className="space-y-6">
       <PageHeader
+        eyebrow="Observability"
         title="Runs"
         subtitle="Every execution, with what it cost and what went wrong."
       />

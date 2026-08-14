@@ -68,6 +68,7 @@ export function Credentials() {
   return (
     <div className="space-y-6">
       <PageHeader
+        eyebrow="Account"
         title="Credentials"
         subtitle="Provider API keys for the AI Agent node. Stored encrypted, referenced by name — never embedded in a flow."
         action={

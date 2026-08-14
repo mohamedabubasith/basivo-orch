@@ -65,6 +65,7 @@ export function ApiKeys() {
   return (
     <div className="space-y-6">
       <PageHeader
+        eyebrow="Account"
         title="API keys"
         subtitle="Run a published flow from your own code. Send the key as an Authorization: Bearer header."
         action={

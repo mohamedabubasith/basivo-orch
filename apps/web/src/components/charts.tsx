@@ -21,15 +21,18 @@ export function StatTile({
   hint,
   tone,
   icon,
+  flat = false,
 }: {
   label: string;
   value: ReactNode;
   hint?: ReactNode;
   tone?: StatusTone;
   icon?: ReactNode;
+  /** Inside a segmented strip: the strip owns the surface and borders. */
+  flat?: boolean;
 }) {
   return (
-    <div className="surface relative overflow-hidden rounded-xl p-5">
+    <div className={flat ? "relative overflow-hidden p-5" : "surface relative overflow-hidden rounded-xl p-5"}>
       {/* The tile's one allowed flourish: a hairline in the metric's colour. */}
       <span
         aria-hidden="true"

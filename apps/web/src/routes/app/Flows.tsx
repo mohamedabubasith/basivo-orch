@@ -69,6 +69,7 @@ export function Flows() {
   return (
     <div className="space-y-6">
       <PageHeader
+        eyebrow="Build"
         title="Flows"
         subtitle="A flow is a graph of nodes. Publish one to give it a stable version other systems can call."
         action={

@@ -89,6 +89,9 @@ export function Dashboard() {
     <div className="space-y-8">
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
+          <p className="mb-1.5 text-[0.68rem] font-medium tracking-[0.14em] text-brand-400 uppercase">
+            Overview
+          </p>
           <h1 className="text-2xl font-semibold tracking-tight text-ink-100">
             Welcome{user?.email ? `, ${user.email.split("@")[0]}` : ""}
           </h1>
@@ -141,10 +144,14 @@ export function Dashboard() {
       {data && hasRuns && runs && (
         <>
           {/* KPI row. Four headline numbers are stat tiles, not a grouped bar
-              chart — the reader wants each value, not a comparison between them. */}
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <StatTile label="Runs" value={runs.total.toLocaleString()} hint={`${runs.running} in flight`} />
+              chart — the reader wants each value, not a comparison between
+              them. One segmented surface rather than four floating cards: an
+              instrument strip reads as one panel, and it is the composition
+              every modern dashboard uses for its headline row. */}
+          <div className="surface grid overflow-hidden rounded-xl sm:grid-cols-2 lg:grid-cols-4 [&>*+*]:border-t [&>*+*]:border-[var(--edge)] sm:[&>*]:border-t-0 sm:[&>*:nth-child(even)]:border-l sm:[&>*:nth-child(n+3)]:border-t lg:[&>*]:!border-t-0 lg:[&>*+*]:!border-l lg:[&>*+*]:border-[var(--edge)]">
+            <StatTile flat label="Runs" value={runs.total.toLocaleString()} hint={`${runs.running} in flight`} />
             <StatTile
+              flat
               label="Success rate"
               value={formatPercent(runs.success_rate, 1)}
               hint={`${runs.failed} failed`}
@@ -159,6 +166,7 @@ export function Dashboard() {
               }
             />
             <StatTile
+              flat
               label="Typical duration"
               value={formatMs(runs.p50_ms)}
               hint={`p95 ${formatMs(runs.p95_ms)} — the slow tail your users feel`}
@@ -166,6 +174,7 @@ export function Dashboard() {
             {/* The differentiator. Every dashboard that counts final states
                 reports these runs as clean successes. */}
             <StatTile
+              flat
               label="Saved by a retry"
               value={data.retry_rescued_runs.toLocaleString()}
               tone={data.retry_rescued_runs > 0 ? "warn" : "good"}
