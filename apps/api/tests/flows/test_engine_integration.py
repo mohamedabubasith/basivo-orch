@@ -417,6 +417,139 @@ async def test_ticket_then_autofix_flow(session, make_run, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# Parallel branches
+# ---------------------------------------------------------------------------
+
+
+async def test_independent_branches_run_concurrently(session, make_run, monkeypatch):
+    """Two agents hanging off one trigger are independent work.
+
+    Measured by the clock, because that is how the bug was reported: a 59s
+    branch and a 3m49s branch took 4m48s — the sum — instead of the longer of
+    the two. Each fake model sleeps, so a sequential engine cannot pass: it
+    would need 3 x DELAY, and the ceiling here is 2 x DELAY.
+    """
+    import asyncio
+    import time
+
+    DELAY = 0.4
+    overlap: list[str] = []
+    in_flight = {"n": 0, "peak": 0}
+
+    def sleeper(node_id: str):
+        async def model(messages, info):
+            in_flight["n"] += 1
+            in_flight["peak"] = max(in_flight["peak"], in_flight["n"])
+            overlap.append(f"start:{node_id}")
+            await asyncio.sleep(DELAY)
+            overlap.append(f"end:{node_id}")
+            in_flight["n"] -= 1
+            return ModelResponse(parts=[TextPart(content=f"done {node_id}")])
+
+        return model
+
+    async def fake_build_model(config, ctx):
+        return FunctionModel(sleeper(ctx.node_id))
+
+    monkeypatch.setattr("basivo_orch.flows.nodes.agent._build_model", fake_build_model)
+
+    graph = Graph.model_validate(
+        {
+            "nodes": [
+                {"id": "t", "type": "trigger.manual", "config": {}},
+                {"id": "a1", "type": "agent.llm", "config": {"prompt": "one"}},
+                {"id": "a2", "type": "agent.llm", "config": {"prompt": "two"}},
+                # Downstream of a1 only: proves the wave scheduler still
+                # respects dependencies while parallelising siblings.
+                {"id": "a3", "type": "agent.llm", "config": {"prompt": "three"}},
+            ],
+            "edges": [
+                {"source": "t", "target": "a1"},
+                {"source": "t", "target": "a2"},
+                {"source": "a1", "target": "a3"},
+            ],
+        }
+    )
+
+    started = time.monotonic()
+    run = await run_graph(session, make_run, graph)
+    elapsed = time.monotonic() - started
+
+    assert run.status is RunStatus.SUCCEEDED
+    # Three model calls at DELAY each. Sequential would be >= 3 x DELAY; the
+    # dependency chain (a1 -> a3) makes 2 x DELAY the floor.
+    assert elapsed < DELAY * 3, f"branches ran sequentially: {elapsed:.2f}s for 3 x {DELAY}s"
+    assert in_flight["peak"] >= 2, "no two nodes were ever in flight at once"
+    # a1 and a2 interleave; a3 begins only after a1 finished.
+    assert overlap.index("start:a2") < overlap.index("end:a1")
+    assert overlap.index("end:a1") < overlap.index("start:a3")
+
+    executions = await nodes_for(session, run.id)
+    assert {node_id: row.status for node_id, row in executions.items()} == {
+        "t": NodeStatus.SUCCEEDED,
+        "a1": NodeStatus.SUCCEEDED,
+        "a2": NodeStatus.SUCCEEDED,
+        "a3": NodeStatus.SUCCEEDED,
+    }
+
+    # Concurrent writers share one session and one event sequence: it must
+    # still be gapless, or the live stream drops events.
+    events = await replay(session, run.id)
+    assert [event.seq for event in events] == list(range(1, len(events) + 1))
+
+
+async def test_a_failing_branch_lets_its_sibling_finish_and_fails_the_run(
+    session, make_run, monkeypatch
+):
+    """A sibling's failure must not orphan work already in flight.
+
+    The slow branch is mid-call when the fast one fails. It has to be allowed
+    to finish and record its row — the tokens are already being billed — and
+    the run still ends FAILED with the real error.
+    """
+    import asyncio
+
+    def model_for(node_id: str):
+        async def model(messages, info):
+            if node_id == "boom":
+                raise RuntimeError("provider exploded")
+            await asyncio.sleep(0.3)
+            return ModelResponse(parts=[TextPart(content="slow branch finished")])
+
+        return model
+
+    async def fake_build_model(config, ctx):
+        return FunctionModel(model_for(ctx.node_id))
+
+    monkeypatch.setattr("basivo_orch.flows.nodes.agent._build_model", fake_build_model)
+
+    graph = Graph.model_validate(
+        {
+            "nodes": [
+                {"id": "t", "type": "trigger.manual", "config": {}},
+                {"id": "boom", "type": "agent.llm", "config": {"prompt": "fail"}},
+                {"id": "slow", "type": "agent.llm", "config": {"prompt": "slow"}},
+            ],
+            "edges": [
+                {"source": "t", "target": "boom"},
+                {"source": "t", "target": "slow"},
+            ],
+        }
+    )
+
+    run = await run_graph(session, make_run, graph)
+
+    assert run.status is RunStatus.FAILED
+    assert "provider exploded" in run.error
+
+    executions = await nodes_for(session, run.id)
+    assert executions["boom"].status is NodeStatus.FAILED
+    # The one that mattered: not left dangling in RUNNING.
+    assert executions["slow"].status is NodeStatus.SUCCEEDED
+    assert executions["slow"].finished_at is not None
+
+
+# ---------------------------------------------------------------------------
 # The rule, enforced
 # ---------------------------------------------------------------------------
 

@@ -42,7 +42,7 @@ import { cx } from "../../lib/cx";
 import { loadConfig } from "../../lib/config";
 import { WorkspaceProvider, useWorkspace } from "../../lib/workspace";
 import { ThemeToggle } from "../../components/ThemeToggle";
-import { Alert, Button, PageLoader } from "../../components/ui";
+import { Alert, Button, PageLoader, Spinner } from "../../components/ui";
 import { FlowNodeCard } from "../../builder/FlowNodeCard";
 import { NodeIconChip } from "../../builder/nodeIcons";
 import { Inspector } from "../../builder/Inspector";
@@ -93,6 +93,32 @@ interface RunDetail {
   nodes: NodeExecution[];
 }
 
+/** What `POST /run?mode=async` answers with: the run exists, watch it here. */
+interface RunAccepted {
+  run_id: string;
+  status: string;
+}
+
+const TERMINAL_RUN_STATUSES = new Set(["succeeded", "failed", "cancelled"]);
+
+/**
+ * Follow a detached run to its end, reporting every snapshot on the way.
+ *
+ * Polling rather than SSE: this goes through the api client, so an access
+ * token that expires during a long agent run is refreshed like any other
+ * request. An EventSource cannot carry that refresh, and the run it was
+ * watching would silently stop updating — the exact failure this replaced.
+ */
+async function pollRun(url: string, onSnapshot: (run: RunDetail) => void): Promise<RunDetail> {
+  const INTERVAL_MS = 1200;
+  for (;;) {
+    const snapshot = await api.get<RunDetail>(url);
+    onSnapshot(snapshot);
+    if (TERMINAL_RUN_STATUSES.has(snapshot.status)) return snapshot;
+    await new Promise((resolve) => setTimeout(resolve, INTERVAL_MS));
+  }
+}
+
 /**
  * The builder owns the whole viewport.
  *
@@ -132,6 +158,33 @@ function BuilderInner() {
   const [testInput, setTestInput] = useState<string>("");
   const [endpointsOpen, setEndpointsOpen] = useState(false);
   const [publicBase, setPublicBase] = useState<string>("");
+  //: Seconds since the current run started, so a multi-minute agent flow shows
+  //: movement instead of an unexplained spinner.
+  const [elapsed, setElapsed] = useState(0);
+
+  /** Paint each canvas node with its status from a run snapshot. */
+  const paintNodes = useCallback(
+    (snapshot: RunDetail) => {
+      const byId = new Map(snapshot.nodes.map((execution) => [execution.node_id, execution]));
+      setNodes((current) =>
+        current.map((node) => {
+          const execution = byId.get(node.id);
+          return {
+            ...node,
+            data: {
+              ...node.data,
+              runStatus:
+                execution && execution.status !== "pending"
+                  ? (execution.status as FlowNode["data"]["runStatus"])
+                  : undefined,
+              runDetail: execution ? detailFor(execution) : undefined,
+            },
+          };
+        }),
+      );
+    },
+    [setNodes],
+  );
 
   useEffect(() => {
     void loadConfig().then((config) => setPublicBase(config.public_base_url ?? ""));
@@ -428,6 +481,7 @@ function BuilderInner() {
     setTestPanelOpen(false);
     setBusy("run");
     setRun(null);
+    setElapsed(0);
     setNodes((current) =>
       current.map((node) => ({
         ...node,
@@ -435,25 +489,31 @@ function BuilderInner() {
       })),
     );
     try {
-      const result = await api.post<RunDetail>(`${base}/run`, { input: parsed });
-      setRun(result);
-      const byId = new Map(result.nodes.map((execution) => [execution.node_id, execution]));
-      setNodes((current) =>
-        current.map((node) => {
-          const execution = byId.get(node.id);
-          return {
-            ...node,
-            data: {
-              ...node.data,
-              runStatus:
-                execution && execution.status !== "pending"
-                  ? (execution.status as FlowNode["data"]["runStatus"])
-                  : undefined,
-              runDetail: execution ? detailFor(execution) : undefined,
-            },
-          };
-        }),
+      // Started detached, then polled. An agent flow runs for minutes, and a
+      // request held open for all of them is a spinner that says nothing,
+      // sitting under whatever proxy timeout is shortest. Polling the run
+      // detail also goes through the api client, so a token refresh mid-run
+      // is handled — an EventSource could not do that.
+      const accepted = await api.post<RunAccepted>(`${base}/run?mode=async`, { input: parsed });
+      const startedAt = Date.now();
+      const tick = window.setInterval(
+        () => setElapsed(Math.round((Date.now() - startedAt) / 1000)),
+        1000,
       );
+      let result: RunDetail;
+      try {
+        result = await pollRun(
+          `/api/v1/orgs/${orgId}/runs/${accepted.run_id}`,
+          (snapshot) => {
+            setRun(snapshot);
+            paintNodes(snapshot);
+          },
+        );
+      } finally {
+        window.clearInterval(tick);
+      }
+      setRun(result);
+      paintNodes(result);
       setBanner(
         result.status === "succeeded"
           ? { tone: "ok", text: `Run succeeded in ${duration(result.duration_ms)}.` }
@@ -527,12 +587,24 @@ function BuilderInner() {
             Validate
           </Button>
           <div className="relative">
+            {/* Not the Button's `loading` prop: it hides the label under the
+                spinner to keep the width steady, which is right for a submit
+                and wrong here — on a run that lasts minutes, the ticking
+                count is the whole difference between "working" and "hung".
+                Tabular numerals keep it from jittering instead. */}
             <Button
               variant="secondary"
               onClick={() => setTestPanelOpen((open) => !open)}
-              loading={busy === "run"}
+              disabled={busy === "run"}
             >
-              Test run
+              {busy === "run" ? (
+                <>
+                  <Spinner className="h-3.5 w-3.5" />
+                  <span className="tabular-nums">Running {elapsed}s</span>
+                </>
+              ) : (
+                "Test run"
+              )}
             </Button>
             {testPanelOpen && (
               <div className="surface absolute top-full right-0 z-30 mt-2 w-96 rounded-2xl p-4 shadow-xl shadow-black/40">
@@ -706,7 +778,9 @@ function BuilderInner() {
           )}
           </div>
 
-          {run && <RunSummary run={run} onClose={() => setRun(null)} />}
+          {run && (
+            <RunSummary run={run} elapsed={elapsed} onClose={() => setRun(null)} />
+          )}
         </div>
 
         {selectedNode && selectedSpec && (
@@ -949,7 +1023,16 @@ function Palette({
 
 /* ------------------------------------------------------------ run result --- */
 
-function RunSummary({ run, onClose }: { run: RunDetail; onClose: () => void }) {
+function RunSummary({
+  run,
+  elapsed,
+  onClose,
+}: {
+  run: RunDetail;
+  elapsed: number;
+  onClose: () => void;
+}) {
+  const live = !TERMINAL_RUN_STATUSES.has(run.status);
   const ordered = [...run.nodes].sort((a, b) =>
     (a.started_at ?? "").localeCompare(b.started_at ?? ""),
   );
@@ -962,7 +1045,16 @@ function RunSummary({ run, onClose }: { run: RunDetail; onClose: () => void }) {
     >
       <div className="p-4">
         <div className="mb-3 flex flex-wrap items-center gap-3">
-          <p className="text-sm font-medium text-ink-100">Last test run</p>
+          <p className="text-sm font-medium text-ink-100">
+            {live ? "Running now" : "Last test run"}
+          </p>
+          {live && (
+            <span
+              className="h-1.5 w-1.5 flex-none animate-pulse rounded-full"
+              style={{ backgroundColor: "var(--status-warn)" }}
+              aria-hidden="true"
+            />
+          )}
           <span className="font-mono text-xs text-ink-500">{run.id.slice(0, 8)}</span>
           <Link
             to={`/app/runs/${run.id}`}
@@ -971,7 +1063,7 @@ function RunSummary({ run, onClose }: { run: RunDetail; onClose: () => void }) {
             Open full log →
           </Link>
           <span className="ml-auto font-mono text-xs text-ink-300">
-            {duration(run.duration_ms)}
+            {live ? `${elapsed}s` : duration(run.duration_ms)}
           </span>
           <button
             onClick={onClose}

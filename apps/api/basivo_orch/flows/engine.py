@@ -5,11 +5,21 @@ side effect here — section 3 of the SOW makes the run log a product feature, s
 the engine's job is equally "run the flow" and "leave behind a log good enough
 to analyse".
 
-Execution model: a single topological pass with an *active set*. A node runs
-when it is reachable through an edge that actually fired. Condition nodes fire
-one port, so the branch not taken is marked SKIPPED rather than left absent —
-an absent row is indistinguishable from a node that never existed, and would
-quietly corrupt the per-node reliability figures the analysis layer computes.
+Execution model: waves over the graph with an *active set*. Every node whose
+predecessors have all settled runs in the same wave, concurrently — two agents
+hanging off one trigger are independent work, and running them one after the
+other made a 59s branch and a 3m49s branch take 4m48s instead of 3m49s. A node
+runs when it is reachable through an edge that actually fired. Condition nodes
+fire one port, so the branch not taken is marked SKIPPED rather than left
+absent — an absent row is indistinguishable from a node that never existed,
+and would quietly corrupt the per-node reliability figures the analysis layer
+computes.
+
+Concurrency has one hard constraint: the whole run shares a single
+`AsyncSession`, and SQLAlchemy sessions are not safe under concurrent use. So
+node *bodies* run in parallel while every database touch — node rows, event
+writes, credential reads — is serialised behind `self._db`. Model calls and
+HTTP are where the wall-clock actually goes; the database work is microseconds.
 """
 
 from __future__ import annotations
@@ -42,6 +52,11 @@ log = get_logger(__name__)
 #: server that accepts the connection and never answers holds a worker forever.
 RUN_TIMEOUT_SECONDS = 900
 
+#: How many nodes may be in flight at once. Parallelism is the point, but a
+#: fan-out of thirty agents firing thirty simultaneous model calls earns a
+#: provider rate-limit instead of a fast run.
+MAX_PARALLEL_NODES = 8
+
 
 class RunCancelled(Exception):
     """Raised when a run is cancelled while executing."""
@@ -62,7 +77,10 @@ class Engine:
         self.session = session
         self.run = run
         self.graph = graph
-        self.events = EventWriter(session, run.id, redis_client)
+        #: Serialises every use of `session`, shared with the event writer so a
+        #: node committing its row cannot interleave with an event write.
+        self._db = asyncio.Lock()
+        self.events = EventWriter(session, run.id, redis_client, lock=self._db)
         self._http = http
         self._owns_http = http is None
 
@@ -89,12 +107,13 @@ class Engine:
         except ValueError:
             return None
 
-        record = await self.session.get(Credential, credential_uuid)
-        if record is None or record.organization_id != self.run.organization_id:
-            return None
+        async with self._db:
+            record = await self.session.get(Credential, credential_uuid)
+            if record is None or record.organization_id != self.run.organization_id:
+                return None
 
-        record.last_used_at = datetime.now(UTC)
-        await self.session.commit()
+            record.last_used_at = datetime.now(UTC)
+            await self.session.commit()
 
         return ResolvedCredential(
             provider=record.provider,
@@ -115,7 +134,8 @@ class Engine:
         try:
             self.run.status = RunStatus.RUNNING
             self.run.started_at = started
-            await self.session.commit()
+            async with self._db:
+                await self.session.commit()
             await self.events.emit("run.started", {"run_id": str(self.run.id)})
 
             try:
@@ -153,7 +173,8 @@ class Engine:
         finished = datetime.now(UTC)
         self.run.finished_at = finished
         self.run.duration_ms = int((finished - started).total_seconds() * 1000)
-        await self.session.commit()
+        async with self._db:
+            await self.session.commit()
 
     def _final_output(self) -> dict[str, Any]:
         """What the run returns to its caller.
@@ -173,30 +194,71 @@ class Engine:
         return {"result": {node_id: self.outputs[node_id] for node_id in terminals}}
 
     async def _run_nodes(self, http: httpx.AsyncClient) -> None:
+        """Execute the graph in waves, everything independent running together.
+
+        A node joins a wave once every predecessor has *settled* (run or been
+        skipped), which is exactly when the sequential pass would have reached
+        it — same ordering guarantees, same skip semantics, minus the waiting.
+        `topological_order` still runs first: it is what raises on a cycle, and
+        its order breaks ties inside a wave so logs read top-to-bottom.
+        """
         order = topological_order(self.graph)
         trigger = next(node for node in self.graph.nodes if node_registry.get(node.type).is_trigger)
+        rank = {node_id: index for index, node_id in enumerate(order)}
+        pending = {node_id for node_id in order if self.graph.node(node_id) is not None}
+        settled: set[str] = set()
+        gate = asyncio.Semaphore(MAX_PARALLEL_NODES)
 
-        for node_id in order:
-            node = self.graph.node(node_id)
-            if node is None:
-                continue
+        while pending:
+            wave = sorted(
+                (
+                    node_id
+                    for node_id in pending
+                    if all(edge.source in settled for edge in self.graph.incoming(node_id))
+                ),
+                key=lambda node_id: rank[node_id],
+            )
+            if not wave:
+                # Unreachable: topological_order already rejects cycles. Raising
+                # beats spinning forever if that ever stops being true.
+                raise NodeError(f"Deadlocked with {len(pending)} node(s) unreachable.")
 
-            incoming = self.graph.incoming(node_id)
-            if node_id != trigger.id and not self._is_active(node_id, incoming):
-                await self._record_skipped(node)
-                continue
+            results = await asyncio.gather(
+                *(self._settle(node_id, trigger.id, http, gate) for node_id in wave),
+                # A sibling's failure must not orphan the branches already in
+                # flight: they finish, record their rows, and the run fails on
+                # the first error afterwards. Cancelling mid-model-call would
+                # bill the tokens and log nothing.
+                return_exceptions=True,
+            )
+            pending -= set(wave)
+            settled |= set(wave)
 
-            upstream = self._input_for(node_id, incoming)
-            result = await self._run_one(node, upstream, http)
+            for node_id, outcome in zip(wave, results, strict=True):
+                if isinstance(outcome, BaseException):
+                    raise outcome
+                if outcome is None:  # skipped
+                    continue
+                self.outputs[node_id] = outcome.output
+                self.variables |= outcome.variables
+                fired = outcome.ports or [DEFAULT_PORT]
+                for edge in self.graph.outgoing(node_id):
+                    port = edge.source_handle or DEFAULT_PORT
+                    if port in fired:
+                        self._arrivals[edge.target].add(port)
 
-            self.outputs[node_id] = result.output
-            self.variables |= result.variables
-
-            fired = result.ports or [DEFAULT_PORT]
-            for edge in self.graph.outgoing(node_id):
-                port = edge.source_handle or DEFAULT_PORT
-                if port in fired:
-                    self._arrivals[edge.target].add(port)
+    async def _settle(
+        self, node_id: str, trigger_id: str, http: httpx.AsyncClient, gate: asyncio.Semaphore
+    ) -> NodeResult | None:
+        """Run one node, or record it as skipped. Returns None when skipped."""
+        node = self.graph.node(node_id)
+        assert node is not None  # pending only ever holds real nodes
+        incoming = self.graph.incoming(node_id)
+        if node_id != trigger_id and not self._is_active(node_id, incoming):
+            await self._record_skipped(node)
+            return None
+        async with gate:
+            return await self._run_one(node, self._input_for(node_id, incoming), http)
 
     def _is_active(self, node_id: str, incoming: list[Any]) -> bool:
         # Any live incoming edge is enough. A join node downstream of a branch
@@ -219,19 +281,20 @@ class Engine:
         return {source: self.outputs[source] for source in sources}
 
     async def _record_skipped(self, node: Any) -> None:
-        self.session.add(
-            NodeExecution(
-                run_id=self.run.id,
-                node_id=node.id,
-                node_type=node.type,
-                node_name=node.name,
-                status=NodeStatus.SKIPPED,
-                attempt=1,
-                duration_ms=0,
-                finished_at=datetime.now(UTC),
+        async with self._db:
+            self.session.add(
+                NodeExecution(
+                    run_id=self.run.id,
+                    node_id=node.id,
+                    node_type=node.type,
+                    node_name=node.name,
+                    status=NodeStatus.SKIPPED,
+                    attempt=1,
+                    duration_ms=0,
+                    finished_at=datetime.now(UTC),
+                )
             )
-        )
-        await self.session.commit()
+            await self.session.commit()
         await self.events.emit(
             "node.skipped",
             {
@@ -260,8 +323,9 @@ class Engine:
                 input_summary=summarise(upstream),
                 started_at=started,
             )
-            self.session.add(record)
-            await self.session.commit()
+            async with self._db:
+                self.session.add(record)
+                await self.session.commit()
 
             await self.events.emit(
                 "node.started",
@@ -330,14 +394,15 @@ class Engine:
                     result = await implementation.run(config, ctx)
 
                 finished = datetime.now(UTC)
-                record.status = NodeStatus.SUCCEEDED
-                record.output_summary = summarise(result.output)
-                record.finished_at = finished
-                record.duration_ms = int((finished - started).total_seconds() * 1000)
-                for key in ("cost_usd", "tokens_in", "tokens_out"):
-                    if key in result.metrics:
-                        setattr(record, key, result.metrics[key])
-                await self.session.commit()
+                async with self._db:
+                    record.status = NodeStatus.SUCCEEDED
+                    record.output_summary = summarise(result.output)
+                    record.finished_at = finished
+                    record.duration_ms = int((finished - started).total_seconds() * 1000)
+                    for key in ("cost_usd", "tokens_in", "tokens_out"):
+                        if key in result.metrics:
+                            setattr(record, key, result.metrics[key])
+                    await self.session.commit()
 
                 await self.events.emit(
                     "node.succeeded",
@@ -360,11 +425,12 @@ class Engine:
                     )
 
                 finished = datetime.now(UTC)
-                record.status = NodeStatus.FAILED
-                record.error = str(exc)[:2000]
-                record.finished_at = finished
-                record.duration_ms = int((finished - started).total_seconds() * 1000)
-                await self.session.commit()
+                async with self._db:
+                    record.status = NodeStatus.FAILED
+                    record.error = str(exc)[:2000]
+                    record.finished_at = finished
+                    record.duration_ms = int((finished - started).total_seconds() * 1000)
+                    await self.session.commit()
                 last_error = exc
 
                 retryable = isinstance(exc, NodeError) and exc.retryable

@@ -251,20 +251,33 @@ async def delete_flow(
 # ---------------------------------------------------------------------------
 
 
-@management_router.post("/orgs/{organization_id}/flows/{flow_id}/run", response_model=RunDetail)
+@management_router.post("/orgs/{organization_id}/flows/{flow_id}/run")
 async def test_run(
     flow_id: uuid.UUID,
     payload: RunRequest,
+    response: Response,
+    mode: Annotated[
+        Literal["sync", "async"],
+        Query(
+            description=(
+                "sync blocks until the run finishes; async returns 202 with a run id "
+                "to poll. The editor uses async — an agent flow can run for minutes, "
+                "and a held-open request is a spinner with no progress and a proxy "
+                "timeout waiting to happen."
+            )
+        ),
+    ] = "sync",
     context: OrgContext = Depends(require(Permission.FLOW_RUN)),
     session: AsyncSession = Depends(get_async_session),
     redis_client: RedisClient | None = Depends(get_redis),
-) -> RunDetail:
+) -> Any:
     """Run the *latest* version, published or not — the editor's test button."""
     flow = await _load_flow(session, context.organization_id, flow_id)
     version = await service.latest_version(session, flow.id)
+    graph = Graph.model_validate(version.graph)
 
     try:
-        service.validate(Graph.model_validate(version.graph))
+        service.validate(graph)
     except GraphError as exc:
         raise _graph_error(exc) from exc
 
@@ -276,9 +289,13 @@ async def test_run(
         payload=payload.input,
         user_id=context.user.id,
     )
-    await service.execute(
-        session, run=run, graph=Graph.model_validate(version.graph), redis_client=redis_client
-    )
+
+    if mode == "async":
+        service.execute_detached(run.id, graph, redis_client)
+        response.status_code = status.HTTP_202_ACCEPTED
+        return _accepted(flow.id, run)
+
+    await service.execute(session, run=run, graph=graph, redis_client=redis_client)
     return await _run_detail(session, context.organization_id, run.id)
 
 

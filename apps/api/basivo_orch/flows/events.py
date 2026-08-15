@@ -69,33 +69,47 @@ class EventWriter:
     rather than silent.
     """
 
-    def __init__(self, session: AsyncSession, run_id: uuid.UUID, client: RedisClient | None):
+    def __init__(
+        self,
+        session: AsyncSession,
+        run_id: uuid.UUID,
+        client: RedisClient | None,
+        *,
+        lock: asyncio.Lock | None = None,
+    ):
         self._session = session
         self._run_id = run_id
         self._redis = client
         self._seq = 0
+        # Nodes run concurrently and share the engine's session; the engine
+        # passes its lock in so an event write cannot interleave with a node
+        # row's commit. It also makes `_seq` safe: increment and insert happen
+        # together, so sequence numbers stay gapless and in write order.
+        self._lock = lock or asyncio.Lock()
 
     @property
     def seq(self) -> int:
         return self._seq
 
     async def emit(self, event_type: str, data: dict[str, Any] | None = None) -> RunEvent:
-        self._seq += 1
         payload = {
             **(data or {}),
             "timestamp": datetime.now(UTC).isoformat(),
         }
 
-        event = RunEvent(run_id=self._run_id, seq=self._seq, type=event_type, data=payload)
-        self._session.add(event)
-        # Committed immediately, not batched with the run's other writes. A
-        # reader polling the database has to be able to see progress *while*
-        # the run is still going; holding events in an open transaction until
-        # the run ends would make the live stream arrive all at once at the end.
-        await self._session.commit()
+        async with self._lock:
+            self._seq += 1
+            event = RunEvent(run_id=self._run_id, seq=self._seq, type=event_type, data=payload)
+            self._session.add(event)
+            # Committed immediately, not batched with the run's other writes. A
+            # reader polling the database has to be able to see progress *while*
+            # the run is still going; holding events in an open transaction until
+            # the run ends would make the live stream arrive all at once at the end.
+            await self._session.commit()
+            seq = self._seq
 
         if self._redis is not None:
-            message = json.dumps({"seq": self._seq, "type": event_type, "data": payload})
+            message = json.dumps({"seq": seq, "type": event_type, "data": payload})
             try:
                 await self._redis.publish(channel_for(self._run_id), message)
             except Exception as exc:
