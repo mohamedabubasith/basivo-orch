@@ -16,7 +16,7 @@ from basivo_orch.config import get_settings
 from basivo_orch.credentials.router import router as credentials_router
 from basivo_orch.db import dispose_engine
 from basivo_orch.flows.events import RedisClient
-from basivo_orch.flows.router import external_router, management_router
+from basivo_orch.flows.router import external_router, hooks_router, management_router
 from basivo_orch.gate import gate_is_active, warn_if_gate_is_inert
 from basivo_orch.logging import configure_logging, get_logger
 
@@ -87,7 +87,11 @@ def create_app() -> FastAPI:
         # /api/v1/* is deliberately NOT exempt: those routes are the web app's,
         # authenticated by the session cookie, and exempting them would hand an
         # attacker cross-site writes.
-        csrf_exempt_prefixes=("/flows",),
+        #
+        # /hooks is exempt for the same reason as /flows: authenticated by the
+        # webhook trigger's secret (HMAC or token header), never by a cookie —
+        # GitHub cannot fetch a CSRF token before delivering a webhook.
+        csrf_exempt_prefixes=("/flows", "/hooks"),
     )
 
     app.add_middleware(
@@ -117,6 +121,7 @@ def create_app() -> FastAPI:
     app.include_router(management_router, prefix=settings.API_V1_PREFIX)
     app.include_router(credentials_router, prefix=settings.API_V1_PREFIX)
     app.include_router(external_router)
+    app.include_router(hooks_router)
 
     @app.get("/health", tags=["ops"])
     async def health() -> dict[str, str]:

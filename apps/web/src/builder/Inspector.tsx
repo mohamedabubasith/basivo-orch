@@ -194,7 +194,7 @@ export function Inspector({
             <p className="text-[0.68rem] font-medium text-ink-300">This webhook's URL</p>
             {isPublished ? (
               <code className="mt-1.5 block truncate rounded-md bg-ink-950/60 px-2 py-1.5 font-mono text-[0.68rem] text-ink-200">
-                POST {publicBase}/flows/{flowId}/run
+                {publicBase}/hooks/{flowId}
               </code>
             ) : (
               <p className="mt-1 text-[0.68rem] leading-relaxed text-ink-500">
@@ -203,17 +203,16 @@ export function Inspector({
               </p>
             )}
             <p className="mt-1.5 text-[0.68rem] leading-relaxed text-ink-500">
-              Callers authenticate with an API key
-              {Boolean(config.require_signature) && (
-                <>
-                  {" "}
-                  and must also send the secret below as{" "}
-                  <code className="text-ink-400">X-Webhook-Secret</code>
-                </>
-              )}
-              ; the request body arrives as{" "}
-              <code className="text-ink-400">{"{{ input }}"}</code>. Full
-              examples are under the Endpoints button above.
+              No API key — paste it straight into GitHub or GitLab webhook
+              settings. The secret below authenticates every delivery
+              (GitHub's <code className="text-ink-400">X-Hub-Signature-256</code>,
+              GitLab's <code className="text-ink-400">X-Gitlab-Token</code>, or a
+              plain <code className="text-ink-400">X-Webhook-Secret</code>), so
+              this URL only answers while{" "}
+              <em className="not-italic text-ink-300">Require signature</em> is
+              on. The delivery arrives as{" "}
+              <code className="text-ink-400">{"{{ input.body }}"}</code>;
+              API-key endpoints live under the Endpoints button above.
             </p>
           </div>
         )}

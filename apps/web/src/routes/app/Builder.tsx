@@ -574,6 +574,7 @@ function BuilderInner() {
                 <EndpointsPanel
                   base={publicBase}
                   flowId={flow.id}
+                  hasWebhookTrigger={nodes.some((node) => node.data.nodeType === "trigger.webhook")}
                   onClose={() => setEndpointsOpen(false)}
                 />
               )}
@@ -749,14 +750,17 @@ function BuilderInner() {
 function EndpointsPanel({
   base,
   flowId,
+  hasWebhookTrigger,
   onClose,
 }: {
   base: string;
   flowId: string;
+  hasWebhookTrigger: boolean;
   onClose: () => void;
 }) {
   const runUrl = `${base}/flows/${flowId}/run`;
   const streamUrl = `${base}/flows/${flowId}/run/stream`;
+  const hookUrl = `${base}/hooks/${flowId}`;
   const curl = [
     `curl -X POST ${runUrl} \\`,
     `  -H "Authorization: Bearer bsv_YOUR_API_KEY" \\`,
@@ -795,6 +799,17 @@ function EndpointsPanel({
       <div className="mt-4 space-y-3">
         <CopyRow label="Run (blocking)" value={runUrl} />
         <CopyRow label="Run (SSE stream)" value={streamUrl} />
+        {hasWebhookTrigger && (
+          <div>
+            <CopyRow label="Inbound hook (no API key)" value={hookUrl} />
+            <p className="mt-1 text-[0.68rem] leading-relaxed text-ink-500">
+              For senders that can't add headers of their own — paste it into
+              GitHub or GitLab webhook settings with the trigger's secret. The
+              secret authenticates each delivery, so it only answers when the
+              trigger has <em>Require signature</em> on.
+            </p>
+          </div>
+        )}
         <div>
           <p className="mb-1 text-[0.68rem] font-medium text-ink-400">Example</p>
           <div className="relative">

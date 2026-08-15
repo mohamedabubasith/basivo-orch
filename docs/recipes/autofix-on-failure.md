@@ -7,7 +7,67 @@ ticket with a linked, reviewable PR by the time anyone looks.
 
 The key mental model: **the flow does not watch anything.** Failures are
 *pushed* to it — every system that knows something broke (CI, Sentry, your
-own app's error handler) can call a URL, and a published flow *is* a URL.
+own app's error handler, GitHub itself) can call a URL, and a published flow
+*is* a URL. Two of them:
+
+- `POST /flows/{id}/run` — for callers you control (CI steps, your app).
+  Authenticated with an API key.
+- `/hooks/{id}` — for senders that **cannot hold an API key**, like GitHub's
+  own repository webhooks. Authenticated by the webhook trigger's secret:
+  GitHub's `X-Hub-Signature-256` body signature, GitLab's `X-Gitlab-Token`,
+  or a plain `X-Webhook-Secret` header. Redeliveries dedupe automatically
+  (the host's delivery UUID becomes the run's idempotency key).
+
+## The tightest loop: a GitHub issue IS the trigger
+
+No CI wiring at all — someone (or something) files an issue, GitHub calls
+your flow, and a fix PR appears on the issue a few minutes later.
+
+Flow (three nodes):
+
+```
+Webhook Trigger → Condition → Auto-fix & PR
+```
+
+1. **Webhook Trigger**: turn **Require signature** on and set a secret.
+   The hook URL refuses to run without it — the secret is what stops
+   strangers from spending your model budget.
+2. **Condition**: `{{ input.body.action }}` equals `opened` — GitHub fires
+   the same webhook for edits, closes, and label changes; only fresh issues
+   should start a fix. To be pickier, add `{{ input.body.issue.title }}`
+   contains `[autofix]`, so only issues opting in get the robot.
+3. **Auto-fix & PR**: repo + git credential + base branch, and the problem
+   assembled from the issue itself:
+
+   ```
+   Fix the problem reported in issue #{{ input.body.issue.number }}
+   ({{ input.body.issue.html_url }}). Mention "#{{ input.body.issue.number }}"
+   in your summary so the PR links back to it.
+
+   Title: {{ input.body.issue.title }}
+
+   {{ input.body.issue.body }}
+   ```
+
+   No Raise Ticket node here — the issue already exists; creating a second
+   one would be noise.
+
+Then, in the repository: **Settings → Webhooks → Add webhook**:
+
+- **Payload URL**: the *Inbound hook* URL from the builder's Endpoints panel
+  (`https://…/hooks/{flow-id}`)
+- **Content type**: `application/json`
+- **Secret**: the same secret you put on the trigger
+- **Events**: "Let me select individual events" → **Issues** only
+
+GitLab is the same idea: project **Settings → Webhooks**, the hook URL,
+**Secret token** = the trigger's secret, trigger on **Issues events** (the
+payload fields differ — read one run's input on the run detail page and
+template from what you see).
+
+That's the whole setup. From then on: issue opened → PR opened, with the
+run's full step log (files read, files staged, tokens, cost) as the audit
+trail, and the merge still yours.
 
 ## Build the flow (once)
 
@@ -59,7 +119,10 @@ own app's error handler) can call a URL, and a published flow *is* a URL.
 
 ## Point failures at it
 
-Anything that can send HTTP is a source. Three that cover most teams:
+Anything that can send HTTP is a source. The snippets below use the API-key
+endpoint because these callers control their own headers; senders that don't
+(GitHub, GitLab webhooks) use the `/hooks/{id}` URL as in the section above.
+Three that cover most teams:
 
 ### GitHub Actions — a failing job reports itself
 

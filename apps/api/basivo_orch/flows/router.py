@@ -1,12 +1,16 @@
 """HTTP surface for flows.
 
-Two routers, because there are two audiences with different credentials:
+Three routers, because there are three audiences with different credentials:
 
 * `management_router` — the editor and dashboard. Session-authenticated,
   organisation-scoped, permission-checked, mounted under the versioned prefix.
 * `external_router` — SOW section 4. API-key authenticated, mounted at the
   paths the SOW specifies (`/flows/{id}/run`, …), because those are a contract
   someone will paste into their backend.
+* `hooks_router` — `/hooks/{flow_id}`, for senders that cannot hold an API
+  key (a GitHub repository webhook has exactly one credential slot: its
+  signing secret). The webhook trigger's secret is the authentication; see
+  `basivo_orch.flows.webhooks`.
 """
 
 from __future__ import annotations
@@ -46,9 +50,16 @@ from basivo_orch.flows.schemas import (
     RunRequest,
 )
 from basivo_orch.flows.streaming import SSE_HEADERS, event_stream
+from basivo_orch.flows.webhooks import (
+    authenticate_hook,
+    ensure_method_allowed,
+    hook_idempotency_key,
+    wrap_hook_payload,
+)
 
 management_router = APIRouter(tags=["flows"])
 external_router = APIRouter(prefix="/flows", tags=["flow execution"])
+hooks_router = APIRouter(tags=["inbound hooks"])
 
 
 def get_redis(request: Request) -> RedisClient | None:
@@ -618,6 +629,71 @@ async def run_flow_streaming(
         media_type="text/event-stream",
         headers={**SSE_HEADERS, "X-Run-Id": str(run.id)},
     )
+
+
+_HOOK_404 = "No webhook is listening at this URL."
+
+
+@hooks_router.api_route(
+    "/hooks/{flow_id}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"], response_model=RunAccepted
+)
+async def inbound_hook(
+    flow_id: uuid.UUID,
+    request: Request,
+    response: Response,
+    session: AsyncSession = Depends(get_async_session),
+    redis_client: RedisClient | None = Depends(get_redis),
+) -> RunAccepted:
+    """Receive a raw webhook delivery and start the flow. No API key.
+
+    Paste this URL into GitHub's or GitLab's webhook settings (or anything
+    else that can POST) with the trigger's secret, and the sender's own
+    authentication — GitHub's body signature, GitLab's token header — admits
+    it. Always 202: webhook senders time out fast and only want the delivery
+    acknowledged, and both hosts show this response body in their delivery
+    log, so the run id lands somewhere a debugging human will actually look.
+
+    Every failure before authentication is the same generic 404 — an
+    unauthenticated caller probing URLs learns nothing about which flows
+    exist, are published, or how they are configured.
+    """
+    flow = await session.get(Flow, flow_id)
+    if flow is None or flow.published_version_id is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, _HOOK_404)
+    version = await session.get(FlowVersion, flow.published_version_id)
+    if version is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, _HOOK_404)
+    graph = Graph.model_validate(version.graph)
+    trigger = next((node for node in graph.nodes if node.type == "trigger.webhook"), None)
+    if trigger is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, _HOOK_404)
+    config = WebhookTriggerConfig.model_validate(trigger.config)
+
+    raw_body = await request.body()
+    authenticate_hook(config, raw_body=raw_body, headers=request.headers)
+    ensure_method_allowed(config, request.method)
+
+    run, created = await service.create_run(
+        session,
+        flow=flow,
+        version=version,
+        trigger=TriggerKind.WEBHOOK,
+        payload=wrap_hook_payload(
+            method=request.method,
+            headers=request.headers,
+            query=request.query_params,
+            raw_body=raw_body,
+        ),
+        idempotency_key=hook_idempotency_key(request.headers),
+    )
+    if created:
+        service.execute_detached(run.id, graph, redis_client)
+    else:
+        # A redelivered webhook (same delivery UUID) reports the original run
+        # rather than fixing the same issue twice.
+        response.headers["Idempotent-Replay"] = "true"
+    response.status_code = status.HTTP_202_ACCEPTED
+    return _accepted(flow.id, run)
 
 
 @external_router.get("/{flow_id}/runs/{run_id}", response_model=RunDetail)

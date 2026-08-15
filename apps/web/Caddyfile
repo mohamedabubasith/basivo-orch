@@ -34,7 +34,7 @@
 		# endpoints — would fall through to the static file server and answer
 		# 405 to a POST. Nothing in development catches this: the Vite dev
 		# server routes by origin, not by path.
-		path /auth /auth/* /users /users/* /orgs /orgs/* /api /api/* /flows /flows/* /health /config
+		path /auth /auth/* /users /users/* /orgs /orgs/* /api /api/* /flows /flows/* /hooks /hooks/* /health /config
 	}
 	handle @api {
 		reverse_proxy api:8000 {
