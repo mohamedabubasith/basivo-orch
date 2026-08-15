@@ -27,12 +27,10 @@ opt-in via environment variables.
 from __future__ import annotations
 
 import httpx
-import pytest
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
 from pydantic_ai.models.function import FunctionModel
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from basivo_orch.flows import nodes as registry
 from basivo_orch.flows.engine import Engine
@@ -155,7 +153,10 @@ async def test_an_agent_code_tool_executes_inside_a_run(session, make_run, monke
                                     "type": "object",
                                     "properties": {"label": {"type": "string"}},
                                 },
-                                "code": 'def main(data):\n    return {"stamped": data["args"]["label"].upper()}\n',
+                                "code": (
+                                    "def main(data):\n"
+                                    '    return {"stamped": data["args"]["label"].upper()}\n'
+                                ),
                             }
                         ],
                     },
