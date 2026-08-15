@@ -40,7 +40,7 @@ def make_context(recorder: _Recorder, http: httpx.AsyncClient, *, upstream: obje
         node_name="Code",
         attempt=1,
         input=upstream,
-        outputs={"earlier": {"output": {"x": 1}}},
+        outputs={"earlier": {"x": 1}},
         variables={"env": "test"},
         trigger={"payload": {"n": 21}},
         progress=recorder.progress,

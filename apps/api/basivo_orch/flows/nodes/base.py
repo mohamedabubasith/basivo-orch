@@ -105,7 +105,15 @@ class NodeContext:
     def template_context(self) -> dict[str, Any]:
         return {
             "input": self.input,
-            "nodes": self.outputs,
+            # Wrapped, so the addressable path is `nodes.<id>.output.*` — the
+            # contract every docstring, the editor's autocomplete and the code
+            # node's tests already promised. The engine exposed the raw value
+            # at `nodes.<id>.*` instead, which meant every `.output` reference
+            # the editor suggested failed at run time with "not available";
+            # the integration suite caught it the first time a flow actually
+            # used a cross-node reference. The envelope also reserves room for
+            # `nodes.<id>.status` and friends without a breaking change.
+            "nodes": {node_id: {"output": value} for node_id, value in self.outputs.items()},
             "vars": self.variables,
             "trigger": self.trigger,
             "run": {"id": str(self.run_id)},
