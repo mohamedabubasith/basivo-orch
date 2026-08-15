@@ -25,7 +25,8 @@ export interface ToolValue {
   name: string;
   description: string;
   input_schema: Record<string, unknown>;
-  kind: "http" | "constant";
+  kind: "code" | "http" | "constant";
+  code: string;
   url: string;
   method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   headers: Record<string, string>;
@@ -88,7 +89,8 @@ function emptyTool(existing: ToolValue[]): ToolValue {
     name,
     description: "",
     input_schema: { type: "object", properties: {} },
-    kind: "http",
+    kind: "code",
+    code: 'def main(data):\n    # data["args"] = what the model passed\n    return {"ok": True}\n',
     url: "",
     method: "POST",
     headers: {},
@@ -139,7 +141,11 @@ export function ToolEditor({
                 className="h-1.5 w-1.5 flex-none rounded-full"
                 style={{
                   backgroundColor:
-                    tool.kind === "constant" ? "var(--status-warn)" : "var(--series)",
+                    tool.kind === "constant"
+                      ? "var(--status-warn)"
+                      : tool.kind === "code"
+                        ? "var(--color-accent-500)"
+                        : "var(--series)",
                 }}
                 aria-hidden="true"
               />
@@ -147,7 +153,7 @@ export function ToolEditor({
                 {tool.name || "unnamed"}
               </span>
               <span className="flex-none text-[0.62rem] text-ink-500 uppercase">
-                {tool.kind === "constant" ? "stub" : tool.method}
+                {tool.kind === "constant" ? "stub" : tool.kind === "code" ? "py" : tool.method}
               </span>
               <svg
                 viewBox="0 0 24 24"
@@ -218,12 +224,40 @@ export function ToolEditor({
                     }
                     className={SMALL_INPUT}
                   >
+                    <option value="code">Your own code (Python function)</option>
                     <option value="http">HTTP call</option>
                     <option value="constant">Constant value (stub for testing)</option>
                   </select>
                 </LabelledSmall>
 
-                {tool.kind === "http" ? (
+                {tool.kind === "code" ? (
+                  <LabelledSmall
+                    label="Function"
+                    hint={'The model\u2019s arguments arrive at data["args"]; the flow\u2019s input/nodes/vars/trigger sit beside them. Whatever main returns goes back to the model.'}
+                  >
+                    <textarea
+                      value={tool.code}
+                      rows={8}
+                      spellCheck={false}
+                      autoCorrect="off"
+                      autoCapitalize="off"
+                      onChange={(event) => update(index, { code: event.target.value })}
+                      onKeyDown={(event) => {
+                        if (event.key !== "Tab") return;
+                        event.preventDefault();
+                        const target = event.currentTarget;
+                        const { selectionStart, selectionEnd } = target;
+                        const next =
+                          tool.code.slice(0, selectionStart) + "    " + tool.code.slice(selectionEnd);
+                        update(index, { code: next });
+                        requestAnimationFrame(() => {
+                          target.selectionStart = target.selectionEnd = selectionStart + 4;
+                        });
+                      }}
+                      className={cx(SMALL_INPUT, "resize-y font-mono leading-relaxed whitespace-pre")}
+                    />
+                  </LabelledSmall>
+                ) : tool.kind === "http" ? (
                   <>
                     <div className="flex gap-2">
                       <select

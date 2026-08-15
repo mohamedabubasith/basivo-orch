@@ -187,7 +187,9 @@ async def test_agent_reports_a_tool_error_without_crashing_the_run(monkeypatch, 
             ToolDefinition(
                 name="broken",
                 kind="http",
-                url="",  # no URL configured -> the tool reports failure, not a crash
+                # Points at loopback, which the SSRF guard refuses at call
+                # time — a runtime failure the model gets to react to.
+                url="https://127.0.0.1/private",
             )
         ],
     )
@@ -210,3 +212,65 @@ def test_parse_json_handles_fenced_and_bare_json():
 def test_parse_json_raises_a_readable_error_on_garbage():
     with pytest.raises(NodeError):
         _parse_json("not json at all")
+
+
+async def test_a_code_tool_runs_the_users_own_function(monkeypatch, http_client):
+    """The user's ask, verbatim: a tool that is their own code — get the time,
+    get an id, compute something — not an HTTP call. The model's arguments
+    arrive at data["args"], the flow context beside them."""
+    calls = {"n": 0}
+
+    def fake_model(messages, info):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return ModelResponse(
+                parts=[ToolCallPart(tool_name="add_up", args={"a": 19, "b": 23}, tool_call_id="t1")]
+            )
+        return ModelResponse(parts=[TextPart(content="Sum delivered.")])
+
+    async def fake_build_model(config, ctx):
+        return FunctionModel(fake_model)
+
+    monkeypatch.setattr("basivo_orch.flows.nodes.agent._build_model", fake_build_model)
+
+    config = AgentConfig(
+        prompt="add",
+        tools=[
+            ToolDefinition(
+                name="add_up",
+                description="Add two numbers.",
+                input_schema={
+                    "type": "object",
+                    "properties": {"a": {"type": "integer"}, "b": {"type": "integer"}},
+                    "required": ["a", "b"],
+                },
+                kind="code",
+                code=(
+                    "def main(data):\n"
+                    '    args = data["args"]\n'
+                    '    return {"sum": args["a"] + args["b"], "env": data["vars"]}\n'
+                ),
+            )
+        ],
+    )
+    recorder = _Recorder()
+    ctx = make_context(recorder, http=http_client)
+
+    result = await AgentNode().run(config, ctx)
+
+    tool_result = next(data for kind, data in recorder.steps if kind == "tool.result")
+    assert tool_result["ok"] is True
+    assert (
+        "'sum': 42" in tool_result["result_preview"] or '"sum": 42' in tool_result["result_preview"]
+    )
+    assert result.output["text"] == "Sum delivered."
+
+
+def test_a_code_tool_without_code_is_refused_at_validation():
+    with pytest.raises(Exception, match="code tool with no code"):
+        ToolDefinition(name="empty", kind="code")
+
+
+def test_an_http_tool_without_a_url_is_refused_at_validation():
+    with pytest.raises(Exception, match="HTTP tool with no URL"):
+        ToolDefinition(name="empty", kind="http")

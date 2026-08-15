@@ -25,15 +25,19 @@ replay, so the detail survives a dropped connection and can be read back long
 after the run finished. `agent.iter()` is used instead of `agent.run()`
 specifically so each model turn is observed as it happens.
 
-**Tools are declared, not arbitrary code.** A tool here is a JSON Schema plus
-one of two bodies: an HTTP call, or a constant. Letting a flow author attach
-executable code to a model that chooses when to run it is a remote-code-
-execution feature with extra steps. HTTP tools go through the same SSRF guard
-as the HTTP node. `Tool.from_schema` builds a pydantic-ai tool straight from
-that JSON Schema, so there is no second, hand-written schema to drift from the
-one the model sees, and the wrapper function is where `tool.called` /
-`tool.result` are actually logged — it is the one place execution, timing and
-outcome are all in scope together.
+**Tools are a declared schema with one of three bodies.** An HTTP call, a
+constant, or the author's own Python function — `def main(data)` with the
+model's arguments at `data["args"]`. Code bodies run in the Code node's
+sandboxed interpreter (`run_python`: isolated mode, CPU rlimit, wall timeout,
+empty environment) under the Code node's stated trust model — flow authors are
+authenticated workspace members, and this is containment against accidents,
+not a jail; see `code.py`'s docstring for the full statement. HTTP tools go
+through the same SSRF guard as the HTTP node, which matters most here: an
+agent choosing its own arguments is a URL partly authored by the prompt.
+`Tool.from_schema` builds a pydantic-ai tool straight from the JSON Schema, so
+there is no second, hand-written schema to drift from the one the model sees,
+and the wrapper function is where `tool.called` / `tool.result` are logged —
+the one place execution, timing and outcome are all in scope together.
 
 **Credentials are resolved by the engine, never embedded in the graph.** The
 node's config carries a `credential_id`, not a key. `NodeContext.resolve_credential`
@@ -50,7 +54,7 @@ import json
 import time
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from pydantic_ai import Agent, ModelHTTPError, UnexpectedModelBehavior, UsageLimitExceeded
 from pydantic_ai.messages import ToolCallPart
 from pydantic_ai.models import Model
@@ -61,6 +65,7 @@ from pydantic_ai.usage import UsageLimits
 
 from basivo_orch.credentials.provider_client import construct_provider
 from basivo_orch.flows.nodes.base import Node, NodeContext, NodeError, NodeResult
+from basivo_orch.flows.nodes.code import PythonExecutionError, run_python
 from basivo_orch.flows.nodes.http import assert_public_url
 from basivo_orch.flows.templating import render_value
 
@@ -112,7 +117,14 @@ class ToolDefinition(BaseModel):
         description="JSON Schema for the arguments. Sent to the model as-is.",
     )
 
-    kind: Literal["http", "constant"] = "http"
+    kind: Literal["code", "http", "constant"] = "http"
+
+    # -- code tools --------------------------------------------------------
+    #: The user's own function — `def main(data)` with the model's arguments
+    #: at data["args"] and the flow context (input/nodes/vars/trigger) beside
+    #: them. Runs in the same sandboxed interpreter as the Code node: one
+    #: sandbox, one contract, one place to harden.
+    code: str = Field(default="", max_length=50_000)
 
     # -- http tools ----------------------------------------------------------
     url: str = Field(default="", description="Supports {{ references }} and {{ tool.<arg> }}.")
@@ -124,6 +136,17 @@ class ToolDefinition(BaseModel):
 
     # -- constant tools --------------------------------------------------------
     value: Any = Field(default=None, description="Returned verbatim. For stubbing a tool.")
+
+    @model_validator(mode="after")
+    def _body_matches_kind(self) -> ToolDefinition:
+        # The webhook switch taught this lesson once: config that promises
+        # behaviour with nothing behind it must fail at validation, not at the
+        # first 3am call.
+        if self.kind == "code" and not self.code.strip():
+            raise ValueError(f"Tool {self.name!r} is a code tool with no code.")
+        if self.kind == "http" and not self.url.strip():
+            raise ValueError(f"Tool {self.name!r} is an HTTP tool with no URL.")
+        return self
 
 
 class AgentConfig(BaseModel):
@@ -445,6 +468,20 @@ async def _execute_tool(
     sees and can adapt to, not a crashed run."""
     if definition.kind == "constant":
         return True, definition.value
+
+    if definition.kind == "code":
+        try:
+            result, _printed = await run_python(
+                definition.code,
+                # The model's arguments where the function expects them, and
+                # the flow context beside them — "get the order" usually needs
+                # both what the model asked for and what the flow knows.
+                {**template, "args": arguments},
+                timeout_seconds=definition.timeout_seconds,
+            )
+            return True, result
+        except PythonExecutionError as exc:
+            return False, str(exc)
 
     context = {**template, "tool": arguments}
     try:

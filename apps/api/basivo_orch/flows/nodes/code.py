@@ -87,6 +87,71 @@ class CodeConfig(BaseModel):
     timeout_seconds: float = Field(default=10.0, ge=1, le=60)
 
 
+class PythonExecutionError(Exception):
+    """The user's code failed; the message is the readable tail of why."""
+
+
+async def run_python(code: str, data: Any, *, timeout_seconds: float) -> tuple[Any, str]:
+    """Run `main(data)` from `code` in the sandboxed interpreter.
+
+    Shared by the Code node and the Agent node's code tools — one sandbox,
+    one contract, one place to harden. Returns (result, printed): whatever
+    main() returned, and anything the code print()ed.
+    """
+    payload = json.dumps({"code": code, "data": data}, default=str).encode("utf-8")
+
+    def limit_resources() -> None:
+        # CPU seconds, not wall seconds: a sleep() is harmless, a spin loop
+        # is killed by the kernel even if the wall timeout somehow fails.
+        cpu = int(timeout_seconds) + 1
+        resource.setrlimit(resource.RLIMIT_CPU, (cpu, cpu))
+        resource.setrlimit(resource.RLIMIT_NOFILE, (64, 64))
+
+    process = await asyncio.create_subprocess_exec(
+        sys.executable,
+        "-I",  # isolated: no site-packages, no PYTHON* env, no cwd on path
+        "-c",
+        _WRAPPER,
+        stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        preexec_fn=limit_resources,
+        # An empty environment, not the server's. The parent process holds
+        # SECRET_KEY, DATABASE_URL and every provider credential's master
+        # key in its env — one os.environ read away from any code node.
+        env={},
+    )
+
+    try:
+        # A grace second over the configured limit: the CPU rlimit and this
+        # wall timeout race, and the rlimit's kill produces the better
+        # error (a traceback) when the code is genuinely spinning.
+        stdout, stderr = await asyncio.wait_for(
+            process.communicate(payload), timeout=timeout_seconds + 2
+        )
+    except TimeoutError:
+        process.kill()
+        await process.wait()
+        raise PythonExecutionError(
+            f"The code did not finish within {timeout_seconds:g}s and was stopped."
+        ) from None
+
+    printed = stderr.decode("utf-8", errors="replace").strip()
+
+    if process.returncode != 0:
+        # The tail is where Python puts the actual exception; the head of a
+        # long traceback is wrapper frames the author did not write.
+        tail = "\n".join(printed.splitlines()[-15:]) or f"exit code {process.returncode}"
+        raise PythonExecutionError(f"Code failed:\n{tail}")
+
+    try:
+        result: Any = json.loads(stdout.decode("utf-8"))["result"]
+    except (ValueError, KeyError) as exc:
+        raise PythonExecutionError("The code produced no readable result.") from exc
+
+    return result, printed
+
+
 class CodeNode(Node):
     type = "code.python"
     label = "Python Code"
@@ -103,63 +168,15 @@ class CodeNode(Node):
     timeout_seconds = 70.0
 
     async def run(self, config: CodeConfig, ctx: NodeContext) -> NodeResult:
-        payload = json.dumps(
-            {"code": config.code, "data": ctx.template_context()}, default=str
-        ).encode("utf-8")
-
-        def limit_resources() -> None:
-            # CPU seconds, not wall seconds: a sleep() is harmless, a spin loop
-            # is killed by the kernel even if the wall timeout somehow fails.
-            cpu = int(config.timeout_seconds) + 1
-            resource.setrlimit(resource.RLIMIT_CPU, (cpu, cpu))
-            resource.setrlimit(resource.RLIMIT_NOFILE, (64, 64))
-
-        process = await asyncio.create_subprocess_exec(
-            sys.executable,
-            "-I",  # isolated: no site-packages, no PYTHON* env, no cwd on path
-            "-c",
-            _WRAPPER,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            preexec_fn=limit_resources,
-            # An empty environment, not the server's. The parent process holds
-            # SECRET_KEY, DATABASE_URL and every provider credential's master
-            # key in its env — one os.environ read away from any code node.
-            # The interpreter itself needs nothing from the environment when
-            # exec'd by absolute path with -I.
-            env={},
-        )
-
         try:
-            # A grace second over the configured limit: the CPU rlimit and this
-            # wall timeout race, and the rlimit's kill produces the better
-            # error (a traceback) when the code is genuinely spinning.
-            stdout, stderr = await asyncio.wait_for(
-                process.communicate(payload), timeout=config.timeout_seconds + 2
+            result, printed = await run_python(
+                config.code, ctx.template_context(), timeout_seconds=config.timeout_seconds
             )
-        except TimeoutError:
-            process.kill()
-            await process.wait()
-            raise NodeError(
-                f"The code did not finish within {config.timeout_seconds:g}s and was stopped."
-            ) from None
-
-        printed = stderr.decode("utf-8", errors="replace").strip()
-
-        if process.returncode != 0:
-            # The tail is where Python puts the actual exception; the head of a
-            # long traceback is wrapper frames the author did not write.
-            tail = "\n".join(printed.splitlines()[-15:]) or f"exit code {process.returncode}"
-            raise NodeError(f"Code failed:\n{tail}")
+        except PythonExecutionError as exc:
+            raise NodeError(str(exc)) from None
 
         if printed:
             # Their print() output — worth surfacing, it is how people debug.
             await ctx.progress(printed[-500:])
-
-        try:
-            result: Any = json.loads(stdout.decode("utf-8"))["result"]
-        except (ValueError, KeyError) as exc:
-            raise NodeError("The code produced no readable result.") from exc
 
         return NodeResult(output=result)
