@@ -21,6 +21,8 @@ def test_stable_nodes_declare_their_paths():
     assert by_type["trigger.webhook"] == ["body", "headers", "query", "method"]
     assert by_type["http.request"] == ["status", "headers", "body"]
     assert "usage.cost_usd" in by_type["agent.llm"]
+    assert by_type["git.ticket"] == ["url", "number"]
+    assert "pr_url" in by_type["git.autofix"]
     # Author-shaped outputs: nothing to promise, so nothing suggested.
     assert by_type["code.python"] == []
     assert by_type["trigger.manual"] == []

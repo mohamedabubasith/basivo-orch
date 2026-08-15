@@ -33,6 +33,9 @@ PROVIDERS: list[str] = [
     "nebius",
     "ovhcloud",
     "alibaba",
+    # VCS hosts, for the git.ticket / git.autofix nodes — not model providers.
+    "github",
+    "gitlab",
 ]
 
 

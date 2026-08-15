@@ -49,6 +49,11 @@ class ModelFetchFailed(Exception):
 async def fetch_models(
     provider_name: str, *, api_key: str, base_url: str, options: dict[str, object]
 ) -> list[str]:
+    if provider_name in ("github", "gitlab"):
+        # VCS credentials have no model catalog; their "test" is the identity
+        # endpoint — proves the token works without touching a repository.
+        return await _verify_vcs_token(provider_name, api_key=api_key, base_url=base_url)
+
     if provider_name in NO_LIVE_CATALOG:
         raise ModelFetchNotSupported(provider_name)
 
@@ -89,3 +94,23 @@ async def _fetch_google(*, api_key: str, base_url: str, options: dict[str, objec
         return sorted(names)
     except Exception as exc:  # noqa: BLE001 - surfaced as "the key didn't work"
         raise ModelFetchFailed(str(exc)) from exc
+
+
+async def _verify_vcs_token(provider_name: str, *, api_key: str, base_url: str) -> list[str]:
+    if provider_name == "github":
+        url = (base_url or "https://api.github.com").rstrip("/") + "/user"
+        headers = {"Authorization": f"Bearer {api_key}", "Accept": "application/vnd.github+json"}
+    else:
+        url = (base_url or "https://gitlab.com").rstrip("/") + "/api/v4/user"
+        headers = {"PRIVATE-TOKEN": api_key}
+
+    import httpx
+
+    async with httpx.AsyncClient(timeout=15) as client:
+        try:
+            response = await client.get(url, headers=headers)
+        except httpx.HTTPError as exc:
+            raise ModelFetchFailed(str(exc)) from exc
+    if response.status_code >= 400:
+        raise ModelFetchFailed(f"{response.status_code}: {response.text[:200]}")
+    return []

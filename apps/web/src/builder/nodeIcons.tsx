@@ -18,8 +18,27 @@ export const NODE_ACCENT: Record<string, string> = {
   "data.set": "var(--status-good)",
   "agent.llm": "var(--color-brand-300)",
   "code.python": "var(--color-brand-300)",
+  "git.ticket": "var(--status-warn)",
+  "git.autofix": "var(--status-good)",
 };
 export const DEFAULT_ACCENT = "var(--series)";
+
+const GIT_TICKET = (
+  <>
+    <path d="M5 4.5h14v15l-3.5-2.5h-7L5 19.5v-15Z" />
+    <path d="M9 9h6M9 12.5h4" />
+  </>
+);
+
+const GIT_AUTOFIX = (
+  <>
+    <circle cx="6" cy="6" r="2.2" />
+    <circle cx="6" cy="18" r="2.2" />
+    <circle cx="18" cy="12" r="2.2" />
+    <path d="M6 8.2v7.6M8 6.5c5 0 8 2 8 5.5" />
+    <path d="M15.2 3.8l2 2-2 2" />
+  </>
+);
 
 const PATHS: Record<string, ReactNode> = {
   "trigger.manual": <path d="M8 5.5v13l11-6.5-11-6.5Z" />,
@@ -67,6 +86,8 @@ const PATHS: Record<string, ReactNode> = {
       <path d="M13.2 6.5 10.8 17.5" />
     </>
   ),
+  "git.ticket": GIT_TICKET,
+  "git.autofix": GIT_AUTOFIX,
 };
 
 const FALLBACK = (

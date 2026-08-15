@@ -356,40 +356,58 @@ class AgentNode(Node):
 # ---------------------------------------------------------------------------
 
 
-async def _build_model(config: AgentConfig, ctx: NodeContext) -> Model:
-    if config.provider not in PROVIDER_MODEL_MODULE:
+async def build_llm_model(
+    ctx: NodeContext, *, provider: str, model: str, credential_id: str, base_url: str = ""
+) -> Model:
+    """A pydantic-ai Model from a provider name + stored credential.
+
+    Shared by every node that talks to a model — the Agent, and the autofix
+    node's repair loop — so credential resolution and provider construction
+    cannot drift between them.
+    """
+    if provider not in PROVIDER_MODEL_MODULE:
         raise NodeError(
-            f"Unknown provider {config.provider!r}. See the node's Provider field for the list.",
+            f"Unknown provider {provider!r}. See the node's Provider field for the list.",
             retryable=False,
         )
 
     api_key = ""
-    base_url = config.base_url
     options: dict[str, Any] = {}
 
-    if config.credential_id:
-        credential = await ctx.resolve_credential(config.credential_id)
+    if credential_id:
+        credential = await ctx.resolve_credential(credential_id)
         if credential is None:
             raise NodeError(
-                f"Credential {config.credential_id!r} was not found in this workspace.",
+                f"Credential {credential_id!r} was not found in this workspace.",
                 retryable=False,
             )
-        if credential.provider != config.provider:
+        if credential.provider != provider:
             raise NodeError(
-                f"This credential is for {credential.provider!r}, not {config.provider!r}.",
+                f"This credential is for {credential.provider!r}, not {provider!r}.",
                 retryable=False,
             )
         api_key = credential.api_key
         base_url = base_url or credential.base_url or ""
         options = credential.options
 
-    provider_cls = infer_provider_class(config.provider)
-    provider = construct_provider(provider_cls, api_key=api_key, base_url=base_url, options=options)
+    provider_cls = infer_provider_class(provider)
+    provider_instance = construct_provider(
+        provider_cls, api_key=api_key, base_url=base_url, options=options
+    )
 
-    module_name, class_name = PROVIDER_MODEL_MODULE[config.provider]
-
+    module_name, class_name = PROVIDER_MODEL_MODULE[provider]
     model_cls = getattr(importlib.import_module(module_name), class_name)
-    return model_cls(config.model, provider=provider)
+    return model_cls(model, provider=provider_instance)
+
+
+async def _build_model(config: AgentConfig, ctx: NodeContext) -> Model:
+    return await build_llm_model(
+        ctx,
+        provider=config.provider,
+        model=config.model,
+        credential_id=config.credential_id,
+        base_url=config.base_url,
+    )
 
 
 # ---------------------------------------------------------------------------

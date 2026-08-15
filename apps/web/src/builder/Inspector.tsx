@@ -20,7 +20,7 @@ import { cx } from "../lib/cx";
 import { NodeIconChip } from "./nodeIcons";
 import type { Suggestion } from "./suggestions";
 import { TemplateInput } from "./TemplateInput";
-import { PROVIDERS } from "./providers";
+import { MODEL_PROVIDERS, VCS_PROVIDERS } from "./providers";
 import { ToolEditor } from "./ToolEditor";
 import type { NodeSpec } from "./specs";
 
@@ -144,6 +144,10 @@ export function Inspector({
   const schema = spec.config_schema as JsonSchema;
   const list = fields(schema);
   const isAgent = spec.type === "agent.llm";
+  // The autofix node embeds an LLM config under the same field names the
+  // Agent uses, so the provider/model/credential pickers apply to both.
+  const usesLlm = isAgent || spec.type === "git.autofix";
+  const usesGit = spec.type === "git.ticket" || spec.type === "git.autofix";
 
   function set(key: string, value: unknown) {
     const next = { ...config };
@@ -236,20 +240,20 @@ export function Inspector({
               />
             ) : isAgent && field.key === "provider" ? (
               <select
-                value={String(config.provider ?? PROVIDERS[0].value)}
+                value={String(config.provider ?? MODEL_PROVIDERS[0].value)}
                 onChange={(event) => set("provider", event.target.value)}
                 className={INPUT}
               >
-                {PROVIDERS.map((option) => (
+                {MODEL_PROVIDERS.map((option) => (
                   <option key={option.value} value={option.value}>
                     {option.label}
                   </option>
                 ))}
               </select>
-            ) : isAgent && field.key === "credential_id" ? (
+            ) : usesLlm && field.key === "credential_id" ? (
               <CredentialPicker
                 orgId={orgId}
-                provider={String(config.provider ?? PROVIDERS[0].value)}
+                provider={String(config.provider ?? MODEL_PROVIDERS[0].value)}
                 value={String(config.credential_id ?? "")}
                 onChange={(v) => set("credential_id", v)}
               />
@@ -257,6 +261,34 @@ export function Inspector({
               <CodeArea value={String(config.code ?? "")} onChange={(v) => set("code", v)} />
             ) : isAgent && field.key === "tools" ? (
               <ToolEditor value={config.tools} onChange={(tools) => set("tools", tools)} suggestions={suggestions} />
+            ) : usesGit && field.key === "git_provider" ? (
+              <select
+                value={String(config.git_provider ?? "github")}
+                onChange={(event) => set("git_provider", event.target.value)}
+                className={INPUT}
+              >
+                {VCS_PROVIDERS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            ) : usesGit && field.key === "git_credential_id" ? (
+              <CredentialPicker
+                orgId={orgId}
+                provider={String(config.git_provider ?? "github")}
+                value={String(config.git_credential_id ?? "")}
+                onChange={(v) => set("git_credential_id", v)}
+              />
+            ) : spec.type === "git.autofix" && (field.key === "problem" || field.key === "instructions") ? (
+              <TemplateInput
+                multiline
+                rows={field.key === "problem" ? 4 : 3}
+                value={String(config[field.key] ?? "")}
+                onChange={(v) => set(field.key, v)}
+                suggestions={suggestions}
+                placeholder={field.key === "problem" ? "{{ input.error }}" : ""}
+              />
             ) : isAgent && (field.key === "prompt" || field.key === "system") ? (
               <TemplateInput
                 multiline
@@ -266,7 +298,7 @@ export function Inspector({
                 suggestions={suggestions}
                 placeholder={field.key === "prompt" ? "{{ input.text }}" : "You are…"}
               />
-            ) : isAgent && field.key === "model" ? (
+            ) : usesLlm && field.key === "model" ? (
               <ModelPicker
                 orgId={orgId}
                 credentialId={String(config.credential_id ?? "")}
@@ -551,7 +583,11 @@ function CredentialPicker({
   return (
     <div>
       <select value={value} onChange={(event) => onChange(event.target.value)} className={INPUT}>
-        <option value="">Use the server's own key (no credential)</option>
+        <option value="">
+          {provider === "github" || provider === "gitlab"
+            ? "Pick a credential…"
+            : "Use the server's own key (no credential)"}
+        </option>
         {matching.map((credential) => (
           <option key={credential.id} value={credential.id}>
             {credential.name} (…{credential.hint || "????"})

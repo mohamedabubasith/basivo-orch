@@ -30,7 +30,23 @@ export const PROVIDER_LABEL: Record<string, string> = {
   nebius: "Nebius",
   ovhcloud: "OVHcloud",
   alibaba: "Alibaba Cloud",
+  github: "GitHub (repos & issues)",
+  gitlab: "GitLab (repos & issues)",
 };
+
+/** Model providers only — what the Agent node's LLM picker offers. The VCS
+ *  hosts are credentials, not places to run a model. */
+export const MODEL_PROVIDERS = PROVIDERS_INTERNAL();
+function PROVIDERS_INTERNAL() {
+  return Object.entries(PROVIDER_LABEL)
+    .filter(([value]) => value !== "github" && value !== "gitlab")
+    .map(([value, label]) => ({ value, label }));
+}
+
+export const VCS_PROVIDERS: { value: string; label: string }[] = [
+  { value: "github", label: "GitHub" },
+  { value: "gitlab", label: "GitLab" },
+];
 
 export const PROVIDERS: { value: string; label: string }[] = Object.entries(PROVIDER_LABEL).map(
   ([value, label]) => ({ value, label }),

@@ -308,6 +308,115 @@ async def test_webhook_and_schedule_triggers_shape_their_payloads(session, make_
 
 
 # ---------------------------------------------------------------------------
+# The ticket-and-fix pair, through the engine
+# ---------------------------------------------------------------------------
+
+
+async def test_ticket_then_autofix_flow(session, make_run, monkeypatch):
+    """The product's headline path as an actual flow: a failing signal arrives,
+    a ticket is raised with the error in it, and the autofix agent opens a PR —
+    every repo mutation happening only after the fix is fully staged."""
+
+    from basivo_orch.flows.nodes.base import ResolvedCredential
+
+    async def fake_resolve(self, credential_id):
+        return ResolvedCredential(provider="github", api_key="tok", base_url=None, options={})
+
+    monkeypatch.setattr(Engine, "_resolve_credential", fake_resolve)
+
+    def fix_model(messages, info):
+        n = sum(1 for m in messages if m.kind == "response")
+        if n == 0:
+            return ModelResponse(
+                parts=[
+                    ToolCallPart(
+                        tool_name="write_file",
+                        args={"path": "app.py", "content": "fixed\n"},
+                        tool_call_id="w",
+                    )
+                ]
+            )
+        return ModelResponse(parts=[TextPart(content="Replaced the broken handler.")])
+
+    async def fake_build(ctx, **kwargs):
+        return FunctionModel(fix_model)
+
+    monkeypatch.setattr("basivo_orch.flows.nodes.agent.build_llm_model", fake_build)
+
+    requests: list[httpx.Request] = []
+
+    def host(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        path = request.url.path
+        if path.endswith("/issues"):
+            return httpx.Response(
+                201, json={"html_url": "https://gh/acme/api/issues/9", "number": 9}
+            )
+        if path.endswith("/git/ref/heads/main"):
+            return httpx.Response(200, json={"object": {"sha": "s1"}})
+        if "/contents/" in path and request.method == "GET":
+            return httpx.Response(404, json={})
+        if path.endswith("/git/refs"):
+            return httpx.Response(201, json={})
+        if "/contents/" in path and request.method == "PUT":
+            return httpx.Response(201, json={})
+        if path.endswith("/pulls"):
+            return httpx.Response(
+                201, json={"html_url": "https://gh/acme/api/pull/10", "number": 10}
+            )
+        return httpx.Response(500, json={"message": f"unexpected {request.method} {path}"})
+
+    graph = Graph.model_validate(
+        {
+            "nodes": [
+                {"id": "t", "type": "trigger.manual", "config": {}},
+                {
+                    "id": "ticket",
+                    "type": "git.ticket",
+                    "config": {
+                        "git_credential_id": "c1",
+                        "repo": "acme/api",
+                        "title": "Failure: {{ input.error }}",
+                    },
+                },
+                {
+                    "id": "fix",
+                    "type": "git.autofix",
+                    "config": {
+                        "git_credential_id": "c1",
+                        "repo": "acme/api",
+                        "problem": "See ticket {{ input.url }}: broken handler",
+                    },
+                },
+            ],
+            "edges": [
+                {"source": "t", "target": "ticket"},
+                {"source": "ticket", "target": "fix"},
+            ],
+        }
+    )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(host)) as client:
+        run = await run_graph(
+            session, make_run, graph, payload={"error": "500s on /billing"}, http=client
+        )
+
+    assert run.status is RunStatus.SUCCEEDED, run.error
+    result = run.output["result"]
+    assert result["pr_url"] == "https://gh/acme/api/pull/10"
+
+    # The ticket carried the error, and the autofix prompt carried the ticket.
+    import json as _json
+
+    issue_body = _json.loads(next(r for r in requests if r.url.path.endswith("/issues")).content)
+    assert issue_body["title"] == "Failure: 500s on /billing"
+
+    executions = await nodes_for(session, run.id)
+    assert executions["ticket"].status is NodeStatus.SUCCEEDED
+    assert executions["fix"].status is NodeStatus.SUCCEEDED
+
+
+# ---------------------------------------------------------------------------
 # The rule, enforced
 # ---------------------------------------------------------------------------
 
@@ -324,6 +433,8 @@ EXERCISED_NODE_TYPES = {
     "data.set",
     "http.request",
     "agent.llm",
+    "git.ticket",
+    "git.autofix",
 }
 
 
