@@ -18,7 +18,8 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 from fastapi import HTTPException, status
 

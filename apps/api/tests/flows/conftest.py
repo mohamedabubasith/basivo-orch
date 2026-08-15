@@ -21,6 +21,7 @@ os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/15")
 os.environ.setdefault("RATE_LIMIT_ENABLED", "false")
 
+from sqlalchemy.pool import StaticPool
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from basivo_orch.auth.models import Organization
@@ -33,16 +34,33 @@ import basivo_orch.models  # noqa: F401,E402  isort:skip
 
 
 @pytest.fixture
-async def session() -> AsyncGenerator[AsyncSession, None]:
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+async def sessions() -> AsyncGenerator[async_sessionmaker[AsyncSession], None]:
+    """A sessionmaker bound to one in-memory database.
+
+    Exposed separately from `session` because code that opens its own sessions
+    — the worker does, so a heartbeat is not stuck behind a node's
+    transaction — takes a factory. Without this, such code would silently talk
+    to the app's real sessionmaker and find no tables at all.
+
+    `StaticPool` keeps every session on the *same* in-memory database; the
+    default pool hands out fresh connections, and each new connection to
+    `:memory:` is a brand new empty database.
+    """
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", poolclass=StaticPool)
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
 
-    maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    async with maker() as db:
-        yield db
+    yield async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
     await engine.dispose()
+
+
+@pytest.fixture
+async def session(
+    sessions: async_sessionmaker[AsyncSession],
+) -> AsyncGenerator[AsyncSession, None]:
+    async with sessions() as db:
+        yield db
 
 
 @pytest.fixture

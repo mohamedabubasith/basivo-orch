@@ -434,6 +434,7 @@ dependencies = [
     { name = "alembic" },
     { name = "asyncpg" },
     { name = "authlib" },
+    { name = "croniter" },
     { name = "cryptography" },
     { name = "fastapi" },
     { name = "fastapi-users", extra = ["sqlalchemy"] },
@@ -479,6 +480,7 @@ requires-dist = [
     { name = "alembic", specifier = ">=1.14.0" },
     { name = "asyncpg", specifier = ">=0.30.0" },
     { name = "authlib", specifier = ">=1.3.2" },
+    { name = "croniter", specifier = ">=6.2.4" },
     { name = "cryptography", specifier = ">=44.0.0" },
     { name = "fastapi", specifier = ">=0.115.0" },
     { name = "fastapi-users", extras = ["sqlalchemy"], specifier = ">=15.0.5,<16" },
@@ -875,6 +877,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/40/65/11c8635a27ce06ef525946bb02b1d5271b0f11e5acf9c5ab6d242512598e/copier-9.17.1.tar.gz", hash = "sha256:778e85f1c2de86824a72ddf4a34140744921d6354450c427c4c8a475371b1bda", size = 647338, upload-time = "2026-08-04T09:15:04.826Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/7f/bf/3adcb9b3091b36de729dad91c107179c8c7c51adb2b08c31177bb540bef1/copier-9.17.1-py3-none-any.whl", hash = "sha256:f6a48f296e2e536c635213e1000ea71099f9f58f3b464a60f2f0fd386e343628", size = 66364, upload-time = "2026-08-04T09:15:03.026Z" },
+]
+
+[[package]]
+name = "croniter"
+version = "6.2.4"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "python-dateutil" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/37/57/2e2a65aee2a70483cb28e2b7e15a072d00a523207593b44400d4717bb100/croniter-6.2.4.tar.gz", hash = "sha256:fc124f751b1b04805c2a04b061898b436b45ab2320b045e1e052ea895de65189", size = 166267, upload-time = "2026-07-10T09:52:59.955Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/cd/ba/d678e5bd329646ca51d3c92addbc77804e86d21f4b6b6a027218e6abb010/croniter-6.2.4-py3-none-any.whl", hash = "sha256:8ef3d544107a5c05a150a2d78f8bf5a8eb9c5c4d93405a736b824109574e3f4d", size = 46677, upload-time = "2026-07-10T09:52:58.425Z" },
 ]
 
 [[package]]

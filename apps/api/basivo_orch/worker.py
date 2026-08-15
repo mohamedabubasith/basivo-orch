@@ -1,0 +1,301 @@
+"""The run worker. `python -m basivo_orch.worker`.
+
+Runs used to execute inside the API process as `asyncio.create_task`, which
+meant a deploy, a reload, or an OOM silently killed every run in flight — a
+four-minute agent run is a long time to be one `uvicorn --reload` away from
+vanishing. Execution belongs in a process whose lifecycle is its own.
+
+There is no new infrastructure here, because the queue already existed: every
+run is written to Postgres as QUEUED before anything executes it. That table
+*is* the job queue, claimed with `FOR UPDATE SKIP LOCKED` — the standard
+Postgres queue pattern. Two workers cannot take the same run, and a worker
+that dies holding one is found by its stale heartbeat and the run is handed
+back rather than left RUNNING forever.
+
+What this process owns:
+
+* claiming and executing queued runs (`claim_one` / `execute_claimed`)
+* the heartbeat that proves it is still alive (`heartbeat`)
+* the reaper that recovers runs from dead workers (`reap_abandoned`)
+* the schedule ticker, which belongs here for the same reason: a cron that
+  only fires while someone is serving HTTP is not a cron.
+
+Scaling is `docker compose up --scale worker=3`. The claim is already
+multi-worker-safe; nothing else has to change.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import os
+import signal
+import socket
+import uuid
+from datetime import UTC, datetime, timedelta
+
+import redis.asyncio as redis
+from sqlalchemy import select, update
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from basivo_orch.auth.settings import get_settings as get_auth_settings
+from basivo_orch.config import get_settings
+from basivo_orch.db import SessionLocal, dispose_engine
+from basivo_orch.flows.engine import RUN_TIMEOUT_SECONDS, Engine
+from basivo_orch.flows.events import RedisClient
+from basivo_orch.flows.graph import Graph
+from basivo_orch.flows.models import FlowVersion, Run, RunStatus
+from basivo_orch.flows.scheduler import run_scheduler
+from basivo_orch.logging import configure_logging, get_logger
+
+# Registers EVERY table on the shared metadata, not just the flow ones.
+# Without it, `run.organization_id`'s foreign key has no `organization` table
+# to point at and every claim dies at mapper configuration — the worker stays
+# up, retries once a second, and executes nothing. The API only gets away
+# with importing less because its routers pull the auth models in anyway.
+import basivo_orch.models  # noqa: F401  isort:skip
+
+log = get_logger(__name__)
+
+#: How often an idle worker asks for work. The query is an index lookup on
+#: (status, created_at); a second of latency on a webhook-triggered run is
+#: invisible next to the run itself.
+POLL_SECONDS = 1.0
+
+#: How often a running worker proves it is alive.
+HEARTBEAT_SECONDS = 15
+
+#: A claimed run whose heartbeat is older than this is considered abandoned.
+#: Comfortably more than several missed heartbeats, so a worker paused by a
+#: slow query or a GC hiccup is never robbed of a run it is still executing.
+LEASE_SECONDS = 90
+
+#: Runs executed inline by an API request (`mode=sync`) never heartbeat, so
+#: they are judged by the engine's own hard ceiling instead. Past this, the
+#: process that was executing it is definitively gone.
+INLINE_GRACE_SECONDS = RUN_TIMEOUT_SECONDS + 300
+
+#: How many runs one worker executes at once.
+MAX_CONCURRENT_RUNS = 4
+
+
+def worker_identity() -> str:
+    """Host and pid — enough to find the process that holds a run."""
+    return f"{socket.gethostname()}:{os.getpid()}"
+
+
+async def claim_one(session: AsyncSession, *, worker_id: str) -> Run | None:
+    """Take the oldest queued run, or return None.
+
+    `SKIP LOCKED` is what makes this safe with several workers: a row another
+    worker has locked is passed over rather than waited on, so workers never
+    queue up behind each other on the same job. The status flip to RUNNING is
+    committed as part of the claim — the run is spoken for before a single
+    node executes.
+    """
+    now = datetime.now(UTC)
+    result = await session.execute(
+        select(Run)
+        .where(Run.status == RunStatus.QUEUED)
+        .order_by(Run.created_at)
+        .limit(1)
+        .with_for_update(skip_locked=True)
+    )
+    run = result.scalar_one_or_none()
+    if run is None:
+        await session.rollback()
+        return None
+
+    run.status = RunStatus.RUNNING
+    run.worker_id = worker_id
+    run.claimed_at = now
+    run.heartbeat_at = now
+    await session.commit()
+    return run
+
+
+async def heartbeat(session: AsyncSession, run_id: uuid.UUID) -> None:
+    await session.execute(
+        update(Run).where(Run.id == run_id).values(heartbeat_at=datetime.now(UTC))
+    )
+    await session.commit()
+
+
+async def execute_claimed(
+    run: Run,
+    redis_client: RedisClient | None,
+    *,
+    sessions: async_sessionmaker[AsyncSession] = SessionLocal,
+) -> None:
+    """Execute a claimed run, heartbeating until it finishes.
+
+    The heartbeat gets its own session: the engine's session is busy inside
+    node transactions for minutes at a time, and a heartbeat that has to wait
+    for a model call to finish is not a heartbeat.
+
+    `sessions` is injectable so tests can bind this to their own database.
+    Production passes nothing and gets the app's sessionmaker.
+    """
+
+    async def beat() -> None:
+        async with sessions() as beat_session:
+            while True:
+                await asyncio.sleep(HEARTBEAT_SECONDS)
+                await heartbeat(beat_session, run.id)
+
+    beater = asyncio.create_task(beat())
+    try:
+        async with sessions() as session:
+            fresh = await session.get(Run, run.id)
+            if fresh is None:
+                return
+            version = await session.get(FlowVersion, fresh.flow_version_id)
+            if version is None:
+                fresh.status = RunStatus.FAILED
+                fresh.error = "The flow version this run belongs to no longer exists."
+                await session.commit()
+                return
+            graph = Graph.model_validate(version.graph)
+            await Engine(session, run=fresh, graph=graph, redis_client=redis_client).execute()
+    except Exception as exc:  # noqa: BLE001 — a crash must not take the worker down
+        log.exception("worker.run_crashed", run_id=str(run.id), error=str(exc))
+        async with sessions() as session:
+            crashed = await session.get(Run, run.id)
+            if crashed is not None and not crashed.status.is_terminal:
+                crashed.status = RunStatus.FAILED
+                crashed.error = f"The worker crashed while executing this run: {exc}"[:2000]
+                crashed.finished_at = datetime.now(UTC)
+                await session.commit()
+    finally:
+        beater.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await beater
+
+
+async def reap_abandoned(session: AsyncSession, *, now: datetime | None = None) -> list[uuid.UUID]:
+    """Hand back runs whose executor died. Returns the run ids recovered.
+
+    A worker-claimed run is judged by its heartbeat; a run executed inline by
+    an API request never had one, so it is judged by the engine's hard
+    timeout plus a wide margin. Recovered runs go back to QUEUED rather than
+    straight to FAILED: the common cause is a deploy, and re-running is what
+    the user wanted to happen in the first place.
+    """
+    now = now or datetime.now(UTC)
+    result = await session.execute(
+        select(Run).where(
+            Run.status == RunStatus.RUNNING,
+            (
+                (Run.worker_id.is_not(None))
+                & (Run.heartbeat_at < now - timedelta(seconds=LEASE_SECONDS))
+            )
+            | (
+                (Run.worker_id.is_(None))
+                & (Run.started_at < now - timedelta(seconds=INLINE_GRACE_SECONDS))
+            ),
+        )
+    )
+    recovered: list[uuid.UUID] = []
+    for run in result.scalars():
+        log.warning(
+            "worker.run_abandoned",
+            run_id=str(run.id),
+            worker_id=run.worker_id,
+            last_heartbeat=run.heartbeat_at.isoformat() if run.heartbeat_at else None,
+        )
+        run.status = RunStatus.QUEUED
+        run.worker_id = None
+        run.claimed_at = None
+        run.heartbeat_at = None
+        run.started_at = None
+        recovered.append(run.id)
+    if recovered:
+        await session.commit()
+    return recovered
+
+
+async def work_loop(redis_client: RedisClient | None, stopping: asyncio.Event) -> None:
+    """Claim and execute until asked to stop."""
+    worker_id = worker_identity()
+    running: set[asyncio.Task[None]] = set()
+    log.info("worker.started", worker_id=worker_id, max_concurrent=MAX_CONCURRENT_RUNS)
+
+    while not stopping.is_set():
+        if len(running) >= MAX_CONCURRENT_RUNS:
+            await asyncio.wait(running, return_when=asyncio.FIRST_COMPLETED)
+            continue
+
+        claimed: Run | None = None
+        try:
+            async with SessionLocal() as session:
+                claimed = await claim_one(session, worker_id=worker_id)
+        except Exception as exc:  # noqa: BLE001 — the database may be restarting
+            log.warning("worker.claim_failed", error=str(exc))
+
+        if claimed is None:
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(stopping.wait(), timeout=POLL_SECONDS)
+            continue
+
+        log.info("worker.run_claimed", run_id=str(claimed.id), worker_id=worker_id)
+        task = asyncio.create_task(execute_claimed(claimed, redis_client))
+        running.add(task)
+        task.add_done_callback(running.discard)
+
+    if running:
+        # Finish what we started. A worker that drops four in-flight runs on
+        # SIGTERM has just recreated the problem it exists to solve.
+        log.info("worker.draining", in_flight=len(running))
+        await asyncio.gather(*running, return_exceptions=True)
+
+
+async def reaper_loop(stopping: asyncio.Event) -> None:
+    while not stopping.is_set():
+        try:
+            async with SessionLocal() as session:
+                await reap_abandoned(session)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("worker.reap_failed", error=str(exc))
+        with contextlib.suppress(TimeoutError):
+            await asyncio.wait_for(stopping.wait(), timeout=LEASE_SECONDS / 3)
+
+
+async def main() -> None:
+    settings = get_settings()
+    configure_logging(json_logs=settings.is_production)
+
+    client: RedisClient | None = None
+    try:
+        client = redis.from_url(get_auth_settings().redis_url, decode_responses=True)
+        await client.ping()
+    except Exception as exc:  # noqa: BLE001 — Redis is for live streaming only
+        log.warning(
+            "redis.unavailable", error=str(exc), impact="run streaming falls back to polling"
+        )
+        client = None
+
+    stopping = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        with contextlib.suppress(NotImplementedError):
+            loop.add_signal_handler(sig, stopping.set)
+
+    tasks = [
+        asyncio.create_task(work_loop(client, stopping)),
+        asyncio.create_task(reaper_loop(stopping)),
+        asyncio.create_task(run_scheduler(client)),
+    ]
+    try:
+        await tasks[0]  # the work loop drains on stop; the others are cancelled
+    finally:
+        for task in tasks[1:]:
+            task.cancel()
+        await asyncio.gather(*tasks[1:], return_exceptions=True)
+        if client is not None:
+            await client.aclose()  # type: ignore[attr-defined]
+        await dispose_engine()
+        log.info("worker.stopped")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

@@ -33,7 +33,15 @@ from basivo_orch.flows import service
 from basivo_orch.flows.apikeys import ApiCaller, generate_key, require_api_key
 from basivo_orch.flows.events import RedisClient, replay
 from basivo_orch.flows.graph import Graph, GraphError
-from basivo_orch.flows.models import ApiKey, Flow, FlowVersion, Run, RunStatus, TriggerKind
+from basivo_orch.flows.models import (
+    ApiKey,
+    Flow,
+    FlowSchedule,
+    FlowVersion,
+    Run,
+    RunStatus,
+    TriggerKind,
+)
 from basivo_orch.flows.nodes.triggers import WebhookTriggerConfig
 from basivo_orch.flows.schemas import (
     ApiKeyCreate,
@@ -161,10 +169,12 @@ async def read_flow(
 ) -> FlowDetail:
     flow = await _load_flow(session, context.organization_id, flow_id)
     version = await service.latest_version(session, flow.id)
+    schedule = await session.get(FlowSchedule, flow.id)
     return FlowDetail(
         **FlowRead.model_validate(flow).model_dump(),
         graph=Graph.model_validate(version.graph),
         version=version.version,
+        next_run_at=schedule.next_run_at if schedule else None,
     )
 
 
@@ -291,7 +301,7 @@ async def test_run(
     )
 
     if mode == "async":
-        service.execute_detached(run.id, graph, redis_client)
+        service.enqueue(run)
         response.status_code = status.HTTP_202_ACCEPTED
         return _accepted(flow.id, run)
 
@@ -597,7 +607,7 @@ async def run_flow(
     wants_async = mode == "async" or (prefer or "").lower().replace(" ", "") == "respond-async"
 
     if wants_async:
-        service.execute_detached(run.id, graph, redis_client)
+        service.enqueue(run)
         response.status_code = status.HTTP_202_ACCEPTED
         return _accepted(flow.id, run)
 
@@ -639,7 +649,7 @@ async def run_flow_streaming(
     if created:
         # Detached, so the response can start streaming immediately. Running it
         # inline would mean the first event arrived only after the last one.
-        service.execute_detached(run.id, graph, redis_client)
+        service.enqueue(run)
 
     return StreamingResponse(
         event_stream(run.id, organization_id=caller.organization_id, redis_client=redis_client),
@@ -652,7 +662,9 @@ _HOOK_404 = "No webhook is listening at this URL."
 
 
 @hooks_router.api_route(
-    "/hooks/{flow_id}", methods=["GET", "POST", "PUT", "PATCH", "DELETE"], response_model=RunAccepted
+    "/hooks/{flow_id}",
+    methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+    response_model=RunAccepted,
 )
 async def inbound_hook(
     flow_id: uuid.UUID,
@@ -704,7 +716,7 @@ async def inbound_hook(
         idempotency_key=hook_idempotency_key(request.headers),
     )
     if created:
-        service.execute_detached(run.id, graph, redis_client)
+        service.enqueue(run)
     else:
         # A redelivered webhook (same delivery UUID) reports the original run
         # rather than fixing the same issue twice.

@@ -73,6 +73,8 @@ interface FlowDetail {
   published_version_id: string | null;
   graph: Graph;
   version: number;
+  /** When the scheduler fires this next. Null unless it is scheduled and published. */
+  next_run_at: string | null;
 }
 
 interface NodeExecution {
@@ -109,12 +111,28 @@ const TERMINAL_RUN_STATUSES = new Set(["succeeded", "failed", "cancelled"]);
  * request. An EventSource cannot carry that refresh, and the run it was
  * watching would silently stop updating — the exact failure this replaced.
  */
-async function pollRun(url: string, onSnapshot: (run: RunDetail) => void): Promise<RunDetail> {
+async function pollRun(
+  url: string,
+  onSnapshot: (run: RunDetail) => void,
+  onStuckInQueue: () => void,
+): Promise<RunDetail> {
   const INTERVAL_MS = 1200;
+  // A run stays QUEUED until a worker claims it, which normally takes under a
+  // second. Much longer than that means no worker is listening, and the
+  // honest thing is to say so rather than spin: "nothing is happening" is
+  // otherwise indistinguishable from "your flow is slow".
+  const QUEUE_PATIENCE_MS = 8000;
+  const startedAt = Date.now();
+  let warned = false;
+
   for (;;) {
     const snapshot = await api.get<RunDetail>(url);
     onSnapshot(snapshot);
     if (TERMINAL_RUN_STATUSES.has(snapshot.status)) return snapshot;
+    if (!warned && snapshot.status === "queued" && Date.now() - startedAt > QUEUE_PATIENCE_MS) {
+      warned = true;
+      onStuckInQueue();
+    }
     await new Promise((resolve) => setTimeout(resolve, INTERVAL_MS));
   }
 }
@@ -508,6 +526,13 @@ function BuilderInner() {
             setRun(snapshot);
             paintNodes(snapshot);
           },
+          () =>
+            setBanner({
+              tone: "bad",
+              text:
+                "This run is queued but nothing has picked it up — the run worker " +
+                "does not look like it is running. Start it with `make worker`.",
+            }),
         );
       } finally {
         window.clearInterval(tick);
@@ -793,6 +818,7 @@ function BuilderInner() {
             flowId={flow.id}
             publicBase={publicBase}
             isPublished={Boolean(flow.published_version_id)}
+            nextRunAt={flow.next_run_at}
             suggestions={selectedSuggestions}
             onRename={(name) =>
               updateSelected((node) => ({ ...node, data: { ...node.data, label: name } }))

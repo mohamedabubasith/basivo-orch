@@ -43,6 +43,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.redis = client
 
     warn_if_gate_is_inert()
+    # Note what this process deliberately does NOT do: execute runs, or fire
+    # schedules. Both belong to `basivo_orch.worker`, whose lifecycle is its
+    # own — a run must not die because the API reloaded, and a cron that only
+    # fires while someone is serving HTTP is not a cron. If nothing is
+    # executing your runs, the worker is not running.
     log.info("service.start", environment=settings.ENVIRONMENT, version=__version__)
     yield
 

@@ -116,6 +116,7 @@ export function Inspector({
   flowId,
   publicBase,
   isPublished,
+  nextRunAt,
   suggestions = [],
   onRename,
   onChange,
@@ -134,6 +135,8 @@ export function Inspector({
   flowId?: string;
   publicBase?: string;
   isPublished?: boolean;
+  /** When the scheduler will next fire this flow, if it is armed. */
+  nextRunAt?: string | null;
   /** What {{ … }} can refer to from this node — see suggestions.ts. */
   suggestions?: Suggestion[];
   onRename: (name: string) => void;
@@ -187,6 +190,30 @@ export function Inspector({
           >
             {problem}
           </p>
+        )}
+
+        {spec.type === "trigger.schedule" && (
+          <div className="rounded-lg border border-ink-700/70 bg-ink-950/40 p-3">
+            <p className="text-[0.68rem] font-medium text-ink-300">This schedule</p>
+            {nextRunAt ? (
+              <>
+                <p className="mt-1.5 font-mono text-[0.72rem] text-ink-100">
+                  Next run {new Date(nextRunAt).toLocaleString()}
+                </p>
+                <p className="mt-1.5 text-[0.68rem] leading-relaxed text-ink-500">
+                  Armed. The run worker fires it — nothing needs to call this
+                  flow. Cron is read in the timezone below, so 6am stays 6am
+                  across daylight saving.
+                </p>
+              </>
+            ) : (
+              <p className="mt-1 text-[0.68rem] leading-relaxed text-ink-500">
+                {isPublished
+                  ? "Not armed yet — publish again after setting the schedule, and the next run time appears here."
+                  : "A schedule only runs once the flow is published. Publish, and the next run time appears here."}
+              </p>
+            )}
+          </div>
         )}
 
         {spec.type === "trigger.webhook" && (

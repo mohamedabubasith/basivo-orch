@@ -160,6 +160,9 @@ class Run(Base):
     __table_args__ = (
         Index("ix_run_flow_created", "flow_id", "created_at"),
         Index("ix_run_org_status", "organization_id", "status"),
+        # The queue index. Every worker poll is "oldest queued run", several
+        # times a second across every worker — it must never be a table scan.
+        Index("ix_run_queue", "status", "created_at"),
         # Repeat deliveries are normal for webhooks; this makes retrying safe.
         UniqueConstraint("flow_id", "idempotency_key", name="uq_run_idempotency"),
     )
@@ -200,6 +203,21 @@ class Run(Base):
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     duration_ms: Mapped[int | None] = mapped_column(Integer(), default=None)
+
+    # --- worker lease -------------------------------------------------------
+    #
+    # A QUEUED row is a job nobody has taken; these three columns are how a
+    # worker takes it and how we find out it died holding it. Without them a
+    # worker that is OOM-killed mid-run leaves the row RUNNING forever, and
+    # the UI shows a spinner for a run that no process is executing.
+
+    #: Which worker claimed it. Null means it was executed inline by an API
+    #: request (`mode=sync`), which the reaper judges by a different clock.
+    worker_id: Mapped[str | None] = mapped_column(String(64), default=None)
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    #: Refreshed while the run executes. A stale heartbeat is the only reliable
+    #: evidence that the process holding this run is gone.
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
 
     node_executions: Mapped[list[NodeExecution]] = relationship(
         back_populates="run", cascade="all, delete-orphan", order_by="NodeExecution.started_at"
@@ -316,3 +334,43 @@ class ApiKey(Base):
         if self.expires_at is not None and self.expires_at <= datetime.now(UTC):
             return False
         return True
+
+
+class FlowSchedule(Base):
+    """When a scheduled flow fires next. One row per scheduled flow.
+
+    Separate from `flow` because it is written on a completely different
+    rhythm: the scheduler updates `next_run_at` every time a flow fires, and
+    putting that churn on the flow row would bump `updated_at` on every tick
+    and make "last edited" meaningless in the UI.
+
+    The row exists only while the *published* version has a schedule trigger.
+    Publishing a version without one deletes it, which is what makes "remove
+    the trigger and republish" actually stop the schedule.
+    """
+
+    __tablename__ = "flow_schedule"
+    __table_args__ = (Index("ix_flow_schedule_due", "next_run_at"),)
+
+    #: The flow is the identity: a flow has at most one schedule.
+    flow_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("flow.id", ondelete="CASCADE"), primary_key=True
+    )
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("organization.id", ondelete="CASCADE"), index=True
+    )
+
+    #: The claim marker. The scheduler selects rows due at or before now and
+    #: pushes this forward in the same transaction, so a second worker (or a
+    #: second tick that overlaps a slow one) cannot fire the same slot twice.
+    next_run_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+
+    #: Copied from the trigger config so the ticker can compute the next slot
+    #: without loading and parsing the whole graph for every due flow.
+    mode: Mapped[str] = mapped_column(String(16))
+    cron: Mapped[str | None] = mapped_column(String(120), default=None)
+    interval_seconds: Mapped[int | None] = mapped_column(Integer(), default=None)
+    timezone: Mapped[str] = mapped_column(String(64), default="UTC")
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

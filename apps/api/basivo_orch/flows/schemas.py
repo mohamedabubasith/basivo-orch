@@ -48,6 +48,11 @@ class FlowDetail(FlowRead):
     graph: Graph
     version: int
 
+    #: When the scheduler will fire this flow next, if it is scheduled and
+    #: published. Null otherwise. Shown in the editor so "is my cron actually
+    #: armed?" is answerable without reading the database.
+    next_run_at: datetime | None = None
+
 
 class GraphProblems(BaseModel):
     """Returned as 422 when a graph will not execute."""

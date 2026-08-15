@@ -32,8 +32,11 @@ api: ## Run the API on :8000
 web: ## Run the web app on :5173
 	cd $(WEB) && npm run dev
 
-dev: ## Run both (API in the background)
-	@$(MAKE) api & sleep 2; $(MAKE) web
+worker: ## Run the run worker (executes runs and fires schedules)
+	cd $(API) && uv run python -m basivo_orch.worker
+
+dev: ## Run API, worker and web together
+	@$(MAKE) api & sleep 2; $(MAKE) worker & sleep 1; $(MAKE) web
 
 migrate: ## Apply migrations
 	cd $(API) && uv run alembic upgrade head

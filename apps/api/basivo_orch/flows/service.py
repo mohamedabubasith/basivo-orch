@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -12,7 +11,6 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from basivo_orch.db import SessionLocal
 from basivo_orch.flows import nodes as node_registry
 from basivo_orch.flows.engine import Engine
 from basivo_orch.flows.events import RedisClient
@@ -22,13 +20,6 @@ from basivo_orch.flows.schemas import slugify
 from basivo_orch.logging import get_logger
 
 log = get_logger(__name__)
-
-#: Strong references to in-flight background runs.
-#:
-#: asyncio only holds a weak reference to a task, so a task nobody keeps can be
-#: garbage-collected mid-execution — the run would simply stop, with the row
-#: left RUNNING forever and nothing in the log to say why.
-_BACKGROUND: set[asyncio.Task[Any]] = set()
 
 
 def validate(graph: Graph) -> None:
@@ -132,6 +123,13 @@ async def publish(session: AsyncSession, *, flow: Flow, user_id: uuid.UUID | Non
     flow.published_version_id = version.id
     await session.commit()
     await session.refresh(version)
+
+    # Publishing is what arms a schedule — and what disarms one, when the
+    # trigger has been removed from the graph being published.
+    from basivo_orch.flows.scheduler import sync_schedule
+
+    await sync_schedule(session, flow=flow, graph=graph)
+
     log.info("flow.published", flow_id=str(flow.id), version=version.version)
     return version
 
@@ -228,33 +226,20 @@ async def execute(
     return await engine.execute()
 
 
-def execute_detached(run_id: uuid.UUID, graph: Graph, redis_client: RedisClient | None) -> None:
-    """Start a run in the background and return immediately.
+def enqueue(run: Run) -> None:
+    """Hand a run to the workers. Returns immediately.
 
-    Uses its own session: the request's session is closed as soon as the 202
-    response is sent, and continuing to use it would fail on the first query
-    after that.
+    There is nothing to send: `create_run` already wrote the row as QUEUED,
+    and QUEUED *is* the queue — `basivo_orch.worker` claims from it with
+    `FOR UPDATE SKIP LOCKED`. This function exists to name the moment, and
+    because the alternative reads like a bug: a route that creates a run and
+    then does nothing looks like a forgotten line.
 
-    This is in-process on purpose for now. It is the right shape for a beta and
-    the wrong shape for scale — a restart loses in-flight runs, and nothing
-    balances load across workers. The fix is a real queue, and the seam is
-    here: this function is the only thing that would change.
+    This replaced an `asyncio.create_task` inside the API process, which meant
+    every deploy, reload or OOM silently killed the runs in flight. A queued
+    row survives all three; whichever worker is alive picks it up.
     """
-
-    async def runner() -> None:
-        async with SessionLocal() as session:
-            run = await session.get(Run, run_id)
-            if run is None:
-                log.error("run.vanished", run_id=str(run_id))
-                return
-            try:
-                await Engine(session, run=run, graph=graph, redis_client=redis_client).execute()
-            except Exception as exc:
-                log.exception("run.crashed", run_id=str(run_id), error=str(exc))
-
-    task = asyncio.create_task(runner())
-    _BACKGROUND.add(task)
-    task.add_done_callback(_BACKGROUND.discard)
+    log.info("run.enqueued", run_id=str(run.id), flow_id=str(run.flow_id))
 
 
 async def get_run(

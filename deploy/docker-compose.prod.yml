@@ -95,6 +95,35 @@ services:
     expose:
       - "8000"
 
+  # Executes runs and fires schedules. Separate from the API on purpose: a
+  # deploy restarts the API constantly, and a run must not die because of it.
+  # Queued runs simply wait in Postgres for whichever worker is alive, and a
+  # run abandoned by a killed worker is reclaimed after its lease expires.
+  # More capacity is `--scale worker=3`; the claim is multi-worker-safe.
+  worker:
+    build:
+      context: ../apps/api
+      dockerfile: Dockerfile
+    image: basivo-api:latest
+    restart: unless-stopped
+    command: ["python", "-m", "basivo_orch.worker"]
+    env_file: [.env]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://basivo:${POSTGRES_PASSWORD}@postgres:5432/basivo_orch
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    # A run holds an agent conversation and its tool results in memory, so the
+    # worker gets more headroom than the API, which only assembles responses.
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+    # SIGTERM makes the worker stop claiming and drain what it holds; the
+    # default 10s would kill a run mid-model-call on every deploy.
+    stop_grace_period: 120s
+
   web:
     build:
       context: ../apps/web
