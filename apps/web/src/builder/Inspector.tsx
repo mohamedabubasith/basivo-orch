@@ -277,17 +277,38 @@ export function Inspector({
                   </option>
                 ))}
               </select>
-            ) : usesLlm && field.key === "credential_id" ? (
+            ) : usesLlm &&
+              (field.key === "credential_id" || field.key === "vision_credential_id") ? (
+              // Both LLM credentials get the picker. Without this the vision
+              // one renders as a text box asking for a UUID, which is not a
+              // thing any person can supply.
               <CredentialPicker
                 orgId={orgId}
-                provider={String(config.provider ?? MODEL_PROVIDERS[0].value)}
-                value={String(config.credential_id ?? "")}
-                onChange={(v) => set("credential_id", v)}
+                provider={String(
+                  (field.key === "vision_credential_id" ? config.vision_provider : null) ??
+                    config.provider ??
+                    MODEL_PROVIDERS[0].value,
+                )}
+                value={String(config[field.key] ?? "")}
+                onChange={(v) => set(field.key, v)}
               />
             ) : spec.type === "code.python" && field.key === "code" ? (
               <CodeArea value={String(config.code ?? "")} onChange={(v) => set("code", v)} />
             ) : isAgent && field.key === "tools" ? (
               <ToolEditor value={config.tools} onChange={(tools) => set("tools", tools)} suggestions={suggestions} />
+            ) : usesLlm && field.key === "vision_provider" ? (
+              <select
+                value={String(config.vision_provider ?? "")}
+                onChange={(event) => set("vision_provider", event.target.value)}
+                className={INPUT}
+              >
+                <option value="">Same as the repair model</option>
+                {MODEL_PROVIDERS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
             ) : usesGit && field.key === "git_provider" ? (
               <select
                 value={String(config.git_provider ?? "github")}
@@ -327,12 +348,16 @@ export function Inspector({
                 suggestions={suggestions}
                 placeholder={field.key === "prompt" ? "{{ input.text }}" : "You are…"}
               />
-            ) : usesLlm && field.key === "model" ? (
+            ) : usesLlm && (field.key === "model" || field.key === "vision_model") ? (
               <ModelPicker
                 orgId={orgId}
-                credentialId={String(config.credential_id ?? "")}
-                value={String(config.model ?? "")}
-                onChange={(v) => set("model", v)}
+                credentialId={String(
+                  (field.key === "vision_model" ? config.vision_credential_id : null) ??
+                    config.credential_id ??
+                    "",
+                )}
+                value={String(config[field.key] ?? "")}
+                onChange={(v) => set(field.key, v)}
               />
             ) : (
               <FieldInput

@@ -739,3 +739,20 @@ async def test_a_blind_run_beats_a_failed_one_when_the_vision_model_errors(monke
 
     assert result.output["pr_url"].endswith("/pull/42"), "the run failed because a picture did not load"
     assert any(kind == "fix.image_unread" for kind, _ in recorder.steps)
+
+
+def test_the_protected_paths_defaults_reach_the_editor():
+    """The editor builds its form from the JSON schema, so a default that does
+    not appear there renders as an empty list — a screen telling the user
+    nothing is protected while the engine protects everything. That gap is
+    exactly how a security control gets turned off by someone tidying a form."""
+    from basivo_orch.flows import nodes as registry
+
+    spec = next(n for n in registry.palette() if n["type"] == "git.autofix")
+    field = spec["config_schema"]["properties"]["protected_paths"]
+    assert field.get("default") == list(DEFAULT_PROTECTED_PATHS)
+
+    # And the vision model must read as optional, since most models need none.
+    vision = spec["config_schema"]["properties"]["vision_model"]
+    assert "Optional" in vision["description"]
+    assert AutofixConfig(git_credential_id="c", repo="a/b", problem="x").vision_model == ""

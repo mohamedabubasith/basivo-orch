@@ -564,14 +564,31 @@ class AutofixConfig(BaseModel):
     #: is described by this model first and the description is handed to the
     #: repair model as text. Leave it empty when the main model reads images
     #: itself (OpenAI, Anthropic, Gemini) and the picture goes straight to it.
-    vision_provider: str = Field(default="", max_length=48)
-    vision_model: str = Field(default="", max_length=160)
-    vision_credential_id: str = Field(default="", description="A saved model credential.")
+    vision_provider: str = Field(
+        default="", max_length=48, description="Leave empty unless you set a vision model."
+    )
+    vision_model: str = Field(
+        default="",
+        max_length=160,
+        description=(
+            "Optional. Leave EMPTY when your model reads images itself (GPT-5, Claude, "
+            "Gemini) — the picture goes straight to it. Set one only if your model calls "
+            "tools but cannot see, and it will describe the image first."
+        ),
+    )
+    vision_credential_id: str = Field(
+        default="", description="Only needed if the vision model uses a different key."
+    )
     #: Editable so a team can widen it; the defaults are the ones that turn a
     #: fix bot into a code-execution vector if left open.
     protected_paths: list[str] = Field(
-        default_factory=lambda: list(DEFAULT_PROTECTED_PATHS),
-        description="Glob patterns the agent may never write.",
+        # `default=`, not `default_factory=`: only a plain default reaches the
+        # JSON schema, and the editor builds its form from that schema. With a
+        # factory the field rendered as an empty list — a UI that says nothing
+        # is protected while the engine was in fact protecting everything.
+        # Pydantic copies this per instance, so the shared tuple is safe.
+        default=list(DEFAULT_PROTECTED_PATHS),
+        description="Glob patterns the agent may never write. Emptying this removes the guard.",
     )
 
     @model_validator(mode="after")
