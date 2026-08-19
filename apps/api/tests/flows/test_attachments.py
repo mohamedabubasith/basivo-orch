@@ -207,3 +207,43 @@ async def test_a_redirect_loop_terminates():
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
         assert await fetch_image(http, ATTACHMENT, token="t") is None
+
+
+# ---------------------------------------------------------------------------
+# Repo-hosted pictures — found the hard way against a real private repository
+# ---------------------------------------------------------------------------
+
+
+def test_urls_that_name_a_file_in_a_repository_are_recognised():
+    """Those cannot be fetched with an API token: github.com/.../raw/ is a web
+    endpoint that answers a Bearer token with 404 and a login page. They have
+    to go through the Contents API instead, so they must be spotted first."""
+    from basivo_orch.flows.nodes.attachments import repo_file_reference
+
+    assert repo_file_reference("https://github.com/acme/api/raw/main/docs/bug.png") == (
+        "acme/api",
+        "main",
+        "docs/bug.png",
+    )
+    assert repo_file_reference("https://github.com/acme/api/blob/main/docs/bug.png?raw=true") == (
+        "acme/api",
+        "main",
+        "docs/bug.png",
+    )
+    assert repo_file_reference("https://raw.githubusercontent.com/acme/api/main/b.png") == (
+        "acme/api",
+        "main",
+        "b.png",
+    )
+    # A pasted attachment is NOT a repo file — it takes the plain fetch path.
+    assert repo_file_reference(ATTACHMENT) is None
+    assert repo_file_reference("https://example.com/x.png") is None
+
+
+def test_image_media_type_reads_magic_numbers():
+    from basivo_orch.flows.nodes.attachments import image_media_type
+
+    assert image_media_type(PNG) == "image/png"
+    assert image_media_type(b"\xff\xd8\xff\xe0rest") == "image/jpeg"
+    assert image_media_type(b"GIF89a...") == "image/gif"
+    assert image_media_type(b"<html>login</html>") is None

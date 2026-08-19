@@ -64,6 +64,32 @@ _MARKDOWN_IMAGE = re.compile(r"!\[[^\]]*\]\(\s*(<?)(?P<url>[^)\s>]+)\1[^)]*\)")
 _HTML_IMAGE = re.compile(r"<img\b[^>]*?\bsrc\s*=\s*[\"'](?P<url>[^\"']+)[\"']", re.IGNORECASE)
 
 
+#: `github.com/o/r/raw|blob/<ref>/<path>` and `raw.githubusercontent.com/o/r/<ref>/<path>`
+#: — the ways an issue references a picture that lives *in the repository*.
+_REPO_FILE = re.compile(
+    r"^https://github\.com/(?P<repo>[^/]+/[^/]+)/(?:raw|blob)/(?P<ref>[^/]+)/(?P<path>.+)$"
+)
+_RAW_HOST_FILE = re.compile(
+    r"^https://raw\.githubusercontent\.com/(?P<repo>[^/]+/[^/]+)/(?P<ref>[^/]+)/(?P<path>.+)$"
+)
+
+
+def repo_file_reference(url: str) -> tuple[str, str, str] | None:
+    """`(repo, ref, path)` if this URL names a file inside a GitHub repository.
+
+    Worth recognising because those URLs cannot be fetched with an API token:
+    `github.com/.../raw/...` is a *web* endpoint that answers a Bearer token
+    with 404 and a login page, and raw.githubusercontent.com wants its own
+    signed link. The same bytes come back cleanly from the Contents API, which
+    is what the caller does with this. Found the hard way, against a real
+    private repository.
+    """
+    for pattern in (_REPO_FILE, _RAW_HOST_FILE):
+        if match := pattern.match(url.split("?")[0]):
+            return match["repo"], match["ref"], match["path"]
+    return None
+
+
 @dataclass(frozen=True)
 class FetchedImage:
     """One image, downloaded and ready to hand to a model."""
@@ -122,6 +148,16 @@ def _sniff_media_type(response: httpx.Response, body: bytes) -> str | None:
     declared = response.headers.get("content-type", "").split(";")[0].strip().lower()
     if declared in _IMAGE_MEDIA_TYPES:
         return declared
+    for prefix, media_type in _MAGIC:
+        if body.startswith(prefix):
+            return media_type
+    if body[:4] == b"RIFF" and body[8:12] == b"WEBP":
+        return "image/webp"
+    return None
+
+
+def image_media_type(body: bytes) -> str | None:
+    """The media type of these bytes, from their magic number, or None."""
     for prefix, media_type in _MAGIC:
         if body.startswith(prefix):
             return media_type

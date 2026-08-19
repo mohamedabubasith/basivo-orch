@@ -619,3 +619,123 @@ async def test_an_image_on_an_untrusted_host_is_skipped_not_fetched(monkeypatch)
 
     skipped = [data for kind, data in recorder.steps if kind == "fix.image_skipped"]
     assert skipped and skipped[0]["reason"] == "host not allowed"
+
+
+async def test_a_vision_model_describes_the_picture_for_a_tool_only_model(monkeypatch):
+    """Providers exist that host models which see and models which call tools,
+    and none that do both — so the picture is described first and the repair
+    model receives words. The description must reach the repair model, and it
+    must be on the run log."""
+    png = b"\x89PNG\r\n\x1a\n" + b"0" * 32
+    repair_prompts: list[str] = []
+
+    def vision_model(messages, info):
+        return ModelResponse(parts=[TextPart(content="Tax row reads $0.00; total $29.99.")])
+
+    def repair_model(messages, info):
+        for message in messages:
+            for part in getattr(message, "parts", []):
+                content = getattr(part, "content", None)
+                # A multi-part prompt arrives as a list; a plain one as a str.
+                if isinstance(content, str):
+                    repair_prompts.append(content)
+                elif isinstance(content, list):
+                    repair_prompts.extend(c for c in content if isinstance(c, str))
+        turn = len([m for m in messages if m.kind == "response"])
+        if turn == 0:
+            return ModelResponse(
+                parts=[
+                    ToolCallPart(
+                        tool_name="write_file",
+                        args={"path": "calc.py", "content": "def add(a, b):\n    return a + b\n"},
+                        tool_call_id="w1",
+                    )
+                ]
+            )
+        return ModelResponse(parts=[TextPart(content="Added the missing tax.")])
+
+    async def fake_build(ctx, *, provider, model, credential_id, base_url=""):
+        return FunctionModel(vision_model if model == "sees-only" else repair_model)
+
+    monkeypatch.setattr("basivo_orch.flows.nodes.agent.build_llm_model", fake_build)
+
+    requests: list[httpx.Request] = []
+    repo = github_repo_handler(requests)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "github.com" and "/user-attachments/" in request.url.path:
+            return httpx.Response(200, content=png, headers={"content-type": "image/png"})
+        return repo(request)
+
+    recorder = _Recorder()
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        ctx = make_context(recorder, http)
+        result = await AutofixNode().run(
+            AutofixConfig(
+                git_credential_id="cred-git",
+                repo="acme/api",
+                problem="wrong total ![s](https://github.com/user-attachments/assets/a)",
+                model="calls-tools",
+                vision_model="sees-only",
+            ),
+            ctx,
+        )
+
+    assert result.output["files_changed"] == ["calc.py"]
+    # The repair model was told what the picture showed…
+    assert any("Tax row reads $0.00" in p for p in repair_prompts), repair_prompts
+    # …and the description is on the run log, so a wrong fix is explainable.
+    described = [d for kind, d in recorder.steps if kind == "fix.image_described"]
+    assert described and "Tax row reads $0.00" in described[0]["description"]
+
+
+async def test_a_blind_run_beats_a_failed_one_when_the_vision_model_errors(monkeypatch):
+    from pydantic_ai import UnexpectedModelBehavior
+
+    png = b"\x89PNG\r\n\x1a\n" + b"0" * 32
+
+    def broken_vision(messages, info):
+        raise UnexpectedModelBehavior("vision endpoint is down")
+
+    def repair_model(messages, info):
+        turn = len([m for m in messages if m.kind == "response"])
+        if turn == 0:
+            return ModelResponse(
+                parts=[
+                    ToolCallPart(
+                        tool_name="write_file",
+                        args={"path": "calc.py", "content": "x\n"},
+                        tool_call_id="w1",
+                    )
+                ]
+            )
+        return ModelResponse(parts=[TextPart(content="Fixed from the text alone.")])
+
+    async def fake_build(ctx, *, provider, model, credential_id, base_url=""):
+        return FunctionModel(broken_vision if model == "sees-only" else repair_model)
+
+    monkeypatch.setattr("basivo_orch.flows.nodes.agent.build_llm_model", fake_build)
+
+    requests: list[httpx.Request] = []
+    repo = github_repo_handler(requests)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "github.com" and "/user-attachments/" in request.url.path:
+            return httpx.Response(200, content=png, headers={"content-type": "image/png"})
+        return repo(request)
+
+    recorder = _Recorder()
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        ctx = make_context(recorder, http)
+        result = await AutofixNode().run(
+            AutofixConfig(
+                git_credential_id="cred-git",
+                repo="acme/api",
+                problem="broken ![s](https://github.com/user-attachments/assets/a)",
+                vision_model="sees-only",
+            ),
+            ctx,
+        )
+
+    assert result.output["pr_url"].endswith("/pull/42"), "the run failed because a picture did not load"
+    assert any(kind == "fix.image_unread" for kind, _ in recorder.steps)
