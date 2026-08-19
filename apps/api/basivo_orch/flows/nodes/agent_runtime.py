@@ -457,7 +457,7 @@ async def run_team(
                 await ctx.progress(f"{speaking} handed over to {inside}")
                 speaking = inside
 
-            for node_name, payload in (chunk or {}).items():
+            for payload in (chunk or {}).values():
                 # Model turns are counted once, from inside the agent that made
                 # them — the parent level repeats the same message, and counting
                 # both would double every token.
