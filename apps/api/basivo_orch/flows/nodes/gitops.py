@@ -418,6 +418,7 @@ class TicketNode(Node):
     output_paths = ("url", "number")
 
     max_attempts = 2
+    replay_safe = False
     retry_backoff_seconds = 2.0
     timeout_seconds = 60.0
 
@@ -485,6 +486,7 @@ class CommentNode(Node):
     config_model = CommentConfig
     output_paths = ("url", "id")
     max_attempts = 2
+    replay_safe = False
 
     async def run(self, config: CommentConfig, ctx: NodeContext) -> NodeResult:
         template = ctx.template_context()
@@ -654,6 +656,7 @@ class AutofixNode(Node):
 
     #: One attempt: a retried half-fix means duplicate branches and PRs.
     max_attempts = 1
+    replay_safe = False
     timeout_seconds = 840.0
 
     async def _attach_images(

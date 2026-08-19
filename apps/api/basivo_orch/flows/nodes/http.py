@@ -108,6 +108,7 @@ class HttpRequestNode(Node):
     output_paths = ("status", "headers", "body")
 
     max_attempts = 3
+    replay_safe = False
     retry_backoff_seconds = 1.0
     timeout_seconds = 125.0
 

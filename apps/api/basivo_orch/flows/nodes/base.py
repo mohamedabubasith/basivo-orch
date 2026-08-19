@@ -165,6 +165,16 @@ class Node(ABC):
     retry_backoff_seconds: ClassVar[float] = 1.0
     timeout_seconds: ClassVar[float] = 60.0
 
+    #: Whether running this node twice with the same input is harmless.
+    #:
+    #: Consulted when a run is recovered after the worker executing it died.
+    #: Recovery re-runs the graph from the start, which is free for a node
+    #: that only reads or computes — and wrong for one that already opened a
+    #: pull request, filed an issue, or charged a card. Nodes that change the
+    #: world outside this system set this to False, and a half-finished run
+    #: that reached one is failed for a human rather than silently repeated.
+    replay_safe: ClassVar[bool] = True
+
     @abstractmethod
     async def run(self, config: Any, ctx: NodeContext) -> NodeResult:
         """Do the work. Raise `NodeError` to fail with a readable message."""

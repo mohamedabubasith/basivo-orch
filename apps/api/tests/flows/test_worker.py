@@ -210,3 +210,95 @@ async def test_queued_runs_are_never_reaped(session, make_run):
     """A run waiting for a worker is not a run in trouble."""
     await make_run(SIMPLE_GRAPH)
     assert await reap_abandoned(session) == []
+
+
+# ---------------------------------------------------------------------------
+# Recovery must not repeat work that changed the outside world
+# ---------------------------------------------------------------------------
+
+
+SIDE_EFFECT_GRAPH = Graph.model_validate(
+    {
+        "nodes": [
+            {"id": "t", "type": "trigger.manual", "config": {}},
+            {
+                "id": "fix",
+                "type": "git.autofix",
+                "name": "Open the PR",
+                "config": {"git_credential_id": "c", "repo": "acme/api", "problem": "x"},
+            },
+        ],
+        "edges": [{"source": "t", "target": "fix"}],
+    }
+)
+
+
+async def _abandon(session, run):
+    run.status = RunStatus.RUNNING
+    run.worker_id = "worker-that-died"
+    stale = datetime.now(UTC) - timedelta(seconds=LEASE_SECONDS + 30)
+    run.heartbeat_at = stale
+    run.started_at = stale
+    await session.commit()
+
+
+async def test_a_run_that_already_opened_a_pr_is_not_replayed(session, make_run):
+    """Recovery re-runs the graph from the beginning, so replaying a run whose
+    autofix node already succeeded would open a SECOND pull request. It is
+    failed for a human instead, naming what already happened."""
+    from basivo_orch.flows.models import NodeExecution, NodeStatus
+
+    run = await make_run(SIDE_EFFECT_GRAPH)
+    await _abandon(session, run)
+    session.add(
+        NodeExecution(
+            run_id=run.id,
+            node_id="fix",
+            node_type="git.autofix",
+            node_name="Open the PR",
+            status=NodeStatus.SUCCEEDED,
+            attempt=1,
+            started_at=datetime.now(UTC),
+        )
+    )
+    await session.commit()
+
+    assert await reap_abandoned(session) == [], "the run was put back on the queue"
+
+    await session.refresh(run)
+    assert run.status is RunStatus.FAILED
+    assert "Open the PR" in run.error
+    assert "repeated" in run.error
+    assert await claim_one(session, worker_id="worker-b") is None
+
+
+async def test_a_run_that_only_read_things_is_replayed_normally(session, make_run):
+    """Nothing irreversible happened, so re-running costs nothing but time."""
+    from basivo_orch.flows.models import NodeExecution, NodeStatus
+
+    run = await make_run(SIDE_EFFECT_GRAPH)
+    await _abandon(session, run)
+    session.add(
+        NodeExecution(
+            run_id=run.id,
+            node_id="t",
+            node_type="trigger.manual",
+            status=NodeStatus.SUCCEEDED,
+            attempt=1,
+            started_at=datetime.now(UTC),
+        )
+    )
+    await session.commit()
+
+    assert await reap_abandoned(session) == [run.id]
+    await session.refresh(run)
+    assert run.status is RunStatus.QUEUED
+
+
+def test_every_node_declares_whether_repeating_it_is_safe():
+    """A node that changes the world outside this system must say so, or
+    recovery will cheerfully do it twice."""
+    from basivo_orch.flows import nodes as registry
+
+    unsafe = {t for t, n in registry.REGISTRY.items() if not n.replay_safe}
+    assert unsafe == {"git.ticket", "git.autofix", "git.comment", "http.request"}

@@ -196,6 +196,7 @@ async def reap_abandoned(session: AsyncSession, *, now: datetime | None = None) 
         )
     )
     recovered: list[uuid.UUID] = []
+    touched = False
     for run in result.scalars():
         log.warning(
             "worker.run_abandoned",
@@ -203,15 +204,59 @@ async def reap_abandoned(session: AsyncSession, *, now: datetime | None = None) 
             worker_id=run.worker_id,
             last_heartbeat=run.heartbeat_at.isoformat() if run.heartbeat_at else None,
         )
+
+        if repeated := await irreversible_steps_taken(session, run.id):
+            # Recovery re-runs the graph from the beginning, so a run that has
+            # already opened a pull request would open a second one. Nobody
+            # thanks an automation for that. It is failed for a human instead,
+            # naming exactly what already happened.
+            run.status = RunStatus.FAILED
+            run.error = (
+                "The worker executing this run stopped before it finished. It was not "
+                "restarted automatically because these steps had already completed and "
+                f"would have been repeated: {', '.join(repeated)}. Check what they left "
+                "behind, then run it again if it is still needed."
+            )
+            run.finished_at = now
+            log.warning("worker.run_not_replayed", run_id=str(run.id), completed=repeated)
+            touched = True
+            continue
+
         run.status = RunStatus.QUEUED
         run.worker_id = None
         run.claimed_at = None
         run.heartbeat_at = None
         run.started_at = None
         recovered.append(run.id)
-    if recovered:
+        touched = True
+    # Committed on any change, not just recoveries: a run failed as
+    # unrepeatable is a change too, and guarding the commit on `recovered`
+    # alone left it sitting in RUNNING forever.
+    if touched:
         await session.commit()
     return recovered
+
+
+async def irreversible_steps_taken(session: AsyncSession, run_id: uuid.UUID) -> list[str]:
+    """Names of already-succeeded nodes in this run that must not run twice.
+
+    Read from the node records the engine writes as it goes, which is why they
+    are written as each node finishes rather than batched at the end.
+    """
+    from basivo_orch.flows import nodes as registry
+    from basivo_orch.flows.models import NodeExecution, NodeStatus
+
+    result = await session.execute(
+        select(NodeExecution).where(
+            NodeExecution.run_id == run_id, NodeExecution.status == NodeStatus.SUCCEEDED
+        )
+    )
+    unsafe = []
+    for record in result.scalars():
+        implementation = registry.REGISTRY.get(record.node_type)
+        if implementation is not None and not implementation.replay_safe:
+            unsafe.append(record.node_name or record.node_id)
+    return unsafe
 
 
 async def work_loop(redis_client: RedisClient | None, stopping: asyncio.Event) -> None:
