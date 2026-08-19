@@ -360,3 +360,136 @@ async def test_a_sub_agent_inherits_the_parents_model_when_it_names_none(monkeyp
     )
 
     assert seen_models == ["parent-model", "parent-model"], seen_models
+
+
+async def test_handover_moves_control_and_the_second_agent_answers(monkeypatch, http_client):
+    """Handover is not delegation: the receiving agent answers the user.
+
+    The front desk transfers to billing, and billing's reply is the run's
+    output — the front desk never speaks again. Claiming otherwise would put
+    the wrong agent's name on the answer.
+    """
+
+    def front_desk(messages):
+        if turn_number(messages) == 0:
+            return tool_call("transfer_to_billing", {}, call_id="h1")
+        return says("front desk should not speak again")
+
+    def billing(messages):
+        return says("Your invoice is £42, due Friday.")
+
+    async def fake_build(ctx, **kwargs):
+        return FakeChatModel(
+            respond=billing if kwargs.get("model") == "billing-model" else front_desk
+        )
+
+    monkeypatch.setattr("basivo_orch.flows.nodes.agent.build_chat_model", fake_build)
+
+    recorder = _Recorder()
+    ctx = make_context(recorder, http=http_client)
+    result = await AgentNode().run(
+        AgentConfig(
+            prompt="How much do I owe?",
+            model="desk-model",
+            team_mode="handover",
+            sub_agents=[
+                {
+                    "name": "billing",
+                    "description": "Handles invoices and payments.",
+                    "model": "billing-model",
+                }
+            ],
+        ),
+        ctx,
+    )
+
+    assert result.output["text"] == "Your invoice is £42, due Friday."
+    assert result.output["answered_by"] == "billing"
+    assert result.output["handovers"] == ["billing"]
+
+    handover = recorder.data_for("agent.handover")[0]
+    assert handover == {"from": "main", "to": "billing"}
+
+    # Each agent's turns are logged under its own name, or "who said that"
+    # is unanswerable after the fact.
+    speakers = {data["agent"] for data in recorder.data_for("llm.response")}
+    assert speakers == {"main", "billing"}
+
+
+async def test_delegation_keeps_control_with_the_parent(monkeypatch, http_client):
+    """The contrast, asserted rather than described: in delegate mode the
+    parent writes the final answer itself."""
+
+    def parent(messages):
+        if turn_number(messages) == 0:
+            return tool_call("ask_billing", {"task": "how much?"}, call_id="d1")
+        return says("Billing tells me it is £42.")
+
+    def billing(messages):
+        return says("£42")
+
+    async def fake_build(ctx, **kwargs):
+        return FakeChatModel(respond=billing if kwargs.get("model") == "billing-model" else parent)
+
+    monkeypatch.setattr("basivo_orch.flows.nodes.agent.build_chat_model", fake_build)
+    monkeypatch.setattr("basivo_orch.flows.nodes.agent_runtime.build_chat_model", fake_build)
+
+    recorder = _Recorder()
+    ctx = make_context(recorder, http=http_client)
+    result = await AgentNode().run(
+        AgentConfig(
+            prompt="How much do I owe?",
+            model="desk-model",
+            team_mode="delegate",
+            sub_agents=[{"name": "billing", "model": "billing-model"}],
+        ),
+        ctx,
+    )
+
+    assert result.output["text"] == "Billing tells me it is £42."
+    assert result.output["delegations"] == ["billing"]
+    assert not recorder.data_for("agent.handover"), "delegation must not transfer control"
+
+
+async def test_the_handover_is_logged_before_the_receiving_agent_answers(monkeypatch, http_client):
+    """Order matters in a timeline nobody can re-run.
+
+    LangGraph delivers the parent-level routing update only after the
+    receiving agent has already spoken, so reading the hand-off from there put
+    it *after* its own consequence — a log that says billing answered, then
+    that we transferred to billing.
+    """
+
+    def desk(messages):
+        if turn_number(messages) == 0:
+            return tool_call("transfer_to_billing", {}, call_id="h1")
+        return says("unused")
+
+    def billing(messages):
+        return says("£42.")
+
+    async def fake_build(ctx, **kwargs):
+        return FakeChatModel(respond=billing if kwargs.get("model") == "b" else desk)
+
+    monkeypatch.setattr("basivo_orch.flows.nodes.agent.build_chat_model", fake_build)
+
+    recorder = _Recorder()
+    ctx = make_context(recorder, http=http_client)
+    await AgentNode().run(
+        AgentConfig(
+            prompt="how much?",
+            model="a",
+            team_mode="handover",
+            sub_agents=[{"name": "billing", "model": "b"}],
+        ),
+        ctx,
+    )
+
+    kinds = recorder.kinds()
+    handover_at = kinds.index("agent.handover")
+    billing_spoke_at = next(
+        i
+        for i, (kind, data) in enumerate(recorder.steps)
+        if kind == "llm.response" and data["agent"] == "billing"
+    )
+    assert handover_at < billing_spoke_at, kinds

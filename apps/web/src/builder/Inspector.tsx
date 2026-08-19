@@ -288,6 +288,22 @@ export function Inspector({
               />
             ) : spec.type === "code.python" && field.key === "code" ? (
               <CodeArea value={String(config.code ?? "")} onChange={(v) => set("code", v)} />
+            ) : isAgent && field.key === "team_mode" ? (
+              <div>
+                <select
+                  value={String(config.team_mode ?? "delegate")}
+                  onChange={(event) => set("team_mode", event.target.value)}
+                  className={INPUT}
+                >
+                  <option value="delegate">Delegate — it asks, then answers itself</option>
+                  <option value="handover">Handover — it transfers, they answer you</option>
+                </select>
+                <p className="mt-1.5 text-[0.68rem] leading-relaxed text-ink-500">
+                  {config.team_mode === "handover"
+                    ? "Control moves. The agent it transfers to replies directly and can transfer on again — right for triage."
+                    : "This agent stays in charge: it asks, gets an answer back, and writes the reply itself — right for combining several answers."}
+                </p>
+              </div>
             ) : isAgent && field.key === "sub_agents" ? (
               <SubAgentEditor
                 value={config.sub_agents}

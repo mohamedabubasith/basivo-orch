@@ -57,10 +57,12 @@ from pydantic import BaseModel, Field, model_validator
 
 from basivo_orch.flows.nodes.agent_runtime import (
     RunTotals,
+    TeamMember,
     build_tool,
     delegation_tool,
     parse_json,
     run_agent,
+    run_team,
 )
 from basivo_orch.flows.nodes.base import Node, NodeContext, NodeError, NodeResult
 from basivo_orch.flows.nodes.code import PythonExecutionError, run_python
@@ -215,8 +217,17 @@ class AgentConfig(BaseModel):
 
     # -- tools ---------------------------------------------------------------
     tools: list[ToolDefinition] = Field(default_factory=list, max_length=32)
-    #: Other agents this one may delegate to at run time.
+    #: Other agents this one may work with at run time.
     sub_agents: list[SubAgentDefinition] = Field(default_factory=list, max_length=8)
+    #: How this agent works with them, when there are any.
+    #:
+    #: "delegate" — it asks (`ask_<name>`), receives an answer, and writes the
+    #: reply itself. Right when several answers must be combined.
+    #:
+    #: "handover" — it transfers (`transfer_to_<name>`) and the receiving
+    #: agent answers directly, and may transfer on again. Right for triage,
+    #: where claiming the first agent wrote the final answer would be a lie.
+    team_mode: Literal["delegate", "handover"] = "delegate"
     #: How many model turns the loop may take. Each round of tool results costs
     #: a turn, so an agent that keeps calling tools is bounded, not unbounded.
     max_iterations: int = Field(default=6, ge=1, le=25)
@@ -334,6 +345,94 @@ class AgentNode(Node):
 
         totals = RunTotals()
         tools = [guard(definition) for definition in config.tools]
+
+        if config.sub_agents and config.team_mode == "handover":
+            await ctx.step(
+                "agent.started",
+                {
+                    "provider": config.provider,
+                    "model": config.model,
+                    "mode": "handover",
+                    "team": ["main", *[sub.name for sub in config.sub_agents]],
+                    "tools": [tool.name for tool in config.tools],
+                },
+            )
+            members = [
+                TeamMember(
+                    name="main",
+                    model=model,
+                    system=system,
+                    tools=tools,
+                    description="The agent that takes the request first.",
+                    model_name=config.model,
+                    provider=config.provider,
+                )
+            ]
+            for sub in config.sub_agents:
+                members.append(
+                    TeamMember(
+                        name=sub.name,
+                        model=await build_chat_model(
+                            ctx,
+                            provider=sub.provider if sub.model else config.provider,
+                            model=sub.model or config.model,
+                            credential_id=sub.credential_id or config.credential_id,
+                            temperature=sub.temperature,
+                            max_tokens=sub.max_tokens,
+                        ),
+                        system=sub.system,
+                        description=sub.description,
+                        model_name=sub.model or config.model,
+                        provider=sub.provider if sub.model else config.provider,
+                    )
+                )
+            await run_team(
+                ctx,
+                members=members,
+                entry="main",
+                prompt=prompt,
+                max_iterations=config.max_iterations,
+                cost_limit_usd=config.cost_limit_usd,
+                totals=totals,
+            )
+            totals.tool_calls = tool_budget["used"]
+            text = totals.text
+            json_output = parse_json(text) if config.response_format == "json" else None
+            await ctx.step(
+                "agent.finished",
+                {
+                    "stop_reason": totals.stop_reason,
+                    "mode": "handover",
+                    "answered_by": totals.answered_by,
+                    "handovers": totals.delegations,
+                    "tool_calls": totals.tool_calls,
+                    "requests": totals.requests,
+                    "input_tokens": totals.input_tokens,
+                    "output_tokens": totals.output_tokens,
+                    "cost_usd": round(totals.cost_usd, 6),
+                },
+            )
+            return NodeResult(
+                output={
+                    "text": text,
+                    "json": json_output,
+                    "stop_reason": totals.stop_reason,
+                    "tool_calls": totals.tool_calls,
+                    "handovers": totals.delegations,
+                    "answered_by": totals.answered_by,
+                    "usage": {
+                        "input_tokens": totals.input_tokens,
+                        "output_tokens": totals.output_tokens,
+                        "cost_usd": round(totals.cost_usd, 6),
+                    },
+                },
+                metrics={
+                    "tokens_in": totals.input_tokens,
+                    "tokens_out": totals.output_tokens,
+                    "cost_usd": round(totals.cost_usd, 6),
+                },
+            )
+
         for sub in config.sub_agents:
             # A sub-agent inherits whatever it did not override, so the common
             # case is a name and a description and nothing else.

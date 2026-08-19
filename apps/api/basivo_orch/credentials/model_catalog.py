@@ -60,9 +60,7 @@ async def fetch_models(
     if provider_name == "anthropic":
         return await _fetch_anthropic(api_key=api_key, base_url=base_url)
 
-    return await _fetch_openai_compatible(
-        provider_name, api_key=api_key, base_url=base_url
-    )
+    return await _fetch_openai_compatible(provider_name, api_key=api_key, base_url=base_url)
 
 
 async def _get(url: str, headers: dict[str, str]) -> dict:
@@ -85,18 +83,14 @@ async def _get(url: str, headers: dict[str, str]) -> dict:
         raise ModelFetchFailed(f"{url} did not answer with JSON") from exc
 
 
-async def _fetch_openai_compatible(
-    provider_name: str, *, api_key: str, base_url: str
-) -> list[str]:
+async def _fetch_openai_compatible(provider_name: str, *, api_key: str, base_url: str) -> list[str]:
     """`GET {base}/models` — the one endpoint every OpenAI-compatible host has.
 
     This is why a new model needs no code change anywhere: the list comes from
     the provider at the moment the user opens the dropdown.
     """
-    endpoint = (base_url or OPENAI_COMPATIBLE.get(provider_name) or "https://api.openai.com/v1")
-    payload = await _get(
-        endpoint.rstrip("/") + "/models", {"Authorization": f"Bearer {api_key}"}
-    )
+    endpoint = base_url or OPENAI_COMPATIBLE.get(provider_name) or "https://api.openai.com/v1"
+    payload = await _get(endpoint.rstrip("/") + "/models", {"Authorization": f"Bearer {api_key}"})
     data = payload.get("data") if isinstance(payload, dict) else None
     if not isinstance(data, list):
         raise ModelFetchNotSupported(provider_name)
