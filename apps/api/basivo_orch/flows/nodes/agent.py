@@ -49,24 +49,23 @@ never into `NodeExecution.input_summary`.
 
 from __future__ import annotations
 
-import importlib
 import json
 import time
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
-from pydantic_ai import Agent, ModelHTTPError, UnexpectedModelBehavior, UsageLimitExceeded
-from pydantic_ai.messages import ToolCallPart
-from pydantic_ai.models import Model
-from pydantic_ai.providers import infer_provider_class
-from pydantic_ai.settings import ModelSettings
-from pydantic_ai.tools import Tool
-from pydantic_ai.usage import UsageLimits
 
-from basivo_orch.credentials.provider_client import construct_provider
+from basivo_orch.flows.nodes.agent_runtime import (
+    RunTotals,
+    build_tool,
+    delegation_tool,
+    parse_json,
+    run_agent,
+)
 from basivo_orch.flows.nodes.base import Node, NodeContext, NodeError, NodeResult
 from basivo_orch.flows.nodes.code import PythonExecutionError, run_python
 from basivo_orch.flows.nodes.http import assert_public_url
+from basivo_orch.flows.nodes.models import build_chat_model
 from basivo_orch.flows.templating import render_value
 
 #: Which Model class a provider's responses are shaped like. Most providers
@@ -149,6 +148,42 @@ class ToolDefinition(BaseModel):
         return self
 
 
+class SubAgentDefinition(BaseModel):
+    """Another agent this one may hand work to.
+
+    Agent-to-agent, made configurable: the parent gets an `ask_<name>` tool
+    per entry, calling it runs this agent on the task, and its answer comes
+    back as the tool result. A supervisor delegating to specialists, rather
+    than free-form handoff — one agent stays in charge, the conversation
+    terminates, and every hand-off is a step on the run log with its own cost.
+
+    Wiring two Agent NODES together on the canvas is still the right shape for
+    a fixed pipeline (writer → reviewer). This is for when the parent should
+    decide, at run time, who to ask.
+    """
+
+    model_config = {"extra": "forbid"}
+
+    name: str = Field(
+        min_length=1,
+        max_length=48,
+        pattern=r"^[a-zA-Z0-9_-]+$",
+        description="How the parent refers to it, e.g. 'researcher'.",
+    )
+    description: str = Field(
+        default="",
+        max_length=600,
+        description="What it is good at. The parent reads this to decide when to ask.",
+    )
+    system: str = Field(default="", max_length=20000, description="Its own instructions.")
+    provider: str = Field(default="openai", max_length=48)
+    model: str = Field(default="", max_length=160, description="Blank uses the parent's model.")
+    credential_id: str = Field(default="", description="Blank uses the parent's credential.")
+    temperature: float | None = Field(default=None, ge=0, le=2)
+    max_tokens: int = Field(default=2048, ge=1, le=64000)
+    max_iterations: int = Field(default=4, ge=1, le=15)
+
+
 class AgentConfig(BaseModel):
     model_config = {"extra": "forbid"}
 
@@ -180,6 +215,8 @@ class AgentConfig(BaseModel):
 
     # -- tools ---------------------------------------------------------------
     tools: list[ToolDefinition] = Field(default_factory=list, max_length=32)
+    #: Other agents this one may delegate to at run time.
+    sub_agents: list[SubAgentDefinition] = Field(default_factory=list, max_length=8)
     #: How many model turns the loop may take. Each round of tool results costs
     #: a turn, so an agent that keeps calling tools is bounded, not unbounded.
     max_iterations: int = Field(default=6, ge=1, le=25)
@@ -226,7 +263,18 @@ class AgentNode(Node):
     timeout_seconds = 660.0
 
     async def run(self, config: AgentConfig, ctx: NodeContext) -> NodeResult:
-        model = await _build_model(config, ctx)
+        model = await build_chat_model(
+            ctx,
+            provider=config.provider,
+            model=config.model,
+            credential_id=config.credential_id,
+            base_url=config.base_url,
+            temperature=config.temperature,
+            max_tokens=config.max_tokens,
+            top_p=config.top_p,
+            request_timeout=config.request_timeout_seconds,
+            stop=config.stop_sequences or None,
+        )
 
         template = ctx.template_context()
         system = str(render_value(config.system, template)) if config.system else ""
@@ -245,18 +293,65 @@ class AgentNode(Node):
             # that was never going to accept an open-ended shape.
             system = (f"{system}\n\nRespond with a single JSON object and nothing else.").strip()
 
-        agent: Agent[None, Any] = Agent(
-            model,
-            instructions=system or None,
-            tools=_build_tools(config.tools, ctx, template),
-            model_settings=_model_settings(config),
-        )
+        tool_budget = {"used": 0}
 
-        limits = UsageLimits(
-            request_limit=config.max_iterations,
-            tool_calls_limit=config.max_tool_calls,
-            cost_limit=config.cost_limit_usd,
-        )
+        def guard(definition: ToolDefinition):
+            """Wrap one user-defined tool with logging and the call ceiling."""
+
+            async def call(**arguments: Any) -> Any:
+                if tool_budget["used"] >= config.max_tool_calls:
+                    # Refused as a result, not an exception: the model is told
+                    # why and can still write its answer, instead of the run
+                    # dying with a half-finished thought.
+                    return (
+                        f"Refused: this run has already made {config.max_tool_calls} tool "
+                        "calls, its limit. Answer with what you have."
+                    )
+                tool_budget["used"] += 1
+                await ctx.step(
+                    "tool.called",
+                    {"tool": definition.name, "kind": definition.kind, "arguments": arguments},
+                )
+                started = time.perf_counter()
+                ok, output = await _execute_tool(definition, arguments, ctx, template)
+                await ctx.step(
+                    "tool.result",
+                    {
+                        "tool": definition.name,
+                        "ok": ok,
+                        "duration_ms": int((time.perf_counter() - started) * 1000),
+                        "result_preview": str(output)[:400],
+                    },
+                )
+                return output
+
+            return build_tool(
+                name=definition.name,
+                description=definition.description,
+                input_schema=definition.input_schema,
+                execute=call,
+            )
+
+        totals = RunTotals()
+        tools = [guard(definition) for definition in config.tools]
+        for sub in config.sub_agents:
+            # A sub-agent inherits whatever it did not override, so the common
+            # case is a name and a description and nothing else.
+            resolved = sub.model_copy(
+                update={
+                    "model": sub.model or config.model,
+                    "provider": sub.provider if sub.model else config.provider,
+                    "credential_id": sub.credential_id or config.credential_id,
+                }
+            )
+            tools.append(
+                delegation_tool(
+                    ctx,
+                    sub_agent=resolved,
+                    parent_totals=totals,
+                    cost_limit_usd=config.cost_limit_usd,
+                )
+            )
 
         await ctx.step(
             "agent.started",
@@ -264,70 +359,39 @@ class AgentNode(Node):
                 "provider": config.provider,
                 "model": config.model,
                 "tools": [tool.name for tool in config.tools],
+                "sub_agents": [sub.name for sub in config.sub_agents],
                 "max_iterations": config.max_iterations,
             },
         )
 
-        text = ""
-        stop_reason = "end_turn"
-        turn_started = time.perf_counter()
+        await run_agent(
+            ctx,
+            model=model,
+            prompt=prompt,
+            system=system,
+            tools=tools,
+            max_iterations=config.max_iterations,
+            max_tool_calls=config.max_tool_calls,
+            cost_limit_usd=config.cost_limit_usd,
+            provider=config.provider,
+            model_name=config.model,
+            totals=totals,
+        )
+        totals.tool_calls = tool_budget["used"]
 
-        try:
-            async with agent.iter(prompt, usage_limits=limits) as run:
-                async for node in run:
-                    if Agent.is_model_request_node(node):
-                        turn_started = time.perf_counter()
-
-                    elif Agent.is_call_tools_node(node):
-                        response = node.model_response
-                        elapsed = int((time.perf_counter() - turn_started) * 1000)
-                        usage = response.usage
-                        tool_call_parts = [
-                            part for part in response.parts if isinstance(part, ToolCallPart)
-                        ]
-                        text_preview = "".join(
-                            getattr(part, "content", "") or ""
-                            for part in response.parts
-                            if getattr(part, "part_kind", None) == "text"
-                        )
-                        await ctx.step(
-                            "llm.response",
-                            {
-                                "model": response.model_name,
-                                "provider": response.provider_name,
-                                "finish_reason": response.finish_reason,
-                                "duration_ms": elapsed,
-                                "input_tokens": usage.input_tokens,
-                                "output_tokens": usage.output_tokens,
-                                "cache_read_tokens": usage.cache_read_tokens,
-                                "cache_write_tokens": usage.cache_write_tokens,
-                                "tool_calls": [part.tool_name for part in tool_call_parts],
-                                "text_preview": text_preview[:400],
-                            },
-                        )
-
-                if run.result is not None:
-                    text = run.result.output
-        except UsageLimitExceeded as exc:
-            stop_reason = "limit_exceeded"
-            await ctx.step("agent.truncated", {"reason": str(exc)})
-        except (ModelHTTPError, UnexpectedModelBehavior) as exc:
-            raise NodeError(f"The model provider returned an error: {exc}", retryable=True) from exc
-
-        total_usage = run.usage
-        cost = float(total_usage.cost) if total_usage.cost is not None else 0.0
-
-        json_output = _parse_json(text) if config.response_format == "json" else None
+        text = totals.text
+        json_output = parse_json(text) if config.response_format == "json" else None
 
         await ctx.step(
             "agent.finished",
             {
-                "stop_reason": stop_reason,
-                "tool_calls": total_usage.tool_calls,
-                "requests": total_usage.requests,
-                "input_tokens": total_usage.input_tokens,
-                "output_tokens": total_usage.output_tokens,
-                "cost_usd": cost,
+                "stop_reason": totals.stop_reason,
+                "tool_calls": totals.tool_calls,
+                "requests": totals.requests,
+                "input_tokens": totals.input_tokens,
+                "output_tokens": totals.output_tokens,
+                "cost_usd": round(totals.cost_usd, 6),
+                "delegations": totals.delegations,
             },
         )
 
@@ -335,18 +399,19 @@ class AgentNode(Node):
             output={
                 "text": text,
                 "json": json_output,
-                "stop_reason": stop_reason,
-                "tool_calls": total_usage.tool_calls,
+                "stop_reason": totals.stop_reason,
+                "tool_calls": totals.tool_calls,
+                "delegations": totals.delegations,
                 "usage": {
-                    "input_tokens": total_usage.input_tokens,
-                    "output_tokens": total_usage.output_tokens,
-                    "cost_usd": cost,
+                    "input_tokens": totals.input_tokens,
+                    "output_tokens": totals.output_tokens,
+                    "cost_usd": round(totals.cost_usd, 6),
                 },
             },
             metrics={
-                "tokens_in": total_usage.input_tokens,
-                "tokens_out": total_usage.output_tokens,
-                "cost_usd": cost,
+                "tokens_in": totals.input_tokens,
+                "tokens_out": totals.output_tokens,
+                "cost_usd": round(totals.cost_usd, 6),
             },
         )
 
@@ -354,126 +419,6 @@ class AgentNode(Node):
 # ---------------------------------------------------------------------------
 # Model construction
 # ---------------------------------------------------------------------------
-
-
-async def build_llm_model(
-    ctx: NodeContext, *, provider: str, model: str, credential_id: str, base_url: str = ""
-) -> Model:
-    """A pydantic-ai Model from a provider name + stored credential.
-
-    Shared by every node that talks to a model — the Agent, and the autofix
-    node's repair loop — so credential resolution and provider construction
-    cannot drift between them.
-    """
-    if provider not in PROVIDER_MODEL_MODULE:
-        raise NodeError(
-            f"Unknown provider {provider!r}. See the node's Provider field for the list.",
-            retryable=False,
-        )
-
-    api_key = ""
-    options: dict[str, Any] = {}
-
-    if credential_id:
-        credential = await ctx.resolve_credential(credential_id)
-        if credential is None:
-            raise NodeError(
-                f"Credential {credential_id!r} was not found in this workspace.",
-                retryable=False,
-            )
-        if credential.provider != provider:
-            raise NodeError(
-                f"This credential is for {credential.provider!r}, not {provider!r}.",
-                retryable=False,
-            )
-        api_key = credential.api_key
-        base_url = base_url or credential.base_url or ""
-        options = credential.options
-
-    provider_cls = infer_provider_class(provider)
-    provider_instance = construct_provider(
-        provider_cls, api_key=api_key, base_url=base_url, options=options
-    )
-
-    module_name, class_name = PROVIDER_MODEL_MODULE[provider]
-    model_cls = getattr(importlib.import_module(module_name), class_name)
-    return model_cls(model, provider=provider_instance)
-
-
-async def _build_model(config: AgentConfig, ctx: NodeContext) -> Model:
-    return await build_llm_model(
-        ctx,
-        provider=config.provider,
-        model=config.model,
-        credential_id=config.credential_id,
-        base_url=config.base_url,
-    )
-
-
-# ---------------------------------------------------------------------------
-# Sampling settings
-# ---------------------------------------------------------------------------
-
-
-def _model_settings(config: AgentConfig) -> ModelSettings:
-    settings: ModelSettings = {
-        "max_tokens": config.max_tokens,
-        "timeout": config.request_timeout_seconds,
-    }
-    if config.temperature is not None:
-        settings["temperature"] = config.temperature
-    if config.top_p is not None:
-        settings["top_p"] = config.top_p
-    if config.seed is not None:
-        settings["seed"] = config.seed
-    if config.stop_sequences:
-        settings["stop_sequences"] = config.stop_sequences
-    return settings
-
-
-# ---------------------------------------------------------------------------
-# Tools
-# ---------------------------------------------------------------------------
-
-
-def _build_tools(
-    definitions: list[ToolDefinition], ctx: NodeContext, template: dict[str, Any]
-) -> list[Tool[None]]:
-    return [_make_tool(definition, ctx, template) for definition in definitions]
-
-
-def _make_tool(
-    definition: ToolDefinition, ctx: NodeContext, template: dict[str, Any]
-) -> Tool[None]:
-    async def call(**arguments: Any) -> Any:
-        # The one place execution, timing and outcome are all in scope
-        # together — logged here rather than reconstructed from pydantic-ai's
-        # internal message history after the fact.
-        await ctx.step(
-            "tool.called",
-            {"tool": definition.name, "kind": definition.kind, "arguments": arguments},
-        )
-        started = time.perf_counter()
-        ok, output = await _execute_tool(definition, arguments, ctx, template)
-        elapsed = int((time.perf_counter() - started) * 1000)
-        await ctx.step(
-            "tool.result",
-            {
-                "tool": definition.name,
-                "ok": ok,
-                "duration_ms": elapsed,
-                "result_preview": str(output)[:400],
-            },
-        )
-        return output
-
-    return Tool.from_schema(
-        call,
-        name=definition.name,
-        description=definition.description or None,
-        json_schema=definition.input_schema,
-        takes_ctx=False,
-    )
 
 
 async def _execute_tool(
@@ -532,28 +477,3 @@ async def _execute_tool(
         return False, str(exc)
     except Exception as exc:  # noqa: BLE001 - a tool failure is data, not a crash
         return False, f"{type(exc).__name__}: {exc}"
-
-
-def _parse_json(text: str) -> Any:
-    """Best-effort JSON out of a model response.
-
-    Models fence JSON in markdown often enough that failing on it would make
-    `response_format: json` unreliable for reasons that have nothing to do
-    with the flow author's prompt.
-    """
-    candidate = text.strip()
-    if candidate.startswith("```"):
-        candidate = candidate[3:]
-        if candidate.lstrip().startswith("json"):
-            candidate = candidate.lstrip()[4:]
-        candidate = candidate.rsplit("```", 1)[0]
-    try:
-        return json.loads(candidate.strip())
-    except ValueError:
-        start, end = candidate.find("{"), candidate.rfind("}")
-        if start != -1 and end > start:
-            try:
-                return json.loads(candidate[start : end + 1])
-            except ValueError:
-                pass
-    raise NodeError("The model did not return valid JSON, but the node requires it.")

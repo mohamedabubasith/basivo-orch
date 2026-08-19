@@ -18,7 +18,7 @@ type in the node registry must appear in EXERCISED_NODE_TYPES, so registering
 a node without integration coverage fails the suite by construction rather
 than by review vigilance.
 
-Model calls use pydantic-ai's FunctionModel — the loop, tools, usage and step
+Model calls use a scripted fake chat model — the loop, tools, usage and step
 logging are all real; only the provider's wire call is substituted, because
 CI has no API key. The genuinely-live path is `test_live_provider.py`,
 opt-in via environment variables.
@@ -29,8 +29,6 @@ from __future__ import annotations
 import json
 
 import httpx
-from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
-from pydantic_ai.models.function import FunctionModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -39,6 +37,7 @@ from basivo_orch.flows.engine import Engine
 from basivo_orch.flows.events import replay
 from basivo_orch.flows.graph import Graph
 from basivo_orch.flows.models import NodeExecution, NodeStatus, RunStatus
+from tests.flows.fakes import FakeChatModel, says, tool_call, turn_number
 
 
 async def run_graph(
@@ -68,19 +67,19 @@ async def test_two_agents_hand_over_through_input_text(session, make_run, monkey
     model records the prompt the engine handed it."""
     received_by_b: list[str] = []
 
-    def model_a(messages, info):
-        return ModelResponse(parts=[TextPart(content="Draft: the sky is blue.")])
+    def model_a(messages):
+        return says("Draft: the sky is blue.")
 
-    def model_b(messages, info):
+    def model_b(messages):
         # The first request part of the last message is B's user prompt.
-        prompt = messages[-1].parts[0].content
+        prompt = messages[-1].content
         received_by_b.append(prompt)
-        return ModelResponse(parts=[TextPart(content=f"Reviewed: {prompt}")])
+        return says(f"Reviewed: {prompt}")
 
-    async def fake_build_model(config, ctx):
-        return FunctionModel(model_a if ctx.node_id == "writer" else model_b)
+    async def fake_build_model(ctx, **kwargs):
+        return FakeChatModel(respond=model_a if ctx.node_id == "writer" else model_b)
 
-    monkeypatch.setattr("basivo_orch.flows.nodes.agent._build_model", fake_build_model)
+    monkeypatch.setattr("basivo_orch.flows.nodes.agent.build_chat_model", fake_build_model)
 
     graph = Graph.model_validate(
         {
@@ -125,18 +124,16 @@ async def test_an_agent_code_tool_executes_inside_a_run(session, make_run, monke
     subprocess actually executes, and the steps land in the persisted log."""
     calls = {"n": 0}
 
-    def fake_model(messages, info):
+    def fake_model(messages):
         calls["n"] += 1
         if calls["n"] == 1:
-            return ModelResponse(
-                parts=[ToolCallPart(tool_name="stamp", args={"label": "x7"}, tool_call_id="t1")]
-            )
-        return ModelResponse(parts=[TextPart(content="stamped")])
+            return tool_call("stamp", {"label": "x7"}, call_id="t1")
+        return says("stamped")
 
-    async def fake_build_model(config, ctx):
-        return FunctionModel(fake_model)
+    async def fake_build_model(ctx, **kwargs):
+        return FakeChatModel(respond=fake_model)
 
-    monkeypatch.setattr("basivo_orch.flows.nodes.agent._build_model", fake_build_model)
+    monkeypatch.setattr("basivo_orch.flows.nodes.agent.build_chat_model", fake_build_model)
 
     graph = Graph.model_validate(
         {
@@ -326,24 +323,16 @@ async def test_ticket_then_autofix_flow(session, make_run, monkeypatch):
 
     monkeypatch.setattr(Engine, "_resolve_credential", fake_resolve)
 
-    def fix_model(messages, info):
-        n = sum(1 for m in messages if m.kind == "response")
+    def fix_model(messages):
+        n = turn_number(messages)
         if n == 0:
-            return ModelResponse(
-                parts=[
-                    ToolCallPart(
-                        tool_name="write_file",
-                        args={"path": "app.py", "content": "fixed\n"},
-                        tool_call_id="w",
-                    )
-                ]
-            )
-        return ModelResponse(parts=[TextPart(content="Replaced the broken handler.")])
+            return tool_call("write_file", {"path": "app.py", "content": "fixed\n"}, call_id="w")
+        return says("Replaced the broken handler.")
 
     async def fake_build(ctx, **kwargs):
-        return FunctionModel(fix_model)
+        return FakeChatModel(respond=fix_model)
 
-    monkeypatch.setattr("basivo_orch.flows.nodes.agent.build_llm_model", fake_build)
+    monkeypatch.setattr("basivo_orch.flows.nodes.gitops.build_chat_model", fake_build)
 
     requests: list[httpx.Request] = []
 
@@ -439,21 +428,21 @@ async def test_independent_branches_run_concurrently(session, make_run, monkeypa
     in_flight = {"n": 0, "peak": 0}
 
     def sleeper(node_id: str):
-        async def model(messages, info):
+        async def model(messages):
             in_flight["n"] += 1
             in_flight["peak"] = max(in_flight["peak"], in_flight["n"])
             overlap.append(f"start:{node_id}")
             await asyncio.sleep(DELAY)
             overlap.append(f"end:{node_id}")
             in_flight["n"] -= 1
-            return ModelResponse(parts=[TextPart(content=f"done {node_id}")])
+            return says(f"done {node_id}")
 
         return model
 
-    async def fake_build_model(config, ctx):
-        return FunctionModel(sleeper(ctx.node_id))
+    async def fake_build_model(ctx, **kwargs):
+        return FakeChatModel(respond=sleeper(ctx.node_id))
 
-    monkeypatch.setattr("basivo_orch.flows.nodes.agent._build_model", fake_build_model)
+    monkeypatch.setattr("basivo_orch.flows.nodes.agent.build_chat_model", fake_build_model)
 
     graph = Graph.model_validate(
         {
@@ -512,18 +501,18 @@ async def test_a_failing_branch_lets_its_sibling_finish_and_fails_the_run(
     import asyncio
 
     def model_for(node_id: str):
-        async def model(messages, info):
+        async def model(messages):
             if node_id == "boom":
                 raise RuntimeError("provider exploded")
             await asyncio.sleep(0.3)
-            return ModelResponse(parts=[TextPart(content="slow branch finished")])
+            return says("slow branch finished")
 
         return model
 
-    async def fake_build_model(config, ctx):
-        return FunctionModel(model_for(ctx.node_id))
+    async def fake_build_model(ctx, **kwargs):
+        return FakeChatModel(respond=model_for(ctx.node_id))
 
-    monkeypatch.setattr("basivo_orch.flows.nodes.agent._build_model", fake_build_model)
+    monkeypatch.setattr("basivo_orch.flows.nodes.agent.build_chat_model", fake_build_model)
 
     graph = Graph.model_validate(
         {
@@ -598,8 +587,6 @@ async def test_github_issue_with_a_screenshot_becomes_a_pr_and_a_reply(
     payload is the shape GitHub actually sends, the image is fetched through
     the redirect, and the PR and comment are asserted on the wire.
     """
-    from pydantic_ai.messages import BinaryContent
-
     from basivo_orch.flows.nodes.base import ResolvedCredential
 
     async def fake_resolve(self, credential_id):
@@ -610,33 +597,26 @@ async def test_github_issue_with_a_screenshot_becomes_a_pr_and_a_reply(
     png = b"\x89PNG\r\n\x1a\n" + b"0" * 32
     saw_image: list[str] = []
 
-    def looking_model(messages, info):
+    def looking_model(messages):
         for message in messages:
-            for part in getattr(message, "parts", []):
-                content = getattr(part, "content", None)
-                if isinstance(content, list):
-                    saw_image.extend(
-                        item.media_type for item in content if isinstance(item, BinaryContent)
-                    )
-        n = sum(1 for m in messages if m.kind == "response")
+            content = getattr(message, "content", None)
+            if isinstance(content, list):
+                saw_image.extend(
+                    item.get("image_url", {}).get("url", "").split(";")[0].removeprefix("data:")
+                    for item in content
+                    if isinstance(item, dict) and item.get("type") == "image_url"
+                )
+        n = turn_number(messages)
         if n == 0:
-            return ModelResponse(
-                parts=[
-                    ToolCallPart(
-                        tool_name="write_file",
-                        args={"path": "totals.py", "content": "TAX = 0.2\n"},
-                        tool_call_id="w",
-                    )
-                ]
+            return tool_call(
+                "write_file", {"path": "totals.py", "content": "TAX = 0.2\n"}, call_id="w"
             )
-        return ModelResponse(
-            parts=[TextPart(content="The screenshot showed tax at 0%. Set TAX back to 0.2.")]
-        )
+        return says("The screenshot showed tax at 0%. Set TAX back to 0.2.")
 
     async def fake_build(ctx, **kwargs):
-        return FunctionModel(looking_model)
+        return FakeChatModel(respond=looking_model)
 
-    monkeypatch.setattr("basivo_orch.flows.nodes.agent.build_llm_model", fake_build)
+    monkeypatch.setattr("basivo_orch.flows.nodes.gitops.build_chat_model", fake_build)
 
     requests: list[httpx.Request] = []
 

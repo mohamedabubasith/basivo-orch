@@ -27,12 +27,9 @@ be stale or simply wrong by the time someone reads it, those providers raise
 
 from __future__ import annotations
 
-from anthropic import AsyncAnthropic
-from groq import AsyncGroq
-from openai import AsyncOpenAI
-from pydantic_ai.providers import infer_provider_class
+import httpx
 
-from basivo_orch.credentials.provider_client import construct_provider
+from basivo_orch.flows.nodes.models import OPENAI_COMPATIBLE
 
 #: Providers with no practical live catalog here. See the module docstring.
 NO_LIVE_CATALOG = frozenset({"bedrock", "huggingface", "azure", "mistral", "cohere"})
@@ -58,42 +55,73 @@ async def fetch_models(
         raise ModelFetchNotSupported(provider_name)
 
     if provider_name == "google":
-        return await _fetch_google(api_key=api_key, base_url=base_url, options=options)
+        return await _fetch_google(api_key=api_key, base_url=base_url)
 
-    provider_cls = infer_provider_class(provider_name)
-    provider = construct_provider(provider_cls, api_key=api_key, base_url=base_url, options=options)
-    client = provider.client
+    if provider_name == "anthropic":
+        return await _fetch_anthropic(api_key=api_key, base_url=base_url)
 
+    return await _fetch_openai_compatible(
+        provider_name, api_key=api_key, base_url=base_url
+    )
+
+
+async def _get(url: str, headers: dict[str, str]) -> dict:
+    """One GET, with the provider's own error text preserved.
+
+    A catalogue fetch doubles as the connection test, so "why did my key not
+    work" must survive to the UI — a bare status code sends the user to the
+    provider's documentation blind.
+    """
     try:
-        if isinstance(client, (AsyncOpenAI, AsyncAnthropic)):
-            # Both `.models.list()` calls return an object that resolves to
-            # the first page on `await` — one page is plenty for a dropdown,
-            # and avoids paginating through every model a large provider has.
-            page = await client.models.list()
-            return sorted({model.id for model in page.data if getattr(model, "id", None)})
-
-        if isinstance(client, AsyncGroq):
-            response = await client.models.list()
-            return sorted({model.id for model in response.data if getattr(model, "id", None)})
-    except Exception as exc:  # noqa: BLE001 - surfaced as "the key didn't work"
+        async with httpx.AsyncClient(timeout=20) as client:
+            response = await client.get(url, headers=headers)
+    except httpx.HTTPError as exc:
         raise ModelFetchFailed(str(exc)) from exc
-
-    raise ModelFetchNotSupported(provider_name)
-
-
-async def _fetch_google(*, api_key: str, base_url: str, options: dict[str, object]) -> list[str]:
-    provider_cls = infer_provider_class("google")
-    provider = construct_provider(provider_cls, api_key=api_key, base_url=base_url, options=options)
-    client = provider.client  # google.genai.Client
-
+    if response.status_code >= 400:
+        raise ModelFetchFailed(f"{response.status_code}: {response.text[:300]}")
     try:
-        pager = await client.aio.models.list()
-        names = {
-            name for model in pager.page if (name := (model.name or "").removeprefix("models/"))
+        return response.json()
+    except ValueError as exc:
+        raise ModelFetchFailed(f"{url} did not answer with JSON") from exc
+
+
+async def _fetch_openai_compatible(
+    provider_name: str, *, api_key: str, base_url: str
+) -> list[str]:
+    """`GET {base}/models` — the one endpoint every OpenAI-compatible host has.
+
+    This is why a new model needs no code change anywhere: the list comes from
+    the provider at the moment the user opens the dropdown.
+    """
+    endpoint = (base_url or OPENAI_COMPATIBLE.get(provider_name) or "https://api.openai.com/v1")
+    payload = await _get(
+        endpoint.rstrip("/") + "/models", {"Authorization": f"Bearer {api_key}"}
+    )
+    data = payload.get("data") if isinstance(payload, dict) else None
+    if not isinstance(data, list):
+        raise ModelFetchNotSupported(provider_name)
+    return sorted({m["id"] for m in data if isinstance(m, dict) and m.get("id")})
+
+
+async def _fetch_anthropic(*, api_key: str, base_url: str) -> list[str]:
+    payload = await _get(
+        (base_url or "https://api.anthropic.com").rstrip("/") + "/v1/models",
+        {"x-api-key": api_key, "anthropic-version": "2023-06-01"},
+    )
+    data = payload.get("data", [])
+    return sorted({m["id"] for m in data if isinstance(m, dict) and m.get("id")})
+
+
+async def _fetch_google(*, api_key: str, base_url: str) -> list[str]:
+    base = (base_url or "https://generativelanguage.googleapis.com").rstrip("/")
+    payload = await _get(f"{base}/v1beta/models?key={api_key}", {})
+    return sorted(
+        {
+            name
+            for model in payload.get("models", [])
+            if (name := (model.get("name") or "").removeprefix("models/"))
         }
-        return sorted(names)
-    except Exception as exc:  # noqa: BLE001 - surfaced as "the key didn't work"
-        raise ModelFetchFailed(str(exc)) from exc
+    )
 
 
 async def _verify_vcs_token(provider_name: str, *, api_key: str, base_url: str) -> list[str]:
