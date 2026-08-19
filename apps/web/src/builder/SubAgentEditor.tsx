@@ -1,10 +1,11 @@
 /**
  * Editing the agents an agent may hand work to.
  *
- * Agent-to-agent, made configurable. Each entry becomes an `ask_<name>` tool
- * on the parent, so the parent decides *at run time* who to consult — which
- * is the thing wiring two Agent nodes on the canvas cannot do, because that
- * pipeline is fixed when you draw it.
+ * Agent-to-agent, made configurable. Each entry becomes a tool on the parent —
+ * `ask_<name>` in delegate mode, `transfer_to_<name>` in handover — so the
+ * parent decides *at run time* who to involve, which is the thing wiring two
+ * Agent nodes on the canvas cannot do: that pipeline is fixed when you draw
+ * it.
  *
  * Deliberately shaped like the tool editor: a collapsed row per agent with the
  * delete control on the header (never buried inside), expanding to its
@@ -40,15 +41,22 @@ export function SubAgentEditor({
   orgId,
   parentProvider,
   parentCredentialId,
+  teamMode,
 }: {
   value: unknown;
   onChange: (agents: SubAgentValue[]) => void;
   orgId?: string | null;
   parentProvider: string;
   parentCredentialId: string;
+  /** Decides the tool each entry becomes, so the row shows the real name. */
+  teamMode: string;
 }) {
   const agents: SubAgentValue[] = Array.isArray(value) ? (value as SubAgentValue[]) : [];
   const [open, setOpen] = useState<number | null>(null);
+  // The row names the tool the parent will actually see. Showing `ask_` while
+  // the mode generates `transfer_to_` is a small lie that costs someone an
+  // afternoon when their system prompt names the wrong tool.
+  const prefix = teamMode === "handover" ? "transfer_to_" : "ask_";
 
   function update(index: number, patch: Partial<SubAgentValue>) {
     onChange(agents.map((agent, i) => (i === index ? { ...agent, ...patch } : agent)));
@@ -86,7 +94,8 @@ export function SubAgentEditor({
                 aria-hidden="true"
               />
               <span className="min-w-0 flex-1 truncate font-mono text-xs text-ink-200">
-                ask_{agent.name || "unnamed"}
+                {prefix}
+                {agent.name || "unnamed"}
               </span>
               <span className="flex-none text-[0.62rem] text-ink-500 uppercase">
                 {agent.model ? "own model" : "inherits"}
@@ -134,7 +143,14 @@ export function SubAgentEditor({
                     className={`${INPUT} font-mono`}
                   />
                   <p className="mt-1 text-[0.68rem] text-ink-500">
-                    The parent calls it as <code className="text-ink-400">ask_{agent.name || "name"}</code>.
+                    The parent calls it as{" "}
+                    <code className="text-ink-400">
+                      {prefix}
+                      {agent.name || "name"}
+                    </code>
+                    {teamMode === "handover"
+                      ? " — and control moves to it."
+                      : " — and its answer comes back."}
                   </p>
                 </div>
 
@@ -148,7 +164,7 @@ export function SubAgentEditor({
                     className={INPUT}
                   />
                   <p className="mt-1 text-[0.68rem] text-ink-500">
-                    The parent reads this to decide when to ask. Vague here means it never delegates.
+                    The parent reads this to decide when to involve it. Vague here means it never does.
                   </p>
                 </div>
 

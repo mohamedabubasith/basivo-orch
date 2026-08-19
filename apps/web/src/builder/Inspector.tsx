@@ -311,6 +311,7 @@ export function Inspector({
                 orgId={orgId}
                 parentProvider={String(config.provider ?? MODEL_PROVIDERS[0].value)}
                 parentCredentialId={String(config.credential_id ?? "")}
+                teamMode={String(config.team_mode ?? "delegate")}
               />
             ) : isAgent && field.key === "tools" ? (
               <ToolEditor value={config.tools} onChange={(tools) => set("tools", tools)} suggestions={suggestions} />
