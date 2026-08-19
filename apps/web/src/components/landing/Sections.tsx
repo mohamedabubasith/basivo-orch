@@ -147,10 +147,13 @@ export function Nav() {
 /* --------------------------------------------------------------- stats --- */
 
 export function Stats() {
+  // Counted from the node registry and the provider table, not rounded up.
+  // A landing page whose numbers do not survive `make dev` is a landing page
+  // nobody on the team trusts.
   const items = [
-    { to: 6, suffix: "", label: "Tier 1 nodes, ready to wire" },
-    { to: 100, suffix: "%", label: "of node executions logged" },
-    { to: 2, suffix: "", label: "ways to call a flow: blocking or streamed" },
+    { to: 15, suffix: "", label: "node types, from triggers to video" },
+    { to: 20, suffix: "", label: "model providers, your keys" },
+    { to: 100, suffix: "%", label: "of steps logged with tokens and cost" },
   ];
   return (
     <section className="relative border-t border-ink-800/70 py-16">
@@ -197,7 +200,7 @@ export function Hero() {
           </Badge>
 
           <h1 className="text-[2.6rem] leading-[1.08] font-semibold tracking-tight text-balance text-ink-100 sm:text-6xl">
-            {"Agent pipelines you can".split(" ").map((word, i) => (
+            {"An issue at 3am is a".split(" ").map((word, i) => (
               <motion.span
                 key={word + i}
                 className="inline-block"
@@ -214,15 +217,15 @@ export function Hero() {
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.5, delay: 0.25, ease: [0.21, 0.5, 0.35, 1] }}
             >
-              actually watch run
+              pull request by breakfast
             </motion.span>
           </h1>
 
           <p className="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-pretty text-ink-300">
-            Drag nodes onto a canvas to build an agent pipeline, then watch it
-            run live. Which step ran, what tool it called, how many tokens it
-            used, what it cost. When something breaks at 3am, you read what
-            happened instead of guessing.
+            Draw the pipeline once: a bug report arrives, an agent reads it —
+            screenshot and all — finds the cause in your repository, and opens
+            a pull request for a human to review. Then watch every step of it
+            run: which tool was called, how many tokens, what it cost.
           </p>
 
           <div className="mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row">
@@ -317,36 +320,37 @@ export function Observability() {
 
 const FEATURES = [
   {
-    title: "Visual pipeline builder",
-    body: "Drag nodes, connect them, branch on results. The canvas is the source of truth — no YAML to keep in sync.",
-    icon: "M4 7h6M14 7h6M4 17h6M14 17h6M10 7a2 2 0 0 0 2 2h0a2 2 0 0 1 2 2v2a2 2 0 0 0 2 2",
+    title: "It reads the screenshot",
+    body: "Bug reports are pictures more often than prose. The repair agent looks at the image attached to an issue, not just the words around it.",
+    icon: "M4.5 5.5h15v13h-15zM4.5 14l4-4 3.5 3.5M13 12.5l2.5-2.5 4 4M9 9.2a1.2 1.2 0 1 1 0-.1",
   },
   {
-    title: "Bring your own models",
-    body: "Anthropic, OpenAI, or anything with an HTTP endpoint. Keys are encrypted at rest and never returned by the API.",
-    icon: "M12 3v18M3 12h18M6.5 6.5l11 11M17.5 6.5l-11 11",
+    title: "Pull requests, never merges",
+    body: "The fix arrives on a branch with the agent's own explanation of what was wrong. Protected paths like CI config are refused outright. You review; it never merges.",
+    icon: "M7 6a2 2 0 1 1 0-.1M7 8v8M7 18a2 2 0 1 1 0-.1M17 12a2 2 0 1 1 0-.1M9 6.5c5 0 6 2 6 5.5",
   },
   {
-    title: "Triggers that fit",
-    body: "Webhooks, schedules, or manual runs. Each carries its payload into the run record so you can replay exactly what happened.",
-    icon: "M13 2 4.5 13.5H11l-1 8.5 8.5-11.5H12l1-8.5Z",
+    title: "Agents that hand over",
+    body: "One agent asks another and keeps control, or transfers the conversation entirely. Every hand-off is on the log with the tokens it cost.",
+    icon: "M4 8h11l-3-3M20 16H9l3 3",
   },
   {
-    title: "Workspaces and roles",
-    body: "Per-organisation membership with permission-checked routes. Authority is re-read on every request, so a demotion applies now, not at token expiry.",
-    icon: "M16 20v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 7a3 3 0 1 0 0 6 3 3 0 0 0 0-6ZM22 20v-2a4 4 0 0 0-3-3.9",
+    title: "Posters and video, rendered",
+    body: "A model writes the layout; a browser renders it with real fonts. Your headline is your headline — not an image model's ninety-percent guess at typography.",
+    icon: "M3.5 5.5h13v13h-13zM16.5 10l4-2.5v9l-4-2.5M7 9.5v5l4-2.5z",
   },
   {
-    title: "Secrets, handled",
-    body: "Credentials live encrypted, are referenced by name in a pipeline, and are redacted from every log line before it is written.",
-    icon: "M17 10V7a5 5 0 0 0-10 0v3M5 10h14v11H5zM12 15v2",
+    title: "Publish for nothing",
+    body: "Telegram, Discord, Bluesky, Mastodon and Slack, each with a credential you make in two minutes. No third-party posting service, no per-post fee.",
+    icon: "M20.5 3.8 3.9 10.2c-.9.3-.9 1.6 0 1.9l6.3 2.1 2.1 6.3c.3.9 1.6.9 1.9 0zM20.5 3.8 10.2 14.2",
   },
   {
-    title: "Self-host or cloud",
-    body: "One container, Postgres and Redis. Terraform for ECS or Lambda if you want it on your own AWS account.",
-    icon: "M20 16.5A4.5 4.5 0 0 0 17 8a6 6 0 0 0-11.3 2A4 4 0 0 0 6 18h12",
+    title: "Runs that survive a deploy",
+    body: "Work is queued in Postgres and executed by workers. Restart the API mid-run and the run keeps going; kill a worker and another picks it up.",
+    icon: "M12 3.5a8.5 8.5 0 1 1-8 5.7M12 3.5V9M4 9.2h5.5",
   },
 ];
+
 
 export function Features() {
   return (
@@ -394,18 +398,18 @@ export function Features() {
 const STEPS = [
   {
     n: "01",
-    title: "Draw the pipeline",
-    body: "Start from a trigger and add steps: a model call, an HTTP request, a branch, a tool. Connect them on the canvas.",
+    title: "Draw it once",
+    body: "Pick a trigger — a webhook, a schedule, a GitHub issue — then add the steps: an agent, a condition, a repair, a render, a post.",
   },
   {
     n: "02",
-    title: "Run it",
-    body: "Fire it manually with a test payload, or point a webhook at it. The run view opens streaming as it executes.",
+    title: "Point something at it",
+    body: "Paste the URL into your repository's webhook settings, set a cron, or call it from your own backend. Publishing gives it a stable address.",
   },
   {
     n: "03",
     title: "Read what happened",
-    body: "Every step keeps its input, output, duration and errors. When something breaks, the log tells you where and why.",
+    body: "Every step keeps its input, output, duration, tokens and cost — and the files it made. Posters and video play in the run itself.",
   },
 ];
 

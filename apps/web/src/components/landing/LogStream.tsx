@@ -28,12 +28,16 @@ interface LogLine {
   duration?: string;
 }
 
+// The product's actual headline flow, not a generic one: a GitHub issue
+// arrives and leaves as a pull request. Every line below is a step this
+// system really emits — `fix.image`, `fix.staged`, `pr.opened` — so the
+// animation on the landing page and the run view show the same vocabulary.
 const NODES: PipelineNode[] = [
-  { id: "trigger", label: "Webhook", kind: "trigger" },
-  { id: "enrich", label: "Enrich context", kind: "tool" },
-  { id: "agent", label: "Triage agent", kind: "llm" },
-  { id: "route", label: "Route", kind: "branch" },
-  { id: "notify", label: "Notify team", kind: "action" },
+  { id: "trigger", label: "GitHub issue", kind: "trigger" },
+  { id: "gate", label: "Trusted author", kind: "branch" },
+  { id: "fix", label: "Repair agent", kind: "llm" },
+  { id: "pr", label: "Open the PR", kind: "action" },
+  { id: "reply", label: "Comment back", kind: "action" },
 ];
 
 /** One scripted run. `wait` is the delay *before* the step is applied. */
@@ -46,38 +50,32 @@ interface Step {
 
 const SCRIPT: Step[] = [
   { wait: 300, node: "trigger", status: "running" },
-  { wait: 260, log: { level: "info", node: "webhook", message: "run started · trace 8f21c4" } },
+  { wait: 260, log: { level: "info", node: "hook", message: "issues.opened · signature verified" } },
   { wait: 220, node: "trigger", status: "ok",
-    log: { level: "success", node: "webhook", message: "payload accepted", duration: "12ms" } },
+    log: { level: "success", node: "hook", message: "#31 Tax missing from order total", duration: "11ms" } },
 
-  { wait: 240, node: "enrich", status: "running" },
-  { wait: 300, log: { level: "debug", node: "enrich", message: "GET /crm/customers/4471" } },
-  { wait: 340, log: { level: "info", node: "enrich", message: "resolved plan=enterprise seats=240" } },
-  { wait: 220, node: "enrich", status: "ok",
-    log: { level: "success", node: "enrich", message: "context assembled", duration: "318ms" } },
+  { wait: 220, node: "gate", status: "running" },
+  { wait: 260, node: "gate", status: "ok",
+    log: { level: "info", node: "gate", message: "author OWNER · branch → true", duration: "7ms" } },
 
-  { wait: 240, node: "agent", status: "running" },
-  { wait: 320, log: { level: "info", node: "agent", message: "claude-opus-5 · 1,284 prompt tokens" } },
-  { wait: 420, log: { level: "warn", node: "agent", message: "rate limited upstream, backing off 400ms" } },
-  { wait: 300, node: "agent", status: "retrying",
-    log: { level: "info", node: "agent", message: "attempt 2 of 3" } },
-  { wait: 460, log: { level: "info", node: "agent", message: "classified: billing · urgency high" } },
-  { wait: 200, node: "agent", status: "ok",
-    log: { level: "success", node: "agent", message: "completed", duration: "1.9s" } },
+  { wait: 240, node: "fix", status: "running" },
+  { wait: 300, log: { level: "debug", node: "fix", message: "fix.image · checkout.png 42KB" } },
+  { wait: 380, log: { level: "info", node: "fix", message: "read shop/pricing.py · 711 bytes" } },
+  { wait: 420, log: { level: "warn", node: "fix", message: "refused .github/workflows/ci.yml — protected" } },
+  { wait: 360, log: { level: "info", node: "fix", message: "staged shop/pricing.py · 1 file" } },
+  { wait: 220, node: "fix", status: "ok",
+    log: { level: "success", node: "fix", message: "6,711 in / 616 out tokens", duration: "665s" } },
 
-  { wait: 220, node: "route", status: "running" },
-  { wait: 260, node: "route", status: "ok",
-    log: { level: "info", node: "route", message: "branch → escalate", duration: "4ms" } },
+  { wait: 240, node: "pr", status: "running" },
+  { wait: 420, node: "pr", status: "ok",
+    log: { level: "success", node: "pr", message: "pr.opened · #5 basivo/autofix-b62c7195", duration: "1.1s" } },
 
-  { wait: 240, node: "notify", status: "running" },
-  { wait: 380, log: { level: "error", node: "notify", message: "slack 503 — service unavailable" } },
-  { wait: 300, node: "notify", status: "retrying",
-    log: { level: "info", node: "notify", message: "retry 1 · backoff 2s" } },
-  { wait: 460, node: "notify", status: "ok",
-    log: { level: "success", node: "notify", message: "posted to #support-escalations", duration: "740ms" } },
+  { wait: 220, node: "reply", status: "running" },
+  { wait: 380, node: "reply", status: "ok",
+    log: { level: "success", node: "reply", message: "commented on #31 with the link", duration: "640ms" } },
 
-  { wait: 400, log: { level: "success", node: "run", message: "run finished · 5 steps · 3.1s" } },
-  { wait: 2600 },
+  { wait: 400, log: { level: "success", node: "run", message: "run finished · issue → pull request" } },
+  { wait: 2800 },
 ];
 
 const LEVEL_STYLES: Record<Level, { dot: string; text: string; label: string }> = {
@@ -182,7 +180,7 @@ export function LogStream() {
         </div>
         <div className="flex min-w-0 flex-1 items-center gap-2">
           <span className="truncate font-mono text-xs text-ink-400">
-            support-triage <span className="text-ink-600">/</span> run #4,218
+            issue-to-pr <span className="text-ink-600">/</span> run #218
           </span>
         </div>
         <span className="flex items-center gap-1.5 rounded-full bg-ok-500/10 px-2 py-0.5 font-mono text-[0.65rem] text-ok-500">

@@ -551,6 +551,7 @@ async def test_a_failing_branch_lets_its_sibling_finish_and_fails_the_run(
 EXERCISED_NODE_TYPES = {
     "design.render",
     "video.render",
+    "video.generate",
     "social.post",
     "git.comment",
     "trigger.manual",
@@ -929,3 +930,89 @@ async def test_a_video_node_takes_its_copy_from_an_agent_and_stores_the_file(
 
     executions = await nodes_for(session, run.id)
     assert executions["clip"].status is NodeStatus.SUCCEEDED
+
+
+async def test_the_video_generator_revises_until_the_composition_actually_shows_something(
+    session, make_run, monkeypatch
+):
+    """The loop, as a flow: the agent's first attempt renders blank, the node
+    tells it so, and the second attempt is accepted and rendered.
+
+    This is the failure that made the node exist. A composition that animates
+    `from` a value the element already has renders *successfully* as an empty
+    video — nothing errors, nothing is logged, and the user gets six seconds of
+    gradient. Catching it costs a second in a browser; not catching it costs a
+    full render and the user's trust.
+    """
+    from basivo_orch.flows.nodes import video as video_module
+
+    blank = (
+        '<div id="stage" data-composition-id="p" data-duration="4" '
+        'data-width="100" data-height="100"><h1 id="a">Hi</h1>'
+        "<script>window.__timelines={p:1}</script></div>"
+    )
+    good = blank.replace("<h1 id=\"a\">Hi</h1>", "<h1 id=\"a\">Visible</h1>")
+
+    attempts: list[str] = []
+
+    def author(messages):
+        attempts.append("turn")
+        return says(blank if len(attempts) == 1 else good)
+
+    async def fake_build(ctx, **kwargs):
+        return FakeChatModel(respond=author)
+
+    monkeypatch.setattr("basivo_orch.flows.nodes.models.build_chat_model", fake_build)
+    monkeypatch.setattr(
+        "basivo_orch.flows.nodes.video.build_chat_model", fake_build, raising=False
+    )
+
+    # The browser probe is the node's own eyes; here it reports the first
+    # composition as blank and the second as fine.
+    async def fake_probe(html, *, width, height, duration):
+        if "Visible" in html:
+            return {1.0: ["Visible"]}, []
+        return {1.0: []}, []
+
+    monkeypatch.setattr(video_module, "probe_composition", fake_probe)
+
+    async def fake_render(html, *, variables, config):
+        assert "Visible" in html, "the blank composition was rendered anyway"
+        return b"\x00\x00\x00\x18ftypmp42" + b"0" * 200, "ok"
+
+    monkeypatch.setattr(video_module, "_render", fake_render)
+
+    graph = Graph.model_validate(
+        {
+            "nodes": [
+                {"id": "t", "type": "trigger.manual", "config": {}},
+                {
+                    "id": "gen",
+                    "type": "video.generate",
+                    "name": "Make the promo",
+                    "config": {
+                        "brief": "A six second promo.",
+                        "model": "m",
+                        "duration_seconds": 4,
+                        "max_attempts": 3,
+                        "save_preview": False,
+                    },
+                },
+            ],
+            "edges": [{"source": "t", "target": "gen"}],
+        }
+    )
+
+    run = await run_graph(session, make_run, graph)
+    assert run.status is RunStatus.SUCCEEDED, run.error
+
+    executions = await nodes_for(session, run.id)
+    assert executions["gen"].status is NodeStatus.SUCCEEDED
+    assert len(attempts) == 2, "the agent was not asked to revise"
+
+    from basivo_orch.flows.models import Artifact
+
+    stored = (
+        (await session.execute(select(Artifact).where(Artifact.run_id == run.id))).scalars().all()
+    )
+    assert len(stored) == 1 and stored[0].content_type == "video/mp4"

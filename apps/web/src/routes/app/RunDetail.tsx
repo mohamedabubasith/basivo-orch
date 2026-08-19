@@ -170,6 +170,7 @@ export function RunDetail() {
               events={events}
               // The failed node is the reason this page is open.
               defaultOpen={node.status === "failed"}
+              orgId={orgId}
             />
           ))}
         </ul>
@@ -184,10 +185,13 @@ function NodeRow({
   node,
   events,
   defaultOpen,
+  orgId,
 }: {
   node: NodeExecution;
   events: RunEvent[];
   defaultOpen: boolean;
+  /** Needed to build artifact URLs — files are tenant-scoped. */
+  orgId: string | null;
 }) {
   const [open, setOpen] = useState(defaultOpen);
   const steps = events.filter(
@@ -249,6 +253,8 @@ function NodeRow({
             <SummaryBlock title="Output" summary={node.output_summary} />
           </div>
 
+          <ArtifactViewer orgId={orgId} summary={node.output_summary} />
+
           {steps.length > 0 && (
             <div>
               <p className="mb-1.5 text-[0.7rem] font-medium tracking-wide text-ink-400">
@@ -274,6 +280,60 @@ function NodeRow({
  * The badge carries what the envelope knows (type, size, truncation); the
  * body shows the preview as data rather than as a nested curiosity.
  */
+/**
+ * Files a node produced, shown rather than named.
+ *
+ * A run that says `artifact_id: 5c44d46c…` has told you nothing you can act
+ * on. A poster is meant to be looked at and a video is meant to be played, so
+ * they are looked at and played here — the artifact endpoint is
+ * session-authenticated, so an <img> or <video> pointed at it just works.
+ */
+function ArtifactViewer({
+  orgId,
+  summary,
+}: {
+  orgId: string | null;
+  summary: Summary | null;
+}) {
+  const preview = (summary?.preview ?? {}) as Record<string, unknown>;
+  const id = typeof preview.artifact_id === "string" ? preview.artifact_id : null;
+  const kind = typeof preview.content_type === "string" ? preview.content_type : "";
+  const name = typeof preview.filename === "string" ? preview.filename : "file";
+  const size = typeof preview.size_bytes === "number" ? preview.size_bytes : 0;
+  if (!orgId || !id) return null;
+
+  const src = `/api/v1/orgs/${orgId}/artifacts/${id}`;
+  const isVideo = kind.startsWith("video/");
+  const isImage = kind.startsWith("image/");
+
+  return (
+    <div className="mt-3">
+      <p className="mb-1.5 text-[0.7rem] font-medium tracking-wide text-ink-400">
+        {isVideo ? "Video" : isImage ? "Image" : "File"} — {name}
+        {size > 0 && ` · ${Math.max(1, Math.round(size / 1024))} KB`}
+      </p>
+      <div className="overflow-hidden rounded-lg border border-ink-700/70 bg-ink-950/60">
+        {isVideo ? (
+          // controls + no autoplay: a run page that starts playing sound at
+          // you while you are reading a log is a page people close.
+          <video src={src} controls preload="metadata" className="block max-h-[420px] w-full" />
+        ) : isImage ? (
+          <img src={src} alt={name} className="block max-h-[420px] w-full object-contain" />
+        ) : (
+          <a
+            href={src}
+            target="_blank"
+            rel="noreferrer"
+            className="block p-3 text-xs text-brand-400 underline decoration-dotted"
+          >
+            Download {name}
+          </a>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function SummaryBlock({ title, summary }: { title: string; summary: Summary | null }) {
   if (summary === null) {
     return <JsonBlock title={title} value={null} empty="Nothing recorded." />;

@@ -197,3 +197,50 @@ async def test_it_renders_a_real_mp4_from_a_template():
     assert result.output["duration_seconds"] == 5.0
     assert result.output["format"] == "mp4"
     assert recorder.data_for("video.started")[0]["variables"] == ["headline"]
+
+
+# ---------------------------------------------------------------------------
+# Compositions an agent wrote
+# ---------------------------------------------------------------------------
+
+
+def test_markdown_fences_are_unwrapped():
+    """Models are told not to fence their answer and do it anyway. Rendering
+    the fence produces a video of the literal characters ```html."""
+    from basivo_orch.flows.nodes.video import strip_code_fences
+
+    assert strip_code_fences("```html\n<div>hi</div>\n```") == "<div>hi</div>"
+    assert strip_code_fences("```\n<div>hi</div>\n```") == "<div>hi</div>"
+    assert strip_code_fences("<div>hi</div>") == "<div>hi</div>"
+
+
+def test_a_composition_with_no_timeline_is_caught_before_rendering():
+    """The worst failure mode, because it is silent: a composition with no
+    exposed timeline renders *successfully* as a motionless video."""
+    from basivo_orch.flows.nodes.video import composition_problems
+
+    still = (
+        '<div id="stage" data-composition-id="p" data-duration="5"><h1>Hi</h1></div>'
+    )
+    assert composition_problems(still) == [
+        "missing the paused GSAP timeline exposed on window.__timelines"
+    ]
+    assert composition_problems(TEMPLATES["announcement"]) == []
+
+
+async def test_an_agent_written_composition_that_is_broken_fails_with_advice():
+    recorder = _Recorder()
+    with pytest.raises(NodeError, match="will not render as video"):
+        await VideoRenderNode().run(
+            VideoRenderConfig(template="custom", html="<h1>just a heading</h1>"),
+            make_context(recorder),
+        )
+
+
+def test_the_composition_instructions_state_the_rules_that_matter():
+    """These ship with the product because every rule is a way a model-written
+    composition fails, and users should not have to rediscover them."""
+    from basivo_orch.flows.nodes.video import COMPOSITION_INSTRUCTIONS
+
+    for rule in ("window.__timelines", "data-duration", "gsap", "No markdown fences"):
+        assert rule in COMPOSITION_INSTRUCTIONS
