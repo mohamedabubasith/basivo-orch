@@ -26,6 +26,8 @@ opt-in via environment variables.
 
 from __future__ import annotations
 
+import json
+
 import httpx
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
 from pydantic_ai.models.function import FunctionModel
@@ -558,6 +560,7 @@ async def test_a_failing_branch_lets_its_sibling_finish_and_fails_the_run(
 #: the point: integration coverage for new nodes is a build requirement, not a
 #: review request. See CLAUDE.md, "Adding a node type".
 EXERCISED_NODE_TYPES = {
+    "git.comment",
     "trigger.manual",
     "trigger.webhook",
     "trigger.schedule",
@@ -579,3 +582,181 @@ def test_every_registered_node_type_has_integration_coverage():
         "the engine integration suite. Add a flow that runs them here and list "
         "them in EXERCISED_NODE_TYPES — see CLAUDE.md, 'Adding a node type'."
     )
+
+
+async def test_github_issue_with_a_screenshot_becomes_a_pr_and_a_reply(
+    session, make_run, monkeypatch
+):
+    """The product's core loop, end to end, as one real flow.
+
+    A GitHub `issues` webhook arrives carrying a screenshot; the condition
+    admits only freshly opened issues; the repair agent reads the picture,
+    stages a fix and opens a PR; and a comment goes back on the issue itself
+    so the person who reported it hears about it where they are looking.
+
+    Everything is real except the model's wire call and GitHub: the trigger
+    payload is the shape GitHub actually sends, the image is fetched through
+    the redirect, and the PR and comment are asserted on the wire.
+    """
+    from pydantic_ai.messages import BinaryContent
+
+    from basivo_orch.flows.nodes.base import ResolvedCredential
+
+    async def fake_resolve(self, credential_id):
+        return ResolvedCredential(provider="github", api_key="tok", base_url=None, options={})
+
+    monkeypatch.setattr(Engine, "_resolve_credential", fake_resolve)
+
+    png = b"\x89PNG\r\n\x1a\n" + b"0" * 32
+    saw_image: list[str] = []
+
+    def looking_model(messages, info):
+        for message in messages:
+            for part in getattr(message, "parts", []):
+                content = getattr(part, "content", None)
+                if isinstance(content, list):
+                    saw_image.extend(
+                        item.media_type for item in content if isinstance(item, BinaryContent)
+                    )
+        n = sum(1 for m in messages if m.kind == "response")
+        if n == 0:
+            return ModelResponse(
+                parts=[
+                    ToolCallPart(
+                        tool_name="write_file",
+                        args={"path": "totals.py", "content": "TAX = 0.2\n"},
+                        tool_call_id="w",
+                    )
+                ]
+            )
+        return ModelResponse(
+            parts=[TextPart(content="The screenshot showed tax at 0%. Set TAX back to 0.2.")]
+        )
+
+    async def fake_build(ctx, **kwargs):
+        return FunctionModel(looking_model)
+
+    monkeypatch.setattr("basivo_orch.flows.nodes.agent.build_llm_model", fake_build)
+
+    requests: list[httpx.Request] = []
+
+    def host(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        path, method = request.url.path, request.method
+        if request.url.host == "github.com" and "/user-attachments/" in path:
+            return httpx.Response(
+                302,
+                headers={"location": "https://private-user-images.githubusercontent.com/1/s.png"},
+            )
+        if request.url.host == "private-user-images.githubusercontent.com":
+            return httpx.Response(200, content=png, headers={"content-type": "image/png"})
+        if path.endswith("/git/ref/heads/main"):
+            return httpx.Response(200, json={"object": {"sha": "base1"}})
+        if "/git/trees/" in path:
+            return httpx.Response(200, json={"tree": [{"path": "totals.py", "type": "blob"}]})
+        if "/contents/" in path and method == "GET":
+            return httpx.Response(404, json={})
+        if path.endswith("/git/refs") and method == "POST":
+            return httpx.Response(201, json={})
+        if "/contents/" in path and method == "PUT":
+            return httpx.Response(201, json={})
+        if path.endswith("/pulls") and method == "POST":
+            return httpx.Response(
+                201, json={"html_url": "https://github.com/acme/shop/pull/58", "number": 58}
+            )
+        if path.endswith("/comments") and method == "POST":
+            return httpx.Response(201, json={"html_url": "https://gh/c/1", "id": 1})
+        return httpx.Response(500, json={"message": f"unexpected {method} {path}"})
+
+    graph = Graph.model_validate(
+        {
+            "nodes": [
+                {"id": "hook", "type": "trigger.webhook", "config": {}},
+                {
+                    "id": "opened",
+                    "type": "logic.condition",
+                    "config": {
+                        "comparisons": [
+                            {
+                                "left": "{{ nodes.hook.output.body.action }}",
+                                "operator": "equals",
+                                "right": "opened",
+                            }
+                        ]
+                    },
+                },
+                {
+                    "id": "fix",
+                    "type": "git.autofix",
+                    "config": {
+                        "git_credential_id": "c1",
+                        "repo": "acme/shop",
+                        "problem": (
+                            "Issue #{{ nodes.hook.output.body.issue.number }}: "
+                            "{{ nodes.hook.output.body.issue.title }}\n\n"
+                            "{{ nodes.hook.output.body.issue.body }}"
+                        ),
+                    },
+                },
+                {
+                    "id": "reply",
+                    "type": "git.comment",
+                    "config": {
+                        "git_credential_id": "c1",
+                        "repo": "acme/shop",
+                        "issue_number": "{{ nodes.hook.output.body.issue.number }}",
+                        "body": "Opened {{ nodes.fix.output.pr_url }} for this.",
+                    },
+                },
+            ],
+            "edges": [
+                {"source": "hook", "target": "opened"},
+                {"source": "opened", "target": "fix", "source_handle": "true"},
+                {"source": "fix", "target": "reply"},
+            ],
+        }
+    )
+
+    # The payload shape GitHub actually delivers for an `issues` event.
+    delivery = {
+        "body": {
+            "action": "opened",
+            "issue": {
+                "number": 31,
+                "title": "Tax shows as 0% at checkout",
+                "body": (
+                    "Every order shows 0% tax since this morning.\n\n"
+                    "![checkout](https://github.com/user-attachments/assets/abc-123)"
+                ),
+                "author_association": "OWNER",
+            },
+            "repository": {"full_name": "acme/shop"},
+        },
+        "headers": {"x-github-event": "issues"},
+        "method": "POST",
+    }
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(host)) as client:
+        run = await run_graph(session, make_run, graph, payload=delivery, http=client)
+
+    assert run.status is RunStatus.SUCCEEDED, run.error
+
+    # 1. The agent actually looked at the screenshot.
+    assert set(saw_image) == {"image/png"}, "the model never received the issue's screenshot"
+
+    # 2. A PR was opened — after the fix was staged, never before.
+    mutations = [(r.method, r.url.path) for r in requests if r.method in ("POST", "PUT")]
+    assert mutations == [
+        ("POST", "/repos/acme/shop/git/refs"),
+        ("PUT", "/repos/acme/shop/contents/totals.py"),
+        ("POST", "/repos/acme/shop/pulls"),
+        ("POST", "/repos/acme/shop/issues/31/comments"),
+    ]
+
+    # 3. The reporter was answered on their own issue, with the PR link.
+    comment = json.loads(requests[-1].content)["body"]
+    assert comment == "Opened https://github.com/acme/shop/pull/58 for this."
+
+    executions = await nodes_for(session, run.id)
+    assert executions["fix"].status is NodeStatus.SUCCEEDED
+    assert executions["reply"].status is NodeStatus.SUCCEEDED

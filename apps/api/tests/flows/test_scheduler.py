@@ -48,9 +48,9 @@ def test_interval_adds_its_seconds():
 
 def test_cron_finds_the_next_daily_slot():
     now = datetime(2026, 3, 1, 7, 30, tzinfo=UTC)
-    assert next_fire_at(mode="cron", cron="0 6 * * *", interval_seconds=None, after=now) == datetime(
-        2026, 3, 2, 6, 0, tzinfo=UTC
-    )
+    assert next_fire_at(
+        mode="cron", cron="0 6 * * *", interval_seconds=None, after=now
+    ) == datetime(2026, 3, 2, 6, 0, tzinfo=UTC)
 
 
 def test_cron_is_evaluated_in_the_flows_own_timezone():
@@ -124,9 +124,7 @@ def test_a_broken_schedule_says_so():
 async def make_flow(session, organization, graph: Graph) -> Flow:
     import uuid
 
-    flow = Flow(
-        organization_id=organization.id, name="Scheduled", slug=f"s-{uuid.uuid4().hex[:8]}"
-    )
+    flow = Flow(organization_id=organization.id, name="Scheduled", slug=f"s-{uuid.uuid4().hex[:8]}")
     session.add(flow)
     await session.flush()
     version = FlowVersion(flow_id=flow.id, version=1, graph=graph.model_dump(mode="json"))

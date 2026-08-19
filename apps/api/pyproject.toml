@@ -89,6 +89,10 @@ ignore = [
 # every hit is a false positive, and silencing them individually would mean
 # editing generated code that `basivo-auth update` rewrites.
 "basivo_orch/auth/**" = ["S105", "S106"]
+# Same false positive, same reason: a test's fake token is the *point* of the
+# test — the attachment tests exist precisely to prove a token is not sent to
+# the wrong host, and they cannot do that without holding one.
+"tests/**" = ["S105", "S106"]
 
 [tool.mypy]
 python_version = "3.12"

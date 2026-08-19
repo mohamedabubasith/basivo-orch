@@ -139,9 +139,7 @@ def test_a_json_delivery_is_parsed_and_secrets_are_scrubbed():
 
 
 def test_a_non_json_body_survives_as_text_for_debugging():
-    payload = wrap_hook_payload(
-        method="POST", headers={}, query={}, raw_body=b"plain=form&data=1"
-    )
+    payload = wrap_hook_payload(method="POST", headers={}, query={}, raw_body=b"plain=form&data=1")
     assert payload["body"] == "plain=form&data=1"
 
 

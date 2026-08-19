@@ -21,7 +21,7 @@ from basivo_orch.flows.nodes.base import (
     summarise,
 )
 from basivo_orch.flows.nodes.code import CodeNode
-from basivo_orch.flows.nodes.gitops import AutofixNode, TicketNode
+from basivo_orch.flows.nodes.gitops import AutofixNode, CommentNode, TicketNode
 from basivo_orch.flows.nodes.http import HttpRequestNode, assert_public_url
 from basivo_orch.flows.nodes.logic import FALSE_PORT, TRUE_PORT, ConditionNode, SetVariablesNode
 from basivo_orch.flows.nodes.triggers import (
@@ -41,6 +41,7 @@ _NODES: tuple[type[Node], ...] = (
     CodeNode,
     TicketNode,
     AutofixNode,
+    CommentNode,
 )
 
 REGISTRY: dict[str, type[Node]] = {node.type: node for node in _NODES}

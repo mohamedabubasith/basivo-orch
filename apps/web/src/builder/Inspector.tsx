@@ -150,7 +150,8 @@ export function Inspector({
   // The autofix node embeds an LLM config under the same field names the
   // Agent uses, so the provider/model/credential pickers apply to both.
   const usesLlm = isAgent || spec.type === "git.autofix";
-  const usesGit = spec.type === "git.ticket" || spec.type === "git.autofix";
+  const usesGit =
+    spec.type === "git.ticket" || spec.type === "git.autofix" || spec.type === "git.comment";
 
   function set(key: string, value: unknown) {
     const next = { ...config };
@@ -306,7 +307,9 @@ export function Inspector({
                 value={String(config.git_credential_id ?? "")}
                 onChange={(v) => set("git_credential_id", v)}
               />
-            ) : spec.type === "git.autofix" && (field.key === "problem" || field.key === "instructions") ? (
+            ) : (spec.type === "git.autofix" &&
+                (field.key === "problem" || field.key === "instructions")) ||
+              (spec.type === "git.comment" && field.key === "body") ? (
               <TemplateInput
                 multiline
                 rows={field.key === "problem" ? 4 : 3}
