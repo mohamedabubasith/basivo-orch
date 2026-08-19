@@ -286,6 +286,27 @@ export function Inspector({
                 value={String(config[field.key] ?? "")}
                 onChange={(v) => set(field.key, v)}
               />
+            ) : spec.type === "design.render" && field.key === "html" ? (
+              <CodeArea value={String(config.html ?? "")} onChange={(v) => set("html", v)} />
+            ) : spec.type === "social.post" && field.key === "credential_id" ? (
+              <CredentialPicker
+                orgId={orgId}
+                provider={String(config.platform ?? "telegram")}
+                value={String(config.credential_id ?? "")}
+                onChange={(v) => set("credential_id", v)}
+              />
+            ) : spec.type === "social.post" &&
+              (field.key === "text" || field.key === "artifact_id" || field.key === "target") ? (
+              <TemplateInput
+                multiline={field.key === "text"}
+                rows={3}
+                value={String(config[field.key] ?? "")}
+                onChange={(v) => set(field.key, v)}
+                suggestions={suggestions}
+                placeholder={
+                  field.key === "artifact_id" ? "{{ nodes.poster.output.artifact_id }}" : ""
+                }
+              />
             ) : spec.type === "code.python" && field.key === "code" ? (
               <CodeArea value={String(config.code ?? "")} onChange={(v) => set("code", v)} />
             ) : isAgent && field.key === "team_mode" ? (

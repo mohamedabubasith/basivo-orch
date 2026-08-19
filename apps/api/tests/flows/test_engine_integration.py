@@ -549,6 +549,8 @@ async def test_a_failing_branch_lets_its_sibling_finish_and_fails_the_run(
 #: the point: integration coverage for new nodes is a build requirement, not a
 #: review request. See CLAUDE.md, "Adding a node type".
 EXERCISED_NODE_TYPES = {
+    "design.render",
+    "social.post",
     "git.comment",
     "trigger.manual",
     "trigger.webhook",
@@ -740,3 +742,113 @@ async def test_github_issue_with_a_screenshot_becomes_a_pr_and_a_reply(
     executions = await nodes_for(session, run.id)
     assert executions["fix"].status is NodeStatus.SUCCEEDED
     assert executions["reply"].status is NodeStatus.SUCCEEDED
+
+
+async def test_the_morning_poster_flow_renders_and_posts(session, make_run, monkeypatch):
+    """The whole point of the poster feature, as one flow.
+
+    A schedule fires, an agent writes the copy, a browser renders the poster
+    with real fonts, and it is posted to Telegram with the image attached.
+    The artifact is passed by id, never as bytes through the graph — the run
+    log stays readable and the poster still arrives.
+    """
+    from basivo_orch.flows.nodes.base import ResolvedCredential
+
+    async def fake_resolve(self, credential_id):
+        return ResolvedCredential(
+            provider="telegram", api_key="bot-token", base_url=None, options={}
+        )
+
+    monkeypatch.setattr(Engine, "_resolve_credential", fake_resolve)
+
+    def copywriter(messages):
+        return says("Ship the fix before standup")
+
+    async def fake_build(ctx, **kwargs):
+        return FakeChatModel(respond=copywriter)
+
+    monkeypatch.setattr("basivo_orch.flows.nodes.agent.build_chat_model", fake_build)
+
+    sent: list[httpx.Request] = []
+
+    def telegram(request: httpx.Request) -> httpx.Response:
+        sent.append(request)
+        return httpx.Response(
+            200, json={"ok": True, "result": {"message_id": 5, "chat": {"username": "basivo"}}}
+        )
+
+    graph = Graph.model_validate(
+        {
+            "nodes": [
+                {
+                    "id": "t",
+                    "type": "trigger.schedule",
+                    "config": {"mode": "cron", "cron": "0 7 * * *"},
+                },
+                {
+                    "id": "copy",
+                    "type": "agent.llm",
+                    "name": "Copywriter",
+                    "config": {"prompt": "Write today's headline.", "model": "m"},
+                },
+                {
+                    "id": "poster",
+                    "type": "design.render",
+                    "name": "Poster",
+                    "config": {
+                        "html": (
+                            "<html><body style='margin:0;width:400px;height:400px;"
+                            "background:#7857ff;color:#fff;font-family:sans-serif'>"
+                            "<h1>{{ nodes.copy.output.text }}</h1></body></html>"
+                        ),
+                        "size": "custom",
+                        "width": 400,
+                        "height": 400,
+                        "scale": 1,
+                        "wait_for_fonts": False,
+                    },
+                },
+                {
+                    "id": "post",
+                    "type": "social.post",
+                    "name": "Post it",
+                    "config": {
+                        "platform": "telegram",
+                        "credential_id": "c1",
+                        "target": "@basivo",
+                        "text": "{{ nodes.copy.output.text }}",
+                        "artifact_id": "{{ nodes.poster.output.artifact_id }}",
+                    },
+                },
+            ],
+            "edges": [
+                {"source": "t", "target": "copy"},
+                {"source": "copy", "target": "poster"},
+                {"source": "poster", "target": "post"},
+            ],
+        }
+    )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(telegram)) as client:
+        run = await run_graph(session, make_run, graph, http=client)
+
+    assert run.status is RunStatus.SUCCEEDED, run.error
+
+    executions = await nodes_for(session, run.id)
+    assert executions["poster"].status is NodeStatus.SUCCEEDED
+    assert executions["post"].status is NodeStatus.SUCCEEDED
+
+    # The poster was stored as a file, and the real PNG reached Telegram.
+    from basivo_orch.flows.models import Artifact
+
+    artifacts = (
+        (await session.execute(select(Artifact).where(Artifact.run_id == run.id))).scalars().all()
+    )
+    assert len(artifacts) == 1
+    stored = artifacts[0]
+    assert stored.content_type == "image/png"
+    assert stored.data.startswith(b"\x89PNG\r\n\x1a\n")
+
+    body = sent[0].content
+    assert stored.data in body, "the rendered poster never reached Telegram"
+    assert b"Ship the fix before standup" in body, "the agent's copy was not used as the caption"

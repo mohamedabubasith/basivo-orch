@@ -102,6 +102,14 @@ class NodeContext:
 
     http: httpx.AsyncClient
 
+    #: Save bytes a node produced — a rendered poster, an export — and get back
+    #: how to refer to them. Implemented by the engine, which owns the database
+    #: session, so a node never writes SQL of its own.
+    save_artifact: Callable[..., Awaitable[dict[str, Any]]] | None = None
+    #: Read bytes another node saved, by id. None when it does not exist or
+    #: belongs to another workspace.
+    load_artifact: Callable[[str], Awaitable[bytes | None]] | None = None
+
     def template_context(self) -> dict[str, Any]:
         return {
             "input": self.input,

@@ -31,6 +31,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    LargeBinary,
     String,
     Text,
     UniqueConstraint,
@@ -372,5 +373,44 @@ class FlowSchedule(Base):
     cron: Mapped[str | None] = mapped_column(String(120), default=None)
     interval_seconds: Mapped[int | None] = mapped_column(Integer(), default=None)
     timezone: Mapped[str] = mapped_column(String(64), default="UTC")
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Artifact(Base):
+    """A file a run produced — a rendered poster, an export, a screenshot.
+
+    The engine passes JSON between nodes, and a poster is bytes. Rather than
+    stuff base64 through the graph (which would land in every run's stored
+    input/output summary and bloat the log beyond reading), a node saves the
+    bytes here and passes the id. Downstream nodes ask the engine for them.
+
+    Stored in the database on purpose. The API and the worker are separate
+    processes — separate containers in production — so a local temp file is
+    not shared, and requiring object storage to render one poster would put an
+    S3 bucket between a user and their first result. Postgres already holds
+    the run log and is already backed up; a poster is a few hundred kilobytes.
+    `MAX_ARTIFACT_BYTES` is what keeps that honest, and object storage is the
+    upgrade when someone stores video.
+    """
+
+    __tablename__ = "artifact"
+    __table_args__ = (Index("ix_artifact_org_created", "organization_id", "created_at"),)
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("organization.id", ondelete="CASCADE"), index=True
+    )
+    #: Cascades, so deleting a flow's runs takes their files with them rather
+    #: than leaving orphans nobody can find or attribute.
+    run_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("run.id", ondelete="CASCADE"), default=None, index=True
+    )
+    node_id: Mapped[str | None] = mapped_column(String(120), default=None)
+
+    filename: Mapped[str] = mapped_column(String(200), default="file")
+    content_type: Mapped[str] = mapped_column(String(120), default="application/octet-stream")
+    size_bytes: Mapped[int] = mapped_column(Integer(), default=0)
+    data: Mapped[bytes] = mapped_column(LargeBinary())
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

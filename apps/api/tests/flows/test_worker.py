@@ -301,4 +301,11 @@ def test_every_node_declares_whether_repeating_it_is_safe():
     from basivo_orch.flows import nodes as registry
 
     unsafe = {t for t, n in registry.REGISTRY.items() if not n.replay_safe}
-    assert unsafe == {"git.ticket", "git.autofix", "git.comment", "http.request"}
+    assert unsafe == {
+        "git.ticket",
+        "git.autofix",
+        "git.comment",
+        "http.request",
+        # Posting twice is the worst kind of duplicate: it is public.
+        "social.post",
+    }

@@ -36,6 +36,11 @@ PROVIDERS: list[str] = [
     # VCS hosts, for the git.ticket / git.autofix nodes — not model providers.
     "github",
     "gitlab",
+    "telegram",
+    "discord",
+    "slack",
+    "mastodon",
+    "bluesky",
 ]
 
 

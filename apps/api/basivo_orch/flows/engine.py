@@ -122,6 +122,68 @@ class Engine:
             options=record.options,
         )
 
+    #: A poster is a few hundred kilobytes; a video is not. This is what keeps
+    #: "files live in Postgres" an honest simplification rather than a trap.
+    MAX_ARTIFACT_BYTES = 12 * 1024 * 1024
+
+    async def _save_artifact(
+        self,
+        data: bytes,
+        *,
+        filename: str = "file",
+        content_type: str = "application/octet-stream",
+        node_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Store bytes a node produced and return how to refer to them."""
+        from basivo_orch.flows.models import Artifact
+
+        if len(data) > self.MAX_ARTIFACT_BYTES:
+            raise NodeError(
+                f"That file is {len(data) // 1024}KB and the limit is "
+                f"{self.MAX_ARTIFACT_BYTES // 1024}KB. Render it smaller, or at a lower scale."
+            )
+
+        artifact = Artifact(
+            organization_id=self.run.organization_id,
+            run_id=self.run.id,
+            node_id=node_id,
+            filename=filename[:200],
+            content_type=content_type[:120],
+            size_bytes=len(data),
+            data=data,
+        )
+        async with self._db:
+            self.session.add(artifact)
+            await self.session.commit()
+            await self.session.refresh(artifact)
+
+        return {
+            "artifact_id": str(artifact.id),
+            "filename": artifact.filename,
+            "content_type": artifact.content_type,
+            "size_bytes": artifact.size_bytes,
+            # Relative on purpose: the public base URL is deployment
+            # configuration, and a stored absolute URL is wrong the moment the
+            # deployment moves.
+            "url": f"/api/v1/orgs/{self.run.organization_id}/artifacts/{artifact.id}",
+        }
+
+    async def _load_artifact(self, artifact_id: str) -> bytes | None:
+        """Read bytes another node saved. Scoped to this run's workspace."""
+        import uuid as _uuid
+
+        from basivo_orch.flows.models import Artifact
+
+        try:
+            key = _uuid.UUID(str(artifact_id))
+        except ValueError:
+            return None
+        async with self._db:
+            artifact = await self.session.get(Artifact, key)
+        if artifact is None or artifact.organization_id != self.run.organization_id:
+            return None
+        return artifact.data
+
     async def execute(self) -> Run:
         http = self._http or httpx.AsyncClient(
             # Flows call third-party endpoints; the pool is shared across the
@@ -386,6 +448,8 @@ class Engine:
                 progress=progress,
                 step=step,
                 resolve_credential=self._resolve_credential,
+                save_artifact=self._save_artifact,
+                load_artifact=self._load_artifact,
                 http=http,
             )
 

@@ -46,6 +46,13 @@ class ModelFetchFailed(Exception):
 async def fetch_models(
     provider_name: str, *, api_key: str, base_url: str, options: dict[str, object]
 ) -> list[str]:
+    if provider_name in ("telegram", "mastodon", "bluesky", "discord", "slack"):
+        # These have no model catalogue; the same call proves the credential
+        # works, which is the question the UI is really asking.
+        return await _verify_posting_token(
+            provider_name, api_key=api_key, base_url=base_url, options=options
+        )
+
     if provider_name in ("github", "gitlab"):
         # VCS credentials have no model catalog; their "test" is the identity
         # endpoint — proves the token works without touching a repository.
@@ -136,3 +143,59 @@ async def _verify_vcs_token(provider_name: str, *, api_key: str, base_url: str) 
     if response.status_code >= 400:
         raise ModelFetchFailed(f"{response.status_code}: {response.text[:200]}")
     return []
+
+
+async def _verify_posting_token(
+    provider_name: str, *, api_key: str, base_url: str, options: dict[str, object]
+) -> list[str]:
+    """Prove a posting credential works, without posting anything.
+
+    Every check here is read-only. A connection test that publishes a message
+    to find out whether it can publish messages is not a test.
+    """
+    if provider_name == "telegram":
+        base = (base_url or "https://api.telegram.org").rstrip("/")
+        payload = await _get(f"{base}/bot{api_key}/getMe", {})
+        bot = payload.get("result", {}) if isinstance(payload, dict) else {}
+        if not bot.get("username"):
+            raise ModelFetchFailed("Telegram did not recognise that bot token.")
+        return [f"@{bot['username']}"]
+
+    if provider_name == "mastodon":
+        base = (base_url or "https://mastodon.social").rstrip("/")
+        payload = await _get(
+            f"{base}/api/v1/accounts/verify_credentials", {"Authorization": f"Bearer {api_key}"}
+        )
+        return [f"@{payload.get('username', 'account')}"]
+
+    if provider_name == "bluesky":
+        base = (base_url or "https://bsky.social").rstrip("/")
+        handle = str((options or {}).get("identifier") or "").strip()
+        if not handle:
+            raise ModelFetchFailed(
+                "Bluesky needs the account handle too. Add identifier to the credential's "
+                "options, e.g. yourname.bsky.social."
+            )
+        try:
+            async with httpx.AsyncClient(timeout=20) as client:
+                response = await client.post(
+                    f"{base}/xrpc/com.atproto.server.createSession",
+                    json={"identifier": handle, "password": api_key},
+                )
+        except httpx.HTTPError as exc:
+            raise ModelFetchFailed(str(exc)) from exc
+        if response.status_code >= 400:
+            raise ModelFetchFailed(f"{response.status_code}: {response.text[:200]}")
+        return [handle]
+
+    # Discord and Slack webhooks carry their secret in the URL. Discord will
+    # describe a webhook on GET; Slack will not, so its credential is accepted
+    # on shape alone rather than by firing a test message into someone's
+    # channel.
+    webhook = (base_url or api_key).strip()
+    if not webhook.startswith("https://"):
+        raise ModelFetchFailed("That should be the full webhook URL, starting with https://.")
+    if provider_name == "discord":
+        payload = await _get(webhook, {})
+        return [str(payload.get("name") or "webhook")]
+    return ["webhook (accepted without a test message)"]

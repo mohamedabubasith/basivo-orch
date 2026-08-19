@@ -381,6 +381,36 @@ async def read_run(
     return await _run_detail(session, context.organization_id, run_id)
 
 
+@management_router.get("/orgs/{organization_id}/artifacts/{artifact_id}")
+async def read_artifact(
+    artifact_id: uuid.UUID,
+    context: OrgContext = Depends(require(Permission.RUN_READ)),
+    session: AsyncSession = Depends(get_async_session),
+) -> Response:
+    """Serve a file a run produced — the poster, so it can be looked at.
+
+    Session-authenticated and tenant-scoped like everything else here: a
+    rendered poster can carry unreleased copy, and an id in a URL is not a
+    permission. Inline rather than as a download, because the point is to see
+    it on the run page.
+    """
+    from basivo_orch.flows.models import Artifact
+
+    artifact = await session.get(Artifact, artifact_id)
+    if artifact is None or artifact.organization_id != context.organization_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No such file.")
+
+    return Response(
+        content=artifact.data,
+        media_type=artifact.content_type,
+        headers={
+            "Content-Disposition": f'inline; filename="{artifact.filename}"',
+            # Immutable: an artifact's bytes never change once written.
+            "Cache-Control": "private, max-age=86400, immutable",
+        },
+    )
+
+
 @management_router.get("/orgs/{organization_id}/runs/{run_id}/events")
 async def run_events(
     run_id: uuid.UUID,
