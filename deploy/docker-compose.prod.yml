@@ -107,6 +107,9 @@ services:
     image: basivo-api:latest
     restart: unless-stopped
     command: ["python", "-m", "basivo_orch.worker"]
+    # Rendering needs a browser (posters and video) plus Node 22+ and FFmpeg
+    # for HyperFrames — which is why the worker image is heavier than the API
+    # and gets more memory below.
     env_file: [.env]
     environment:
       DATABASE_URL: postgresql+asyncpg://basivo:${POSTGRES_PASSWORD}@postgres:5432/basivo_orch

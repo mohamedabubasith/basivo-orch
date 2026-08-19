@@ -286,6 +286,23 @@ export function Inspector({
                 value={String(config[field.key] ?? "")}
                 onChange={(v) => set(field.key, v)}
               />
+            ) : spec.type === "video.render" && field.key === "html" ? (
+              <CodeArea value={String(config.html ?? "")} onChange={(v) => set("html", v)} />
+            ) : spec.type === "video.render" && field.key === "variables" ? (
+              <div>
+                <TemplateInput
+                  multiline
+                  rows={4}
+                  value={String(config.variables ?? "{}")}
+                  onChange={(v) => set("variables", v)}
+                  suggestions={suggestions}
+                  placeholder={'{"headline": "{{ nodes.copy.output.text }}"}'}
+                />
+                <p className="mt-1.5 text-[0.68rem] leading-relaxed text-ink-500">
+                  JSON, filled into the template. An upstream agent usually writes these —
+                  that is the division of labour: it writes words, the template does layout.
+                </p>
+              </div>
             ) : spec.type === "design.render" && field.key === "html" ? (
               <CodeArea value={String(config.html ?? "")} onChange={(v) => set("html", v)} />
             ) : spec.type === "social.post" && field.key === "credential_id" ? (

@@ -23,6 +23,7 @@ export const NODE_ACCENT: Record<string, string> = {
   "git.comment": "var(--series)",
   "design.render": "var(--color-brand-300)",
   "social.post": "var(--color-accent-500)",
+  "video.render": "var(--status-warn)",
 };
 export const DEFAULT_ACCENT = "var(--series)";
 
@@ -63,6 +64,14 @@ const SOCIAL_POST = (
   <>
     <path d="M20.5 3.8 3.9 10.2c-.9.3-.9 1.6 0 1.9l6.3 2.1 2.1 6.3c.3.9 1.6.9 1.9 0L20.5 3.8Z" />
     <path d="M20.5 3.8 10.2 14.2" />
+  </>
+);
+
+const VIDEO_RENDER = (
+  <>
+    <rect x="2.8" y="5.5" width="12.4" height="13" rx="2.4" />
+    <path d="M15.2 10.4l4.1-2.6a.8.8 0 0 1 1.2.7v6.9a.8.8 0 0 1-1.2.7l-4.1-2.6" />
+    <path d="M7.4 9.6v4.8l3.6-2.4-3.6-2.4Z" />
   </>
 );
 
@@ -117,6 +126,7 @@ const PATHS: Record<string, ReactNode> = {
   "git.comment": GIT_COMMENT,
   "design.render": DESIGN_RENDER,
   "social.post": SOCIAL_POST,
+  "video.render": VIDEO_RENDER,
 };
 
 const FALLBACK = (

@@ -550,6 +550,7 @@ async def test_a_failing_branch_lets_its_sibling_finish_and_fails_the_run(
 #: review request. See CLAUDE.md, "Adding a node type".
 EXERCISED_NODE_TYPES = {
     "design.render",
+    "video.render",
     "social.post",
     "git.comment",
     "trigger.manual",
@@ -852,3 +853,79 @@ async def test_the_morning_poster_flow_renders_and_posts(session, make_run, monk
     body = sent[0].content
     assert stored.data in body, "the rendered poster never reached Telegram"
     assert b"Ship the fix before standup" in body, "the agent's copy was not used as the caption"
+
+
+async def test_a_video_node_takes_its_copy_from_an_agent_and_stores_the_file(
+    session, make_run, monkeypatch
+):
+    """The video half of the same story: an agent writes the line, a template
+    renders it, and the file lands as an artifact the posting node can attach.
+
+    The renderer itself is substituted — a real render is minutes of CPU and
+    belongs in `test_video.py` behind its own flag — but everything around it
+    is real: the templating of variables from an upstream node, the duration
+    guard, the artifact write, and the reference downstream nodes use.
+    """
+    from basivo_orch.flows.nodes import video as video_module
+
+    captured: dict[str, object] = {}
+
+    async def fake_render(html, *, variables, config):
+        captured["variables"] = variables
+        captured["template_applied"] = "Auto-fix shipped" in json.dumps(variables)
+        return b"\x00\x00\x00\x18ftypmp42" + b"0" * 400, "ok"
+
+    monkeypatch.setattr(video_module, "_render", fake_render)
+
+    def copywriter(messages):
+        return says("Auto-fix shipped")
+
+    async def fake_build(ctx, **kwargs):
+        return FakeChatModel(respond=copywriter)
+
+    monkeypatch.setattr("basivo_orch.flows.nodes.agent.build_chat_model", fake_build)
+
+    graph = Graph.model_validate(
+        {
+            "nodes": [
+                {"id": "t", "type": "trigger.manual", "config": {}},
+                {
+                    "id": "copy",
+                    "type": "agent.llm",
+                    "config": {"prompt": "Write a launch line.", "model": "m"},
+                },
+                {
+                    "id": "clip",
+                    "type": "video.render",
+                    "name": "Promo",
+                    "config": {
+                        "template": "announcement",
+                        "variables": '{"headline": "{{ nodes.copy.output.text }}"}',
+                        "quality": "draft",
+                    },
+                },
+            ],
+            "edges": [
+                {"source": "t", "target": "copy"},
+                {"source": "copy", "target": "clip"},
+            ],
+        }
+    )
+
+    run = await run_graph(session, make_run, graph)
+    assert run.status is RunStatus.SUCCEEDED, run.error
+
+    # The agent's line reached the composition's variables.
+    assert captured["variables"] == {"headline": "Auto-fix shipped"}
+
+    from basivo_orch.flows.models import Artifact
+
+    stored = (
+        (await session.execute(select(Artifact).where(Artifact.run_id == run.id))).scalars().all()
+    )
+    assert len(stored) == 1
+    assert stored[0].content_type == "video/mp4"
+    assert stored[0].filename.endswith(".mp4")
+
+    executions = await nodes_for(session, run.id)
+    assert executions["clip"].status is NodeStatus.SUCCEEDED

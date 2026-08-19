@@ -31,6 +31,7 @@ from basivo_orch.flows.nodes.triggers import (
     ScheduleTriggerNode,
     WebhookTriggerNode,
 )
+from basivo_orch.flows.nodes.video import VideoRenderNode
 
 _NODES: tuple[type[Node], ...] = (
     ManualTriggerNode,
@@ -46,6 +47,7 @@ _NODES: tuple[type[Node], ...] = (
     CommentNode,
     RenderNode,
     SocialPostNode,
+    VideoRenderNode,
 )
 
 REGISTRY: dict[str, type[Node]] = {node.type: node for node in _NODES}

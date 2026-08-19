@@ -122,9 +122,11 @@ class Engine:
             options=record.options,
         )
 
-    #: A poster is a few hundred kilobytes; a video is not. This is what keeps
-    #: "files live in Postgres" an honest simplification rather than a trap.
-    MAX_ARTIFACT_BYTES = 12 * 1024 * 1024
+    #: A poster is a few hundred kilobytes; a minute of 1080p video is tens of
+    #: megabytes. This ceiling is what keeps "files live in Postgres" an honest
+    #: simplification rather than a trap — and the number that will eventually
+    #: argue for object storage, when someone stores something longer.
+    MAX_ARTIFACT_BYTES = 64 * 1024 * 1024
 
     async def _save_artifact(
         self,
