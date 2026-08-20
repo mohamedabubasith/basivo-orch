@@ -301,6 +301,62 @@
     color: transparent;
   }
 
+  /* A node that is running.
+   *
+   * Two things at once, because they answer different questions from
+   * different distances. The travelling light around the border says "this
+   * one, right now" when you are looking at the whole canvas; the breathing
+   * glow says "still working" when you are watching one node and nothing has
+   * changed for ten seconds. A static ring answers neither. */
+  @keyframes node-breathe {
+    0%,
+    100% {
+      box-shadow:
+        0 0 0 1px color-mix(in oklab, var(--series) 45%, transparent),
+        0 0 16px -2px color-mix(in oklab, var(--series) 40%, transparent),
+        0 12px 24px -16px rgba(0, 0, 0, 0.45);
+    }
+    50% {
+      box-shadow:
+        0 0 0 1px color-mix(in oklab, var(--series) 80%, transparent),
+        0 0 30px 2px color-mix(in oklab, var(--series) 60%, transparent),
+        0 12px 24px -16px rgba(0, 0, 0, 0.45);
+    }
+  }
+
+  @keyframes node-orbit {
+    to {
+      transform: translate(-50%, -50%) rotate(360deg);
+    }
+  }
+
+  .node-running {
+    /* box-shadow is not clipped by the card's own overflow-hidden, which is
+     * what lets the glow sit outside a card that must clip its accent rail. */
+    animation: node-breathe 1.8s ease-in-out infinite;
+  }
+
+  .node-orbit {
+    /* A square larger than the card, spun behind it. The card's inner surface
+     * covers the middle, so only a sliver at the edge shows — a light going
+     * round the border, with no mask-composite support needed. */
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 220%;
+    aspect-ratio: 1;
+    transform: translate(-50%, -50%);
+    background: conic-gradient(
+      from 0deg,
+      transparent 0deg,
+      transparent 250deg,
+      color-mix(in oklab, var(--series) 90%, transparent) 320deg,
+      color-mix(in oklab, var(--color-ink-100) 70%, transparent) 350deg,
+      transparent 360deg
+    );
+    animation: node-orbit 1.9s linear infinite;
+  }
+
   .grid-bg {
     background-image:
       linear-gradient(to right, color-mix(in oklab, var(--color-ink-600) 40%, transparent) 1px, transparent 1px),

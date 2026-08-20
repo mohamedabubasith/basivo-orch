@@ -414,3 +414,51 @@ class Artifact(Base):
     data: Mapped[bytes] = mapped_column(LargeBinary())
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class AgentMemory(Base):
+    """What an agent remembers between runs.
+
+    Without this every run starts blank: a support agent cannot recall the
+    customer it spoke to yesterday, and a repair agent re-proposes the fix that
+    was already rejected. Memory is keyed by whatever identifies the *subject*
+    of the conversation — an issue number, a customer id, a channel — so one
+    agent node holds many independent conversations rather than one muddled
+    stream.
+
+    **Only the human turn and the final reply are stored.** Tool calls and
+    their results are deliberately excluded: they are where credentials, file
+    contents and third-party payloads live, and a memory table is exactly the
+    wrong place to accumulate those. What a person means by "remember the
+    conversation" is what was said, not how it was found out.
+
+    Stored here rather than in a managed memory service because this is the
+    most sensitive data an agent touches, and it already sits beside the runs
+    and credentials it relates to.
+    """
+
+    __tablename__ = "agent_memory"
+    __table_args__ = (
+        # One row per (workspace, node, subject). The unique constraint is what
+        # makes "load then save" safe without a transaction dance.
+        UniqueConstraint("organization_id", "scope", "subject", name="uq_agent_memory_scope"),
+        Index("ix_agent_memory_updated", "organization_id", "updated_at"),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("organization.id", ondelete="CASCADE"), index=True
+    )
+    #: Which agent owns it — flow id plus node id. Two nodes in one flow keep
+    #: separate memories, which is what "this agent remembers" has to mean.
+    scope: Mapped[str] = mapped_column(String(200))
+    #: Who or what the conversation is about, rendered from the node's config.
+    subject: Mapped[str] = mapped_column(String(300))
+
+    #: [{"role": "user"|"assistant", "text": "..."}], oldest first.
+    turns: Mapped[list[dict[str, Any]]] = mapped_column(JSONColumn, default=list)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )

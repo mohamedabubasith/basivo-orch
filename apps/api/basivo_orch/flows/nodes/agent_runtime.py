@@ -156,6 +156,24 @@ def build_tool(
     )
 
 
+def as_messages(history: list[dict[str, Any]] | None) -> list[tuple[str, str]]:
+    """Remembered turns as LangChain message tuples.
+
+    Roles are normalised rather than trusted: the table is ours, but a row
+    written by an older version of this code — or by a future one — must not be
+    able to inject a `system` turn into a later conversation. Anything that is
+    not the assistant is treated as the user speaking.
+    """
+    messages: list[tuple[str, str]] = []
+    for turn in history or []:
+        text = str(turn.get("text") or "").strip()
+        if not text:
+            continue
+        role = "assistant" if turn.get("role") == "assistant" else "user"
+        messages.append((role, text))
+    return messages
+
+
 async def run_agent(
     ctx: NodeContext,
     *,
@@ -170,11 +188,17 @@ async def run_agent(
     model_name: str,
     totals: RunTotals | None = None,
     label: str = "agent",
+    history: list[dict[str, Any]] | None = None,
 ) -> RunTotals:
     """Run one agent to completion, logging every step. Returns the totals.
 
     `totals` is passed in when a sub-agent shares its parent's budget, so a
     supervisor cannot escape its cost ceiling by delegating.
+
+    `history` is what the agent remembers from earlier runs — prior turns are
+    prepended to the message list, which is how a model is given memory at all.
+    It goes ahead of the system prompt's effect but behind the new prompt, so
+    the current request is still the last thing the model reads.
     """
     from langchain.agents import create_agent
     from langgraph.errors import GraphRecursionError
@@ -187,7 +211,7 @@ async def run_agent(
 
     try:
         async for _, chunk in agent.astream(
-            {"messages": [("user", prompt)]},
+            {"messages": [*as_messages(history), ("user", prompt)]},
             stream_mode=["updates"],
             config={"recursion_limit": recursion_limit_for(max_iterations)},
         ):
@@ -396,6 +420,7 @@ async def run_team(
     max_iterations: int,
     cost_limit_usd: float | None,
     totals: RunTotals | None = None,
+    history: list[dict[str, Any]] | None = None,
 ) -> RunTotals:
     """Run a team where control hands over between agents.
 
@@ -440,7 +465,7 @@ async def run_team(
         # turn — and its tokens — never surface at all. The namespace names
         # the agent that spoke; the parent-level updates name the routing.
         async for namespace, _, chunk in app.astream(
-            {"messages": [("user", prompt)]},
+            {"messages": [*as_messages(history), ("user", prompt)]},
             stream_mode=["updates"],
             subgraphs=True,
             config={"recursion_limit": recursion_limit_for(max_iterations) * max(1, len(members))},

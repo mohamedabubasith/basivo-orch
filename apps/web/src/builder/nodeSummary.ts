@@ -10,20 +10,29 @@
  * is glanceable or it is nothing.
  */
 
-const str = (value: unknown): string => (typeof value === "string" ? value.trim() : "");
+const str = (value: unknown): string =>
+  typeof value === "string" ? value.trim() : "";
 
 /** Model ids are namespaced (`openai/gpt-oss-120b`); the tail identifies it. */
 const shortModel = (model: string): string => model.split("/").pop() ?? model;
 
-export function nodeSummary(type: string, config: Record<string, unknown>): string {
+export function nodeSummary(
+  type: string,
+  config: Record<string, unknown>,
+): string {
   switch (type) {
     case "agent.llm": {
       const model = shortModel(str(config.model));
-      const team = Array.isArray(config.sub_agents) ? config.sub_agents.length : 0;
+      const team = Array.isArray(config.sub_agents)
+        ? config.sub_agents.length
+        : 0;
       const tools = Array.isArray(config.tools) ? config.tools.length : 0;
       const extras = [
         tools ? `${tools} tool${tools > 1 ? "s" : ""}` : "",
         team ? `${team} sub-agent${team > 1 ? "s" : ""}` : "",
+        // Worth a card slot: whether an agent remembers changes what the same
+        // prompt does on the second run, and it is invisible otherwise.
+        config.memory === "conversation" ? "remembers" : "",
       ].filter(Boolean);
       return [model || "no model", ...extras].join(" · ");
     }
@@ -32,8 +41,12 @@ export function nodeSummary(type: string, config: Record<string, unknown>): stri
     case "git.comment":
       return str(config.repo) || "no repository";
     case "trigger.webhook": {
-      const methods = Array.isArray(config.methods) ? config.methods.join("/") : "POST";
-      return config.require_signature ? `${methods} · signed` : `${methods} · unsigned`;
+      const methods = Array.isArray(config.methods)
+        ? config.methods.join("/")
+        : "POST";
+      return config.require_signature
+        ? `${methods} · signed`
+        : `${methods} · unsigned`;
     }
     case "trigger.schedule":
       return config.mode === "cron"
@@ -42,16 +55,28 @@ export function nodeSummary(type: string, config: Record<string, unknown>): stri
           ? `every ${config.interval_seconds}s`
           : "no interval set";
     case "logic.condition": {
-      const count = Array.isArray(config.comparisons) ? config.comparisons.length : 0;
+      const count = Array.isArray(config.comparisons)
+        ? config.comparisons.length
+        : 0;
       const match = str(config.match) || "all";
-      return count ? `${count} check${count > 1 ? "s" : ""} · match ${match}` : "no checks";
+      return count
+        ? `${count} check${count > 1 ? "s" : ""} · match ${match}`
+        : "no checks";
     }
     case "data.set": {
-      const assignments = Array.isArray(config.assignments) ? config.assignments : [];
+      const assignments = Array.isArray(config.assignments)
+        ? config.assignments
+        : [];
       const names = assignments
-        .map((entry) => (entry && typeof entry === "object" ? str((entry as never)["name"]) : ""))
+        .map((entry) =>
+          entry && typeof entry === "object"
+            ? str((entry as never)["name"])
+            : "",
+        )
         .filter(Boolean);
-      return names.length ? names.slice(0, 3).join(", ") + (names.length > 3 ? "…" : "") : "nothing set";
+      return names.length
+        ? names.slice(0, 3).join(", ") + (names.length > 3 ? "…" : "")
+        : "nothing set";
     }
     case "http.request":
       return `${str(config.method) || "GET"} ${str(config.url) || "no URL"}`;
@@ -68,7 +93,9 @@ export function nodeSummary(type: string, config: Record<string, unknown>): stri
         shortModel(str(config.model)) || "no model"
       }`;
     case "social.post":
-      return [str(config.platform) || "telegram", str(config.target)].filter(Boolean).join(" · ");
+      return [str(config.platform) || "telegram", str(config.target)]
+        .filter(Boolean)
+        .join(" · ");
     case "trigger.manual":
       return "started by hand";
     default:

@@ -27,16 +27,27 @@ opt-in via environment variables.
 from __future__ import annotations
 
 import json
+import uuid
 
 import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from basivo_orch.auth.models import Organization
 from basivo_orch.flows import nodes as registry
 from basivo_orch.flows.engine import Engine
 from basivo_orch.flows.events import replay
 from basivo_orch.flows.graph import Graph
-from basivo_orch.flows.models import NodeExecution, NodeStatus, RunStatus
+from basivo_orch.flows.models import (
+    AgentMemory,
+    Flow,
+    FlowVersion,
+    NodeExecution,
+    NodeStatus,
+    Run,
+    RunStatus,
+    TriggerKind,
+)
 from tests.flows.fakes import FakeChatModel, says, tool_call, turn_number
 
 
@@ -544,10 +555,179 @@ async def test_a_failing_branch_lets_its_sibling_finish_and_fails_the_run(
 # The rule, enforced
 # ---------------------------------------------------------------------------
 
+
 #: Every node type exercised by this file, through the real engine. Adding a
 #: node to the registry without adding it here fails the next test — which is
 #: the point: integration coverage for new nodes is a build requirement, not a
 #: review request. See CLAUDE.md, "Adding a node type".
+async def test_an_agent_remembers_across_two_runs_of_the_same_flow(
+    session, organization, monkeypatch
+):
+    """Memory, end to end, through the real store.
+
+    Two runs of *one* flow — a second run of a second flow would prove nothing,
+    since memory is scoped to the flow. What the second model call receives is
+    captured rather than inferred: the row existing in the table is not the
+    same claim as the model having read it.
+
+    The subject is rendered from the payload, so this is also the shape a
+    support flow uses — one thread per issue, arriving on a webhook.
+    """
+    seen: list[list] = []
+
+    async def fake_build_model(_ctx, **_kwargs):
+        def respond(messages):
+            seen.append([m.content for m in messages])
+            return says("Widen the statement timeout.")
+
+        return FakeChatModel(respond=respond)
+
+    monkeypatch.setattr("basivo_orch.flows.nodes.agent.build_chat_model", fake_build_model)
+
+    graph = Graph.model_validate(
+        {
+            "nodes": [
+                {"id": "t", "type": "trigger.webhook", "config": {"require_signature": False}},
+                {
+                    "id": "support",
+                    "type": "agent.llm",
+                    "config": {
+                        "prompt": "{{ input.body.text }}",
+                        "memory": "conversation",
+                        "memory_key": "issue-{{ input.body.issue }}",
+                    },
+                },
+            ],
+            "edges": [{"source": "t", "target": "support"}],
+        }
+    )
+
+    flow = Flow(
+        organization_id=organization.id, name="Support", slug=f"support-{uuid.uuid4().hex[:8]}"
+    )
+    session.add(flow)
+    await session.flush()
+    version = FlowVersion(flow_id=flow.id, version=1, graph=graph.model_dump(mode="json"))
+    session.add(version)
+    await session.commit()
+
+    async def fire(text: str) -> Run:
+        run = Run(
+            flow_id=flow.id,
+            flow_version_id=version.id,
+            organization_id=organization.id,
+            trigger=TriggerKind.WEBHOOK,
+            input={"payload": {"body": {"issue": 41, "text": text}}},
+            status=RunStatus.QUEUED,
+        )
+        session.add(run)
+        await session.commit()
+        await session.refresh(run)
+        return await Engine(session, run=run, graph=graph, redis_client=None).execute()
+
+    first = await fire("Postgres times out on the report page.")
+    second = await fire("That did not help. What did you tell me to try?")
+
+    assert first.status is RunStatus.SUCCEEDED
+    assert second.status is RunStatus.SUCCEEDED
+
+    # Run one saw one message. Run two saw the whole thread, new request last.
+    assert seen[0] == ["Postgres times out on the report page."]
+    assert seen[1] == [
+        "Postgres times out on the report page.",
+        "Widen the statement timeout.",
+        "That did not help. What did you tell me to try?",
+    ]
+
+    # One row, keyed by the rendered subject, holding the windowed thread.
+    rows = (
+        (
+            await session.execute(
+                select(AgentMemory).where(AgentMemory.organization_id == organization.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(rows) == 1
+    assert rows[0].subject == "issue-41"
+    assert rows[0].scope == f"{flow.id}:support"
+    assert len(rows[0].turns) == 4
+
+    # And the run log says what was recalled, which is what makes a surprising
+    # answer debuggable months later.
+    events = await replay(session, second.id)
+    loaded = [e.data for e in events if e.data.get("step") == "memory.loaded"]
+    assert loaded and loaded[0]["turns"] == 2
+
+
+async def test_memory_is_not_readable_across_tenants(session, organization, monkeypatch):
+    """Another workspace's row with the same scope and subject stays invisible.
+
+    Scopes embed a flow id and so cannot collide in practice; the tenant filter
+    is defence for the case where they somehow do, and it is only defence if it
+    is in the query. Asserted by planting the collision.
+    """
+    seen: list[list] = []
+
+    async def fake_build_model(_ctx, **_kwargs):
+        def respond(messages):
+            seen.append([m.content for m in messages])
+            return says("ok")
+
+        return FakeChatModel(respond=respond)
+
+    monkeypatch.setattr("basivo_orch.flows.nodes.agent.build_chat_model", fake_build_model)
+
+    graph = Graph.model_validate(
+        {
+            "nodes": [
+                {"id": "t", "type": "trigger.manual", "config": {}},
+                {
+                    "id": "a",
+                    "type": "agent.llm",
+                    "config": {"prompt": "hello", "memory": "conversation"},
+                },
+            ],
+            "edges": [{"source": "t", "target": "a"}],
+        }
+    )
+
+    flow = Flow(organization_id=organization.id, name="F", slug=f"f-{uuid.uuid4().hex[:8]}")
+    session.add(flow)
+    await session.flush()
+    version = FlowVersion(flow_id=flow.id, version=1, graph=graph.model_dump(mode="json"))
+    session.add(version)
+
+    intruder = Organization(name="Other", slug=f"other-{uuid.uuid4().hex[:8]}")
+    session.add(intruder)
+    await session.flush()
+    session.add(
+        AgentMemory(
+            organization_id=intruder.id,
+            scope=f"{flow.id}:a",
+            subject="default",
+            turns=[{"role": "user", "text": "the other tenant's secret"}],
+        )
+    )
+    await session.commit()
+
+    run = Run(
+        flow_id=flow.id,
+        flow_version_id=version.id,
+        organization_id=organization.id,
+        trigger=TriggerKind.MANUAL,
+        input={"payload": {}},
+        status=RunStatus.QUEUED,
+    )
+    session.add(run)
+    await session.commit()
+    await session.refresh(run)
+    await Engine(session, run=run, graph=graph, redis_client=None).execute()
+
+    assert seen[0] == ["hello"], "the other tenant's turn must not appear"
+
+
 EXERCISED_NODE_TYPES = {
     "design.render",
     "video.render",
@@ -951,7 +1131,7 @@ async def test_the_video_generator_revises_until_the_composition_actually_shows_
         'data-width="100" data-height="100"><h1 id="a">Hi</h1>'
         "<script>window.__timelines={p:1}</script></div>"
     )
-    good = blank.replace("<h1 id=\"a\">Hi</h1>", "<h1 id=\"a\">Visible</h1>")
+    good = blank.replace('<h1 id="a">Hi</h1>', '<h1 id="a">Visible</h1>')
 
     attempts: list[str] = []
 
@@ -963,9 +1143,7 @@ async def test_the_video_generator_revises_until_the_composition_actually_shows_
         return FakeChatModel(respond=author)
 
     monkeypatch.setattr("basivo_orch.flows.nodes.models.build_chat_model", fake_build)
-    monkeypatch.setattr(
-        "basivo_orch.flows.nodes.video.build_chat_model", fake_build, raising=False
-    )
+    monkeypatch.setattr("basivo_orch.flows.nodes.video.build_chat_model", fake_build, raising=False)
 
     # The browser probe is the node's own eyes; here it reports the first
     # composition as blank and the second as fine.

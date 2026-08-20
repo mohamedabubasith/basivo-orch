@@ -145,7 +145,9 @@ export function Inspector({
   // Agent uses, so the provider/model/credential pickers apply to both.
   const usesLlm = isAgent || spec.type === "git.autofix";
   const usesGit =
-    spec.type === "git.ticket" || spec.type === "git.autofix" || spec.type === "git.comment";
+    spec.type === "git.ticket" ||
+    spec.type === "git.autofix" ||
+    spec.type === "git.comment";
 
   function set(key: string, value: unknown) {
     const next = { ...config };
@@ -161,8 +163,12 @@ export function Inspector({
       <div className="flex items-center gap-3 border-b border-ink-800/70 p-4">
         <NodeIconChip type={spec.type} size={8} />
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-medium text-ink-100">{spec.label}</p>
-          <p className="truncate font-mono text-[0.68rem] text-ink-500">{spec.type}</p>
+          <p className="truncate text-sm font-medium text-ink-100">
+            {spec.label}
+          </p>
+          <p className="truncate font-mono text-[0.68rem] text-ink-500">
+            {spec.type}
+          </p>
         </div>
         <button
           onClick={onClose}
@@ -170,18 +176,28 @@ export function Inspector({
           className="rounded-lg p-1.5 text-ink-500 transition-colors hover:bg-ink-800 hover:text-ink-200"
         >
           <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none">
-            <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="1.8" />
+            <path
+              d="M6 6l12 12M18 6L6 18"
+              stroke="currentColor"
+              strokeWidth="1.8"
+            />
           </svg>
         </button>
       </div>
 
       <div className="flex-1 space-y-4 overflow-y-auto p-4">
-        <p className="text-xs leading-relaxed text-ink-500">{spec.description}</p>
+        <p className="text-xs leading-relaxed text-ink-500">
+          {spec.description}
+        </p>
 
         {problem && (
           <p
             className="rounded-lg border p-2.5 text-xs leading-relaxed"
-            style={{ borderColor: "color-mix(in oklab, var(--status-bad) 45%, transparent)", color: "var(--status-bad)" }}
+            style={{
+              borderColor:
+                "color-mix(in oklab, var(--status-bad) 45%, transparent)",
+              color: "var(--status-bad)",
+            }}
           >
             {problem}
           </p>
@@ -189,7 +205,9 @@ export function Inspector({
 
         {spec.type === "trigger.schedule" && (
           <div className="rounded-lg border border-ink-700/70 bg-ink-950/40 p-3">
-            <p className="text-[0.68rem] font-medium text-ink-300">This schedule</p>
+            <p className="text-[0.68rem] font-medium text-ink-300">
+              This schedule
+            </p>
             {nextRunAt ? (
               <>
                 <p className="mt-1.5 font-mono text-[0.72rem] text-ink-100">
@@ -213,7 +231,9 @@ export function Inspector({
 
         {spec.type === "trigger.webhook" && (
           <div className="rounded-lg border border-ink-700/70 bg-ink-950/40 p-3">
-            <p className="text-[0.68rem] font-medium text-ink-300">This webhook's URL</p>
+            <p className="text-[0.68rem] font-medium text-ink-300">
+              This webhook's URL
+            </p>
             {isPublished ? (
               <code className="mt-1.5 block truncate rounded-md bg-ink-950/60 px-2 py-1.5 font-mono text-[0.68rem] text-ink-200">
                 {publicBase}/hooks/{flowId}
@@ -226,11 +246,11 @@ export function Inspector({
             )}
             <p className="mt-1.5 text-[0.68rem] leading-relaxed text-ink-500">
               No API key — paste it straight into GitHub or GitLab webhook
-              settings. The secret below authenticates every delivery
-              (GitHub's <code className="text-ink-400">X-Hub-Signature-256</code>,
-              GitLab's <code className="text-ink-400">X-Gitlab-Token</code>, or a
-              plain <code className="text-ink-400">X-Webhook-Secret</code>), so
-              this URL only answers while{" "}
+              settings. The secret below authenticates every delivery (GitHub's{" "}
+              <code className="text-ink-400">X-Hub-Signature-256</code>,
+              GitLab's <code className="text-ink-400">X-Gitlab-Token</code>, or
+              a plain <code className="text-ink-400">X-Webhook-Secret</code>),
+              so this URL only answers while{" "}
               <em className="not-italic text-ink-300">Require signature</em> is
               on. The delivery arrives as{" "}
               <code className="text-ink-400">{"{{ input.body }}"}</code>;
@@ -247,185 +267,272 @@ export function Inspector({
           />
         </Labelled>
 
-        {list.map((field) => (
-          <Labelled
-            key={field.key}
-            label={field.title}
-            required={field.required}
-            hint={field.description}
-          >
-            {spec.type === "trigger.webhook" && field.key === "methods" ? (
-              <MethodPicker
-                value={Array.isArray(config.methods) ? (config.methods as string[]) : ["POST"]}
-                onChange={(methods) => set("methods", methods)}
-              />
-            ) : isAgent && field.key === "provider" ? (
-              <select
-                value={String(config.provider ?? MODEL_PROVIDERS[0].value)}
-                onChange={(event) => set("provider", event.target.value)}
-                className={INPUT}
-              >
-                {MODEL_PROVIDERS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            ) : usesLlm &&
-              (field.key === "credential_id" || field.key === "vision_credential_id") ? (
-              // Both LLM credentials get the picker. Without this the vision
-              // one renders as a text box asking for a UUID, which is not a
-              // thing any person can supply.
-              <CredentialPicker
-                orgId={orgId}
-                provider={String(
-                  (field.key === "vision_credential_id" ? config.vision_provider : null) ??
-                    config.provider ??
-                    MODEL_PROVIDERS[0].value,
-                )}
-                value={String(config[field.key] ?? "")}
-                onChange={(v) => set(field.key, v)}
-              />
-            ) : spec.type === "video.render" && field.key === "html" ? (
-              <CodeArea value={String(config.html ?? "")} onChange={(v) => set("html", v)} />
-            ) : spec.type === "video.render" && field.key === "variables" ? (
-              <div>
-                <TemplateInput
-                  multiline
-                  rows={4}
-                  value={String(config.variables ?? "{}")}
-                  onChange={(v) => set("variables", v)}
-                  suggestions={suggestions}
-                  placeholder={'{"headline": "{{ nodes.copy.output.text }}"}'}
+        {list
+          .filter(
+            (field) =>
+              // While memory is off there is no thread to key or bound, so the
+              // two fields that configure one would be asking about nothing.
+              !(
+                isAgent &&
+                (field.key === "memory_key" || field.key === "memory_window") &&
+                (config.memory ?? "off") === "off"
+              ),
+          )
+          .map((field) => (
+            <Labelled
+              key={field.key}
+              label={field.title}
+              required={field.required}
+              hint={field.description}
+            >
+              {spec.type === "trigger.webhook" && field.key === "methods" ? (
+                <MethodPicker
+                  value={
+                    Array.isArray(config.methods)
+                      ? (config.methods as string[])
+                      : ["POST"]
+                  }
+                  onChange={(methods) => set("methods", methods)}
                 />
-                <p className="mt-1.5 text-[0.68rem] leading-relaxed text-ink-500">
-                  JSON, filled into the template. An upstream agent usually writes these —
-                  that is the division of labour: it writes words, the template does layout.
-                </p>
-              </div>
-            ) : spec.type === "design.render" && field.key === "html" ? (
-              <CodeArea value={String(config.html ?? "")} onChange={(v) => set("html", v)} />
-            ) : spec.type === "social.post" && field.key === "credential_id" ? (
-              <CredentialPicker
-                orgId={orgId}
-                provider={String(config.platform ?? "telegram")}
-                value={String(config.credential_id ?? "")}
-                onChange={(v) => set("credential_id", v)}
-              />
-            ) : spec.type === "social.post" &&
-              (field.key === "text" || field.key === "artifact_id" || field.key === "target") ? (
-              <TemplateInput
-                multiline={field.key === "text"}
-                rows={3}
-                value={String(config[field.key] ?? "")}
-                onChange={(v) => set(field.key, v)}
-                suggestions={suggestions}
-                placeholder={
-                  field.key === "artifact_id" ? "{{ nodes.poster.output.artifact_id }}" : ""
-                }
-              />
-            ) : spec.type === "code.python" && field.key === "code" ? (
-              <CodeArea value={String(config.code ?? "")} onChange={(v) => set("code", v)} />
-            ) : isAgent && field.key === "team_mode" ? (
-              <div>
+              ) : isAgent && field.key === "provider" ? (
                 <select
-                  value={String(config.team_mode ?? "delegate")}
-                  onChange={(event) => set("team_mode", event.target.value)}
+                  value={String(config.provider ?? MODEL_PROVIDERS[0].value)}
+                  onChange={(event) => set("provider", event.target.value)}
                   className={INPUT}
                 >
-                  <option value="delegate">Delegate — it asks, then answers itself</option>
-                  <option value="handover">Handover — it transfers, they answer you</option>
+                  {MODEL_PROVIDERS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
                 </select>
-                <p className="mt-1.5 text-[0.68rem] leading-relaxed text-ink-500">
-                  {config.team_mode === "handover"
-                    ? "Control moves. The agent it transfers to replies directly and can transfer on again — right for triage."
-                    : "This agent stays in charge: it asks, gets an answer back, and writes the reply itself — right for combining several answers."}
-                </p>
-              </div>
-            ) : isAgent && field.key === "sub_agents" ? (
-              <SubAgentEditor
-                value={config.sub_agents}
-                onChange={(agents) => set("sub_agents", agents)}
-                orgId={orgId}
-                parentProvider={String(config.provider ?? MODEL_PROVIDERS[0].value)}
-                parentCredentialId={String(config.credential_id ?? "")}
-                teamMode={String(config.team_mode ?? "delegate")}
-              />
-            ) : isAgent && field.key === "tools" ? (
-              <ToolEditor value={config.tools} onChange={(tools) => set("tools", tools)} suggestions={suggestions} />
-            ) : usesLlm && field.key === "vision_provider" ? (
-              <select
-                value={String(config.vision_provider ?? "")}
-                onChange={(event) => set("vision_provider", event.target.value)}
-                className={INPUT}
-              >
-                <option value="">Same as the repair model</option>
-                {MODEL_PROVIDERS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            ) : usesGit && field.key === "git_provider" ? (
-              <select
-                value={String(config.git_provider ?? "github")}
-                onChange={(event) => set("git_provider", event.target.value)}
-                className={INPUT}
-              >
-                {VCS_PROVIDERS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            ) : usesGit && field.key === "git_credential_id" ? (
-              <CredentialPicker
-                orgId={orgId}
-                provider={String(config.git_provider ?? "github")}
-                value={String(config.git_credential_id ?? "")}
-                onChange={(v) => set("git_credential_id", v)}
-              />
-            ) : (spec.type === "git.autofix" &&
-                (field.key === "problem" || field.key === "instructions")) ||
-              (spec.type === "git.comment" && field.key === "body") ? (
-              <TemplateInput
-                multiline
-                rows={field.key === "problem" ? 4 : 3}
-                value={String(config[field.key] ?? "")}
-                onChange={(v) => set(field.key, v)}
-                suggestions={suggestions}
-                placeholder={field.key === "problem" ? "{{ input.error }}" : ""}
-              />
-            ) : isAgent && (field.key === "prompt" || field.key === "system") ? (
-              <TemplateInput
-                multiline
-                rows={field.key === "prompt" ? 5 : 3}
-                value={String(config[field.key] ?? "")}
-                onChange={(v) => set(field.key, v)}
-                suggestions={suggestions}
-                placeholder={field.key === "prompt" ? "{{ input.text }}" : "You are…"}
-              />
-            ) : usesLlm && (field.key === "model" || field.key === "vision_model") ? (
-              <ModelPicker
-                orgId={orgId}
-                credentialId={String(
-                  (field.key === "vision_model" ? config.vision_credential_id : null) ??
-                    config.credential_id ??
-                    "",
-                )}
-                value={String(config[field.key] ?? "")}
-                onChange={(v) => set(field.key, v)}
-              />
-            ) : (
-              <FieldInput
-                field={field}
-                value={config[field.key]}
-                onChange={(v) => set(field.key, v)}
-                suggestions={suggestions}
-              />
-            )}
-          </Labelled>
-        ))}
+              ) : usesLlm &&
+                (field.key === "credential_id" ||
+                  field.key === "vision_credential_id") ? (
+                // Both LLM credentials get the picker. Without this the vision
+                // one renders as a text box asking for a UUID, which is not a
+                // thing any person can supply.
+                <CredentialPicker
+                  orgId={orgId}
+                  provider={String(
+                    (field.key === "vision_credential_id"
+                      ? config.vision_provider
+                      : null) ??
+                      config.provider ??
+                      MODEL_PROVIDERS[0].value,
+                  )}
+                  value={String(config[field.key] ?? "")}
+                  onChange={(v) => set(field.key, v)}
+                />
+              ) : spec.type === "video.render" && field.key === "html" ? (
+                <CodeArea
+                  value={String(config.html ?? "")}
+                  onChange={(v) => set("html", v)}
+                />
+              ) : spec.type === "video.render" && field.key === "variables" ? (
+                <div>
+                  <TemplateInput
+                    multiline
+                    rows={4}
+                    value={String(config.variables ?? "{}")}
+                    onChange={(v) => set("variables", v)}
+                    suggestions={suggestions}
+                    placeholder={'{"headline": "{{ nodes.copy.output.text }}"}'}
+                  />
+                  <p className="mt-1.5 text-[0.68rem] leading-relaxed text-ink-500">
+                    JSON, filled into the template. An upstream agent usually
+                    writes these — that is the division of labour: it writes
+                    words, the template does layout.
+                  </p>
+                </div>
+              ) : spec.type === "design.render" && field.key === "html" ? (
+                <CodeArea
+                  value={String(config.html ?? "")}
+                  onChange={(v) => set("html", v)}
+                />
+              ) : spec.type === "social.post" &&
+                field.key === "credential_id" ? (
+                <CredentialPicker
+                  orgId={orgId}
+                  provider={String(config.platform ?? "telegram")}
+                  value={String(config.credential_id ?? "")}
+                  onChange={(v) => set("credential_id", v)}
+                />
+              ) : spec.type === "social.post" &&
+                (field.key === "text" ||
+                  field.key === "artifact_id" ||
+                  field.key === "target") ? (
+                <TemplateInput
+                  multiline={field.key === "text"}
+                  rows={3}
+                  value={String(config[field.key] ?? "")}
+                  onChange={(v) => set(field.key, v)}
+                  suggestions={suggestions}
+                  placeholder={
+                    field.key === "artifact_id"
+                      ? "{{ nodes.poster.output.artifact_id }}"
+                      : ""
+                  }
+                />
+              ) : spec.type === "code.python" && field.key === "code" ? (
+                <CodeArea
+                  value={String(config.code ?? "")}
+                  onChange={(v) => set("code", v)}
+                />
+              ) : isAgent && field.key === "memory" ? (
+                <div>
+                  <select
+                    value={String(config.memory ?? "off")}
+                    onChange={(event) => set("memory", event.target.value)}
+                    className={INPUT}
+                  >
+                    <option value="off">Off — every run starts fresh</option>
+                    <option value="conversation">
+                      Remember the conversation
+                    </option>
+                  </select>
+                  <p className="mt-1.5 text-[0.68rem] leading-relaxed text-ink-500">
+                    {config.memory === "conversation"
+                      ? "Past requests and replies are sent again before the new one, so you can say “that didn’t work” and be understood. Tool calls are never stored."
+                      : "Right for one-shot work — classifying or summarising whatever arrives. Remembering would only bias it."}
+                  </p>
+                </div>
+              ) : isAgent && field.key === "memory_key" ? (
+                <div>
+                  <TemplateInput
+                    value={String(config.memory_key ?? "")}
+                    onChange={(v) => set("memory_key", v)}
+                    suggestions={suggestions}
+                    placeholder="{{ input.body.issue.number }}"
+                  />
+                  <p className="mt-1.5 text-[0.68rem] leading-relaxed text-ink-500">
+                    One separate thread per value — usually an issue number or a
+                    chat id.{" "}
+                    {config.memory_key
+                      ? ""
+                      : "Left empty, every trigger shares one thread, so two people would read each other’s history."}
+                  </p>
+                </div>
+              ) : isAgent && field.key === "team_mode" ? (
+                <div>
+                  <select
+                    value={String(config.team_mode ?? "delegate")}
+                    onChange={(event) => set("team_mode", event.target.value)}
+                    className={INPUT}
+                  >
+                    <option value="delegate">
+                      Delegate — it asks, then answers itself
+                    </option>
+                    <option value="handover">
+                      Handover — it transfers, they answer you
+                    </option>
+                  </select>
+                  <p className="mt-1.5 text-[0.68rem] leading-relaxed text-ink-500">
+                    {config.team_mode === "handover"
+                      ? "Control moves. The agent it transfers to replies directly and can transfer on again — right for triage."
+                      : "This agent stays in charge: it asks, gets an answer back, and writes the reply itself — right for combining several answers."}
+                  </p>
+                </div>
+              ) : isAgent && field.key === "sub_agents" ? (
+                <SubAgentEditor
+                  value={config.sub_agents}
+                  onChange={(agents) => set("sub_agents", agents)}
+                  orgId={orgId}
+                  parentProvider={String(
+                    config.provider ?? MODEL_PROVIDERS[0].value,
+                  )}
+                  parentCredentialId={String(config.credential_id ?? "")}
+                  teamMode={String(config.team_mode ?? "delegate")}
+                />
+              ) : isAgent && field.key === "tools" ? (
+                <ToolEditor
+                  value={config.tools}
+                  onChange={(tools) => set("tools", tools)}
+                  suggestions={suggestions}
+                />
+              ) : usesLlm && field.key === "vision_provider" ? (
+                <select
+                  value={String(config.vision_provider ?? "")}
+                  onChange={(event) =>
+                    set("vision_provider", event.target.value)
+                  }
+                  className={INPUT}
+                >
+                  <option value="">Same as the repair model</option>
+                  {MODEL_PROVIDERS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              ) : usesGit && field.key === "git_provider" ? (
+                <select
+                  value={String(config.git_provider ?? "github")}
+                  onChange={(event) => set("git_provider", event.target.value)}
+                  className={INPUT}
+                >
+                  {VCS_PROVIDERS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              ) : usesGit && field.key === "git_credential_id" ? (
+                <CredentialPicker
+                  orgId={orgId}
+                  provider={String(config.git_provider ?? "github")}
+                  value={String(config.git_credential_id ?? "")}
+                  onChange={(v) => set("git_credential_id", v)}
+                />
+              ) : (spec.type === "git.autofix" &&
+                  (field.key === "problem" || field.key === "instructions")) ||
+                (spec.type === "git.comment" && field.key === "body") ? (
+                <TemplateInput
+                  multiline
+                  rows={field.key === "problem" ? 4 : 3}
+                  value={String(config[field.key] ?? "")}
+                  onChange={(v) => set(field.key, v)}
+                  suggestions={suggestions}
+                  placeholder={
+                    field.key === "problem" ? "{{ input.error }}" : ""
+                  }
+                />
+              ) : isAgent &&
+                (field.key === "prompt" || field.key === "system") ? (
+                <TemplateInput
+                  multiline
+                  rows={field.key === "prompt" ? 5 : 3}
+                  value={String(config[field.key] ?? "")}
+                  onChange={(v) => set(field.key, v)}
+                  suggestions={suggestions}
+                  placeholder={
+                    field.key === "prompt" ? "{{ input.text }}" : "You are…"
+                  }
+                />
+              ) : usesLlm &&
+                (field.key === "model" || field.key === "vision_model") ? (
+                <ModelPicker
+                  orgId={orgId}
+                  credentialId={String(
+                    (field.key === "vision_model"
+                      ? config.vision_credential_id
+                      : null) ??
+                      config.credential_id ??
+                      "",
+                  )}
+                  value={String(config[field.key] ?? "")}
+                  onChange={(v) => set(field.key, v)}
+                />
+              ) : (
+                <FieldInput
+                  field={field}
+                  value={config[field.key]}
+                  onChange={(v) => set(field.key, v)}
+                  suggestions={suggestions}
+                />
+              )}
+            </Labelled>
+          ))}
       </div>
 
       <div className="border-t border-ink-800/70 p-4">
@@ -459,7 +566,11 @@ function Labelled({
         {required && <span style={{ color: "var(--status-warn)" }}> *</span>}
       </label>
       {children}
-      {hint && <p className="mt-1 text-[0.68rem] leading-relaxed text-ink-500">{hint}</p>}
+      {hint && (
+        <p className="mt-1 text-[0.68rem] leading-relaxed text-ink-500">
+          {hint}
+        </p>
+      )}
     </div>
   );
 }
@@ -490,7 +601,8 @@ const TOOLS_EXAMPLE = JSON.stringify(
     },
     {
       name: "stub_example",
-      description: "Always returns the same value — useful while testing a flow.",
+      description:
+        "Always returns the same value — useful while testing a flow.",
       input_schema: { type: "object", properties: {} },
       kind: "constant",
       value: "ok",
@@ -541,7 +653,9 @@ function FieldInput({
             // ink-600 + an ink-100 knob, not ink-700 + white: in light mode
             // ink-700 is #dfe3ed and a white knob on it is invisible — the
             // switch read as an empty pill with no state at all.
-            checked ? "border-brand-500 bg-brand-500" : "border-ink-500 bg-ink-600",
+            checked
+              ? "border-brand-500 bg-brand-500"
+              : "border-ink-500 bg-ink-600",
           )}
         >
           <span
@@ -552,7 +666,9 @@ function FieldInput({
           />
         </button>
         {/* The state in a word, so the toggle is never a colour-only guess. */}
-        <span className={cx("text-xs", checked ? "text-ink-200" : "text-ink-500")}>
+        <span
+          className={cx("text-xs", checked ? "text-ink-200" : "text-ink-500")}
+        >
           {checked ? "On" : "Off"}
         </span>
       </div>
@@ -564,9 +680,15 @@ function FieldInput({
       <input
         type="number"
         value={value === undefined || value === null ? "" : String(value)}
-        placeholder={field.default === undefined || field.default === null ? "" : String(field.default)}
+        placeholder={
+          field.default === undefined || field.default === null
+            ? ""
+            : String(field.default)
+        }
         onChange={(event) =>
-          onChange(event.target.value === "" ? undefined : Number(event.target.value))
+          onChange(
+            event.target.value === "" ? undefined : Number(event.target.value),
+          )
         }
         className={INPUT}
       />
@@ -580,7 +702,13 @@ function FieldInput({
     return (
       <JsonInput
         value={value}
-        placeholder={field.key === "tools" ? TOOLS_EXAMPLE : field.type === "array" ? "[]" : "{}"}
+        placeholder={
+          field.key === "tools"
+            ? TOOLS_EXAMPLE
+            : field.type === "array"
+              ? "[]"
+              : "{}"
+        }
         onChange={onChange}
       />
     );
@@ -590,7 +718,9 @@ function FieldInput({
     <TemplateInput
       value={value === undefined || value === null ? "" : String(value)}
       placeholder={
-        field.default === undefined || field.default === null ? "" : String(field.default)
+        field.default === undefined || field.default === null
+          ? ""
+          : String(field.default)
       }
       onChange={(v) => onChange(v)}
       suggestions={suggestions}
@@ -640,11 +770,15 @@ function JsonInput({
         className={cx(
           INPUT,
           "resize-y font-mono text-[0.75rem]",
-          invalid && "border-[var(--status-bad)] focus:border-[var(--status-bad)]",
+          invalid &&
+            "border-[var(--status-bad)] focus:border-[var(--status-bad)]",
         )}
       />
       {invalid && (
-        <p className="mt-1 text-[0.68rem]" style={{ color: "var(--status-bad)" }}>
+        <p
+          className="mt-1 text-[0.68rem]"
+          style={{ color: "var(--status-bad)" }}
+        >
           Not valid JSON — the last valid value is still saved.
         </p>
       )}
@@ -652,7 +786,13 @@ function JsonInput({
   );
 }
 
-function CodeArea({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+function CodeArea({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+}) {
   return (
     <textarea
       value={value}
@@ -660,14 +800,17 @@ function CodeArea({ value, onChange }: { value: string; onChange: (value: string
       spellCheck={false}
       autoCorrect="off"
       autoCapitalize="off"
-      placeholder={'def main(data):\n    # data has: input, nodes, vars, trigger\n    return {"ok": True}'}
+      placeholder={
+        'def main(data):\n    # data has: input, nodes, vars, trigger\n    return {"ok": True}'
+      }
       onChange={(event) => onChange(event.target.value)}
       onKeyDown={(event) => {
         if (event.key !== "Tab") return;
         event.preventDefault();
         const target = event.currentTarget;
         const { selectionStart, selectionEnd } = target;
-        const next = value.slice(0, selectionStart) + "    " + value.slice(selectionEnd);
+        const next =
+          value.slice(0, selectionStart) + "    " + value.slice(selectionEnd);
         onChange(next);
         // The value update is async through React; restore the caret after it.
         requestAnimationFrame(() => {
@@ -681,7 +824,6 @@ function CodeArea({ value, onChange }: { value: string; onChange: (value: string
     />
   );
 }
-
 
 /**
  * HTTP methods as checkboxes. The generic form rendered this list-of-enums as
@@ -706,7 +848,9 @@ function MethodPicker({
             type="button"
             aria-pressed={active}
             onClick={() => {
-              const next = active ? value.filter((m) => m !== method) : [...value, method];
+              const next = active
+                ? value.filter((m) => m !== method)
+                : [...value, method];
               // Zero methods is a webhook nothing can call; refuse the last
               // uncheck rather than saving a config that can never fire.
               if (next.length > 0) onChange(next);

@@ -110,6 +110,13 @@ class NodeContext:
     #: belongs to another workspace.
     load_artifact: Callable[[str], Awaitable[bytes | None]] | None = None
 
+    #: What this agent remembers about `subject` from previous runs, oldest
+    #: turn first. Engine-provided for the same reason credentials are: the
+    #: node never writes SQL.
+    load_memory: Callable[..., Awaitable[list[dict[str, Any]]]] | None = None
+    #: Replace what it remembers. Called after a run with the windowed turns.
+    save_memory: Callable[..., Awaitable[None]] | None = None
+
     def template_context(self) -> dict[str, Any]:
         return {
             "input": self.input,

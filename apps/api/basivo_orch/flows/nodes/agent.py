@@ -238,12 +238,106 @@ class AgentConfig(BaseModel):
         default=None, ge=0, description="Abort the run if this is exceeded mid-loop."
     )
 
+    # -- memory ----------------------------------------------------------------
+    #: Whether this agent remembers earlier runs.
+    #:
+    #: "off" — every run starts blank. Correct for one-shot work: a classifier
+    #: that summarises whatever arrives has nothing to gain from last week's
+    #: input, and remembering would only bias it.
+    #:
+    #: "conversation" — the human turn and the final reply of previous runs are
+    #: replayed before the new prompt, so the agent can be told "the fix you
+    #: suggested didn't work" and know what fix that was.
+    memory: Literal["off", "conversation"] = "off"
+    #: Which conversation to load. Supports {{ references }}, and normally
+    #: should use one: `{{ input.payload.issue.number }}` keeps one thread per
+    #: GitHub issue, `{{ input.payload.chat_id }}` one per chat. An empty key
+    #: means a single shared thread for the node, which is right for a standing
+    #: assistant and wrong for anything with more than one counterparty —
+    #: they would read each other's history.
+    memory_key: str = Field(
+        default="",
+        max_length=300,
+        description="One thread per rendered value. Supports {{ references }}.",
+    )
+    #: How many past turns to replay, newest kept. This is a cost control as
+    #: much as a relevance one: history is resent in full on every model call,
+    #: so an unbounded memory makes each run more expensive than the last until
+    #: it hits the context limit.
+    memory_window: int = Field(default=20, ge=2, le=200)
+
     # -- output ----------------------------------------------------------------
     response_format: Literal["text", "json"] = "text"
 
     # -- transport -------------------------------------------------------------
     base_url: str = Field(default="", max_length=300, description="Overrides the credential's.")
     request_timeout_seconds: float = Field(default=120.0, ge=5, le=600)
+
+
+def _memory_subject(config: AgentConfig, template: dict[str, Any]) -> str:
+    """Which conversation this run belongs to.
+
+    `"default"` when no key is configured, rather than the empty string: a
+    blank subject in the table would be indistinguishable from a key that
+    rendered empty because its reference was missing, and those two want very
+    different handling — the first is one shared thread, the second is a bug
+    that would silently merge every counterparty into it.
+    """
+    if not config.memory_key.strip():
+        return "default"
+    rendered = render_value(config.memory_key, template)
+    if not isinstance(rendered, str):
+        rendered = json.dumps(rendered, default=str, sort_keys=True)
+    rendered = rendered.strip()
+    if not rendered:
+        raise NodeError(
+            f"The memory key {config.memory_key!r} rendered empty. It decides whose "
+            "conversation this is, so an empty value would mix separate threads "
+            "together — check the reference against the trigger's payload."
+        )
+    return rendered[:300]
+
+
+async def _load_memory(
+    config: AgentConfig, ctx: NodeContext, template: dict[str, Any]
+) -> list[dict[str, Any]]:
+    if config.memory == "off" or ctx.load_memory is None:
+        return []
+    subject = _memory_subject(config, template)
+    turns = await ctx.load_memory(ctx.node_id, subject)
+    # Windowed on the way in as well as out: a window narrowed after a long
+    # conversation must take effect on the next run, not gradually.
+    turns = turns[-config.memory_window :]
+    await ctx.step(
+        "memory.loaded",
+        {"subject": subject, "turns": len(turns), "window": config.memory_window},
+    )
+    return turns
+
+
+async def _save_memory(
+    config: AgentConfig,
+    ctx: NodeContext,
+    template: dict[str, Any],
+    history: list[dict[str, Any]],
+    prompt: str,
+    text: str,
+) -> None:
+    """Append this exchange to what the agent remembers.
+
+    Saved even when the reply is empty — a truncated or cost-limited run still
+    happened, and dropping the human turn would make the next run answer a
+    question it appears never to have been asked.
+    """
+    if config.memory == "off" or ctx.save_memory is None:
+        return
+    subject = _memory_subject(config, template)
+    turns = [*history, {"role": "user", "text": prompt[:8000]}]
+    if text.strip():
+        turns.append({"role": "assistant", "text": text[:8000]})
+    turns = turns[-config.memory_window :]
+    await ctx.save_memory(ctx.node_id, subject, turns)
+    await ctx.step("memory.saved", {"subject": subject, "turns": len(turns)})
 
 
 class AgentNode(Node):
@@ -386,6 +480,7 @@ class AgentNode(Node):
                         provider=sub.provider if sub.model else config.provider,
                     )
                 )
+            history = await _load_memory(config, ctx, template)
             await run_team(
                 ctx,
                 members=members,
@@ -394,9 +489,11 @@ class AgentNode(Node):
                 max_iterations=config.max_iterations,
                 cost_limit_usd=config.cost_limit_usd,
                 totals=totals,
+                history=history,
             )
             totals.tool_calls = tool_budget["used"]
             text = totals.text
+            await _save_memory(config, ctx, template, history, prompt, text)
             json_output = parse_json(text) if config.response_format == "json" else None
             await ctx.step(
                 "agent.finished",
@@ -463,6 +560,8 @@ class AgentNode(Node):
             },
         )
 
+        history = await _load_memory(config, ctx, template)
+
         await run_agent(
             ctx,
             model=model,
@@ -475,10 +574,12 @@ class AgentNode(Node):
             provider=config.provider,
             model_name=config.model,
             totals=totals,
+            history=history,
         )
         totals.tool_calls = tool_budget["used"]
 
         text = totals.text
+        await _save_memory(config, ctx, template, history, prompt, text)
         json_output = parse_json(text) if config.response_format == "json" else None
 
         await ctx.step(

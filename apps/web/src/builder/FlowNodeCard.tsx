@@ -55,11 +55,14 @@ export function FlowNodeCard({ data, selected }: NodeProps<FlowNode>) {
         // A single flat border made these read as list rows rather than
         // objects sitting on a surface.
         "shadow-[0_1px_2px_rgba(0,0,0,0.10),0_12px_24px_-16px_rgba(0,0,0,0.45)]",
-        selected
-          ? "border-brand-400 ring-2 ring-brand-400/25"
-          : data.problem
-            ? "border-[var(--status-bad)]"
-            : "border-ink-600/70 hover:border-ink-500",
+        data.runStatus === "running"
+          ? // The glow is the border while it runs; a second one competes.
+            "node-running border-transparent"
+          : selected
+            ? "border-brand-400 ring-2 ring-brand-400/25"
+            : data.problem
+              ? "border-[var(--status-bad)]"
+              : "border-ink-600/70 hover:border-ink-500",
       )}
       style={{
         // The identity colour runs faintly through the whole card, not only
@@ -71,6 +74,22 @@ export function FlowNodeCard({ data, selected }: NodeProps<FlowNode>) {
         background: `color-mix(in oklab, ${accent} 9%, var(--color-ink-850))`,
       }}
     >
+      {/* While running: a light going round the edge, and an inner surface
+          that covers everything but that edge. Rendered before the rail so the
+          rail stays on top of it. */}
+      {data.runStatus === "running" && (
+        <>
+          <span className="node-orbit" aria-hidden="true" />
+          <span
+            className="pointer-events-none absolute inset-[1.5px] rounded-[10px]"
+            style={{
+              background: `color-mix(in oklab, ${accent} 9%, var(--color-ink-850))`,
+            }}
+            aria-hidden="true"
+          />
+        </>
+      )}
+
       {/* A full-height rail rather than a 1px top hairline. This is the thing
           you read at low zoom, when labels have stopped being legible — a
           canvas of a dozen nodes should sort into triggers / agents / devops
@@ -92,7 +111,7 @@ export function FlowNodeCard({ data, selected }: NodeProps<FlowNode>) {
         />
       )}
 
-      <div className="flex items-start gap-2.5 py-2.5 pr-3.5 pl-3">
+      <div className="relative flex items-start gap-2.5 py-2.5 pr-3.5 pl-3">
         <NodeIconChip type={data.nodeType} size={8} />
 
         <div className="min-w-0 flex-1">
@@ -109,7 +128,7 @@ export function FlowNodeCard({ data, selected }: NodeProps<FlowNode>) {
       </div>
 
       {(status || data.problem) && (
-        <div className="border-t border-ink-700/60 px-3.5 py-2">
+        <div className="relative border-t border-ink-700/60 px-3.5 py-2">
           {status && (
             <p className="flex items-center gap-1.5 text-[0.68rem]" style={{ color: status.color }}>
               {data.runStatus === "running" ? (

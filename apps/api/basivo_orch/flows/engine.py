@@ -186,6 +186,57 @@ class Engine:
             return None
         return artifact.data
 
+    async def _memory_scope(self, node_id: str) -> str:
+        """Which agent owns a memory. Flow plus node, never the run.
+
+        Keyed on the flow rather than the flow *version*, or every publish
+        would amnesia the agent — and on the node id so two agents in one flow
+        keep separate memories, which is what "this agent remembers" means.
+        """
+        return f"{self.run.flow_id}:{node_id}"
+
+    async def _load_memory(self, node_id: str, subject: str) -> list[dict[str, Any]]:
+        from sqlalchemy import select as _select
+
+        from basivo_orch.flows.models import AgentMemory
+
+        async with self._db:
+            result = await self.session.execute(
+                _select(AgentMemory).where(
+                    AgentMemory.organization_id == self.run.organization_id,
+                    AgentMemory.scope == await self._memory_scope(node_id),
+                    AgentMemory.subject == subject[:300],
+                )
+            )
+            row = result.scalar_one_or_none()
+        return list(row.turns or []) if row else []
+
+    async def _save_memory(self, node_id: str, subject: str, turns: list[dict[str, Any]]) -> None:
+        from sqlalchemy import select as _select
+
+        from basivo_orch.flows.models import AgentMemory
+
+        scope = await self._memory_scope(node_id)
+        async with self._db:
+            result = await self.session.execute(
+                _select(AgentMemory).where(
+                    AgentMemory.organization_id == self.run.organization_id,
+                    AgentMemory.scope == scope,
+                    AgentMemory.subject == subject[:300],
+                )
+            )
+            row = result.scalar_one_or_none()
+            if row is None:
+                row = AgentMemory(
+                    organization_id=self.run.organization_id,
+                    scope=scope,
+                    subject=subject[:300],
+                )
+                self.session.add(row)
+            row.turns = turns
+            row.updated_at = datetime.now(UTC)
+            await self.session.commit()
+
     async def execute(self) -> Run:
         http = self._http or httpx.AsyncClient(
             # Flows call third-party endpoints; the pool is shared across the
@@ -452,6 +503,8 @@ class Engine:
                 resolve_credential=self._resolve_credential,
                 save_artifact=self._save_artifact,
                 load_artifact=self._load_artifact,
+                load_memory=self._load_memory,
+                save_memory=self._save_memory,
                 http=http,
             )
 
