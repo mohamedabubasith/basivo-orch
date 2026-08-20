@@ -44,6 +44,24 @@ class FlowRead(BaseModel):
         return self.published_version_id is not None
 
 
+class FlowSummary(FlowRead):
+    """A flow as the list needs it, not as the table stores it.
+
+    The list used to show a name, a slug and "updated 5 days ago" — none of
+    which answers the questions you open that page with: what starts this,
+    how big is it, and did the last run pass. Those come from the published
+    (or latest) version's graph and the most recent run, computed once for the
+    whole page rather than by the browser asking per row.
+    """
+
+    node_count: int = 0
+    trigger_type: str | None = None
+    last_run_status: str | None = None
+    last_run_at: datetime | None = None
+    #: When this flow next fires, if it is scheduled and published.
+    next_run_at: datetime | None = None
+
+
 class FlowDetail(FlowRead):
     graph: Graph
     version: int

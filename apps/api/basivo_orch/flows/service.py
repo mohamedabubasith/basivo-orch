@@ -15,7 +15,14 @@ from basivo_orch.flows import nodes as node_registry
 from basivo_orch.flows.engine import Engine
 from basivo_orch.flows.events import RedisClient
 from basivo_orch.flows.graph import Graph, validate_graph
-from basivo_orch.flows.models import Flow, FlowVersion, Run, RunStatus, TriggerKind
+from basivo_orch.flows.models import (
+    Flow,
+    FlowSchedule,
+    FlowVersion,
+    Run,
+    RunStatus,
+    TriggerKind,
+)
 from basivo_orch.flows.schemas import slugify
 from basivo_orch.logging import get_logger
 
@@ -160,6 +167,84 @@ async def list_flows(
         .offset(offset)
     )
     return list(result.scalars())
+
+
+async def summarise_flows(
+    session: AsyncSession, flows: list[Flow]
+) -> dict[uuid.UUID, dict[str, Any]]:
+    """Per-flow facts the list needs: size, trigger, and the last run.
+
+    Three queries for the whole page rather than three per row. A list that
+    fires a request per flow is how a page with twenty flows becomes a page
+    that takes two seconds and hammers the database.
+    """
+    if not flows:
+        return {}
+
+    ids = [flow.id for flow in flows]
+    summary: dict[uuid.UUID, dict[str, Any]] = {
+        flow.id: {
+            "node_count": 0,
+            "trigger_type": None,
+            "last_run_status": None,
+            "last_run_at": None,
+            "next_run_at": None,
+        }
+        for flow in flows
+    }
+
+    # The version each flow actually presents: what is published, or the
+    # latest draft when nothing is. Reading the graph is how node count and
+    # trigger type are known at all — they are not columns.
+    latest = (
+        select(FlowVersion.flow_id, func.max(FlowVersion.version).label("version"))
+        .where(FlowVersion.flow_id.in_(ids))
+        .group_by(FlowVersion.flow_id)
+        .subquery()
+    )
+    versions = await session.execute(
+        select(FlowVersion).join(
+            latest,
+            (FlowVersion.flow_id == latest.c.flow_id) & (FlowVersion.version == latest.c.version),
+        )
+    )
+    published_ids = {flow.published_version_id for flow in flows if flow.published_version_id}
+    published = await session.execute(
+        select(FlowVersion).where(FlowVersion.id.in_(published_ids or {uuid.uuid4()}))
+    )
+    by_flow: dict[uuid.UUID, FlowVersion] = {v.flow_id: v for v in versions.scalars()}
+    by_flow.update({v.flow_id: v for v in published.scalars()})
+
+    for flow_id, version in by_flow.items():
+        graph = version.graph or {}
+        nodes = graph.get("nodes") or []
+        summary[flow_id]["node_count"] = len(nodes)
+        trigger = next(
+            (n.get("type") for n in nodes if str(n.get("type", "")).startswith("trigger.")), None
+        )
+        summary[flow_id]["trigger_type"] = trigger
+
+    # The most recent run per flow, in one pass.
+    runs = await session.execute(
+        select(Run.flow_id, Run.status, Run.created_at)
+        .where(Run.flow_id.in_(ids))
+        .order_by(Run.flow_id, Run.created_at.desc())
+    )
+    for flow_id, status, created_at in runs:
+        entry = summary[flow_id]
+        if entry["last_run_at"] is None:
+            entry["last_run_status"] = str(status)
+            entry["last_run_at"] = created_at
+
+    schedules = await session.execute(
+        select(FlowSchedule.flow_id, FlowSchedule.next_run_at).where(
+            FlowSchedule.flow_id.in_(ids)
+        )
+    )
+    for flow_id, next_run_at in schedules:
+        summary[flow_id]["next_run_at"] = next_run_at
+
+    return summary
 
 
 # ---------------------------------------------------------------------------

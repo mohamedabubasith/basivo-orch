@@ -50,6 +50,7 @@ from basivo_orch.flows.schemas import (
     FlowCreate,
     FlowDetail,
     FlowRead,
+    FlowSummary,
     FlowUpdate,
     NodeTypeRead,
     RunAccepted,
@@ -140,16 +141,28 @@ async def create_flow(
     )
 
 
-@management_router.get("/orgs/{organization_id}/flows", response_model=list[FlowRead])
+@management_router.get("/orgs/{organization_id}/flows", response_model=list[FlowSummary])
 async def list_flows(
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
     context: OrgContext = Depends(require(Permission.FLOW_READ)),
     session: AsyncSession = Depends(get_async_session),
-) -> list[Flow]:
-    return await service.list_flows(
+) -> list[FlowSummary]:
+    """The list, with what the list actually needs.
+
+    Name and slug alone left the page unable to answer the questions it is
+    opened with — what starts this, how big is it, did the last run pass — so
+    each row carries them, gathered in a fixed number of queries rather than
+    one per flow.
+    """
+    flows = await service.list_flows(
         session, organization_id=context.organization_id, limit=limit, offset=offset
     )
+    summaries = await service.summarise_flows(session, flows)
+    return [
+        FlowSummary(**FlowRead.model_validate(flow).model_dump(), **summaries[flow.id])
+        for flow in flows
+    ]
 
 
 async def _load_flow(session: AsyncSession, organization_id: uuid.UUID, flow_id: uuid.UUID) -> Flow:

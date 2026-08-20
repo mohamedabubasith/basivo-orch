@@ -14,7 +14,6 @@ import { Link, useNavigate } from "react-router-dom";
 import { ApiError, api } from "../../lib/api";
 import { useWorkspace } from "../../lib/workspace";
 import { Alert, Button, Card, Field, PageLoader } from "../../components/ui";
-import { StatusPip } from "../../components/charts";
 import { PageHeader, RelativeTime } from "./bits";
 
 interface Flow {
@@ -25,7 +24,27 @@ interface Flow {
   published_version_id: string | null;
   created_at: string;
   updated_at: string;
+  node_count: number;
+  trigger_type: string | null;
+  last_run_status: string | null;
+  last_run_at: string | null;
+  next_run_at: string | null;
 }
+
+/** What starts a flow, in the words a person would use. */
+const TRIGGER_LABEL: Record<string, string> = {
+  "trigger.manual": "Manual",
+  "trigger.webhook": "Webhook",
+  "trigger.schedule": "Scheduled",
+};
+
+const RUN_TONE: Record<string, "good" | "bad" | "warn"> = {
+  succeeded: "good",
+  failed: "bad",
+  running: "warn",
+  queued: "warn",
+  cancelled: "warn",
+};
 
 export function Flows() {
   const { orgId } = useWorkspace();
@@ -98,44 +117,102 @@ export function Flows() {
           </div>
         </Card>
       ) : (
-        <ul className="space-y-2.5">
-          {flows.map((flow, index) => (
-            <motion.li
-              key={flow.id}
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: Math.min(index * 0.03, 0.25), duration: 0.25 }}
-            >
-              <div className="surface flex items-center gap-2 rounded-2xl transition-colors hover:border-ink-500">
+        <ul className="overflow-hidden rounded-2xl border border-ink-800/70">
+          {flows.map((flow, index) => {
+            const published = Boolean(flow.published_version_id);
+            const tone = flow.last_run_status ? RUN_TONE[flow.last_run_status] : null;
+            return (
+              <motion.li
+                key={flow.id}
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: Math.min(index * 0.02, 0.2), duration: 0.2 }}
+                // One list with hairline dividers, not a stack of floating
+                // cards: eleven cards at 130px each is two screens of scroll
+                // for information that fits in one.
+                className="group relative border-b border-ink-800/70 bg-ink-900/30 transition-colors last:border-b-0 hover:bg-ink-800/40"
+              >
+                {/* Published or draft, readable before any label is: the same
+                    rail device as the node cards and the stat tiles. */}
+                <span
+                  aria-hidden="true"
+                  className="absolute inset-y-0 left-0 w-[3px]"
+                  style={{
+                    background: published ? "var(--status-good)" : "var(--status-warn)",
+                    opacity: published ? 0.9 : 0.55,
+                  }}
+                />
                 <Link
                   to={`/app/flows/${flow.id}`}
-                  className="flex min-w-0 flex-1 flex-wrap items-center gap-4 p-5"
+                  className="flex min-w-0 items-center gap-4 py-3 pr-14 pl-5"
                 >
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-3">
-                      <p className="truncate font-medium text-ink-100">{flow.name}</p>
-                      {flow.published_version_id ? (
-                        <StatusPip tone="good">Published</StatusPip>
-                      ) : (
-                        <StatusPip tone="warn">Draft</StatusPip>
+                  <div className="min-w-0 flex-[2]">
+                    <div className="flex items-baseline gap-2">
+                      <p className="truncate text-[0.95rem] font-medium text-ink-100">
+                        {flow.name}
+                      </p>
+                      {!published && (
+                        <span className="flex-none text-[0.68rem] text-[var(--status-warn)]">
+                          Draft
+                        </span>
                       )}
                     </div>
-                    <p className="mt-1 truncate text-sm text-ink-400">
-                      {flow.description || <span className="text-ink-600">No description</span>}
+                    {/* The slug identifies it to other systems; "no
+                        description" repeated down a page is noise, so it is
+                        simply absent. */}
+                    <p className="mt-0.5 truncate font-mono text-[0.68rem] text-ink-500">
+                      {flow.slug}
                     </p>
                   </div>
-                  <div className="text-right text-xs text-ink-500">
-                    <p className="font-mono">{flow.slug}</p>
-                    <p className="mt-1">
-                      Updated <RelativeTime value={flow.updated_at} />
-                    </p>
+
+                  {/* The three facts the page is opened to find. */}
+                  <div className="hidden flex-1 items-center gap-5 text-xs text-ink-400 sm:flex">
+                    <span className="w-20 flex-none">
+                      {flow.trigger_type ? TRIGGER_LABEL[flow.trigger_type] ?? "Trigger" : "—"}
+                    </span>
+                    <span className="w-16 flex-none [font-variant-numeric:tabular-nums]">
+                      {flow.node_count === 0
+                        ? "empty"
+                        : `${flow.node_count} node${flow.node_count > 1 ? "s" : ""}`}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate">
+                      {flow.last_run_status && tone ? (
+                        <span className="inline-flex items-center gap-1.5">
+                          <span
+                            className="h-1.5 w-1.5 flex-none rounded-full"
+                            style={{
+                              background:
+                                tone === "good"
+                                  ? "var(--status-good)"
+                                  : tone === "bad"
+                                    ? "var(--status-bad)"
+                                    : "var(--status-warn)",
+                            }}
+                            aria-hidden="true"
+                          />
+                          {flow.last_run_status}
+                          {flow.last_run_at && (
+                            <span className="text-ink-500">
+                              <RelativeTime value={flow.last_run_at} />
+                            </span>
+                          )}
+                        </span>
+                      ) : (
+                        <span className="text-ink-600">never run</span>
+                      )}
+                    </span>
                   </div>
                 </Link>
+
+                {/* Revealed on hover rather than a permanent bordered box on
+                    every row: destructive controls should not be the loudest
+                    thing on a list. Focus shows it too, so it stays reachable
+                    from the keyboard. */}
                 <button
                   onClick={() => void remove(flow)}
                   aria-label={`Delete flow ${flow.name}`}
                   title="Delete this flow"
-                  className="mr-4 flex-none rounded-lg border border-ink-700 p-2.5 text-ink-500 transition-colors hover:border-[var(--status-bad)] hover:text-[var(--status-bad)]"
+                  className="absolute top-1/2 right-4 -translate-y-1/2 rounded-lg p-2 text-ink-500 opacity-0 transition-all group-hover:opacity-100 hover:bg-ink-800 hover:text-[var(--status-bad)] focus-visible:opacity-100"
                 >
                   <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" aria-hidden="true">
                     <path
@@ -147,9 +224,9 @@ export function Flows() {
                     />
                   </svg>
                 </button>
-              </div>
-            </motion.li>
-          ))}
+              </motion.li>
+            );
+          })}
         </ul>
       )}
     </div>

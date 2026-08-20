@@ -312,17 +312,17 @@ function WorkspaceGate() {
 function SidebarContent({ collapsed, onToggle }: { collapsed: boolean; onToggle?: () => void }) {
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      <div className={cx("flex h-16 flex-none items-center", collapsed ? "justify-center" : "px-5")}>
+      <div className={cx("flex h-14 flex-none items-center", collapsed ? "justify-center" : "px-5")}>
         {collapsed ? <Logo className="[&>span:last-child]:hidden" /> : <Logo />}
       </div>
 
       {!collapsed && <WorkspaceSwitcher />}
 
-      <nav className="mt-2 flex-1 overflow-y-auto px-3">
+      <nav className="mt-1 flex-1 overflow-y-auto px-3">
         {NAV.map((group) => (
-          <div key={group.heading} className="mb-5">
+          <div key={group.heading} className="mb-3.5">
             {!collapsed && (
-              <p className="mb-1.5 px-3 text-[0.68rem] font-medium tracking-[0.12em] text-ink-500 uppercase">
+              <p className="mb-1 px-3 text-[0.62rem] font-medium tracking-[0.14em] text-ink-600 uppercase">
                 {group.heading}
               </p>
             )}
@@ -333,7 +333,7 @@ function SidebarContent({ collapsed, onToggle }: { collapsed: boolean; onToggle?
                     {({ isActive }) => (
                       <span
                         className={cx(
-                          "relative flex items-center rounded-lg py-2 text-sm transition-colors",
+                          "relative flex items-center rounded-lg py-1.5 text-[0.86rem] transition-colors",
                           collapsed ? "justify-center px-2" : "gap-3 px-3",
                           isActive ? "text-ink-100" : "text-ink-400 hover:text-ink-100",
                         )}
@@ -367,29 +367,31 @@ function SidebarContent({ collapsed, onToggle }: { collapsed: boolean; onToggle?
         ))}
       </nav>
 
-      {!collapsed && (
-        <div className="flex-none px-3 pb-3">
-          <ThemeToggle />
-        </div>
-      )}
-
       <AccountBlock collapsed={collapsed} />
 
-      {onToggle && (
-        <button
-          onClick={onToggle}
-          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          className="flex h-11 flex-none items-center justify-center border-t border-ink-800/70 text-ink-500 transition-colors hover:bg-ink-850 hover:text-ink-200"
-        >
-          <svg
-            viewBox="0 0 24 24"
-            className={cx("h-4 w-4 transition-transform", collapsed && "rotate-180")}
-            {...stroke}
+      <div
+        className={cx(
+          "flex flex-none items-center border-t border-ink-800/70 px-3 py-2",
+          collapsed ? "justify-center" : "justify-between",
+        )}
+      >
+        {!collapsed && <ThemeToggle compact />}
+        {onToggle && (
+          <button
+            onClick={onToggle}
+            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            className="rounded-lg p-2 text-ink-500 transition-colors hover:bg-ink-850 hover:text-ink-200"
           >
-            <path d="M14 7l-5 5 5 5" />
-          </svg>
-        </button>
-      )}
+            <svg
+              viewBox="0 0 24 24"
+              className={cx("h-4 w-4 transition-transform", collapsed && "rotate-180")}
+              {...stroke}
+            >
+              <path d="M14 7l-5 5 5 5" />
+            </svg>
+          </button>
+        )}
+      </div>
     </div>
   );
 }
@@ -407,9 +409,9 @@ function WorkspaceSwitcher() {
         onClick={() => setOpen((value) => !value)}
         aria-haspopup="listbox"
         aria-expanded={open}
-        className="flex w-full items-center gap-2.5 rounded-xl border border-ink-700/60 bg-ink-850/60 px-3 py-2.5 text-left transition-colors hover:border-ink-600"
+        className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-ink-850"
       >
-        <span className="grid h-7 w-7 flex-none place-items-center rounded-lg bg-gradient-to-br from-brand-500 to-accent-500 text-xs font-semibold text-white">
+        <span className="grid h-6 w-6 flex-none place-items-center rounded-md bg-gradient-to-br from-brand-500 to-accent-500 text-[0.68rem] font-semibold text-white">
           {(current?.name ?? "?").charAt(0).toUpperCase()}
         </span>
         <span className="min-w-0 flex-1">
