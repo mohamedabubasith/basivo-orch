@@ -11,7 +11,7 @@ that fails loudly if it is missing.
 
 | File | Edit | Why it is not upstream |
 |---|---|---|
-| `auth/authz.py` | `Permission.FLOW_*`, `RUN_*`, `APIKEY_*` members and their entries in `ROLE_PERMISSIONS` | Product-specific verbs. The scaffold cannot know what a flow is. |
+| `auth/authz.py` | `Permission.FLOW_*`, `RUN_*`, `APIKEY_*`, `CREDENTIAL_*`, `SKILL_*` members and their entries in `ROLE_PERMISSIONS` | Product-specific verbs. The scaffold cannot know what a flow or a skill is. |
 | `auth/authz.py` | `require()` depends on `current_app_user` instead of `current_active_user` | Puts the email-confirmation gate on every org-scoped route at once. See `basivo_orch/gate.py`. |
 | `auth/routers/orgs.py` | `create_organization` depends on `current_app_user` | Creating a workspace is workspace access; gating reads but not creation lets an unconfirmed account leave an orphan behind the wall. |
 
