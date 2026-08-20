@@ -11,7 +11,7 @@ import uuid
 
 from basivo_orch.flows import service
 from basivo_orch.flows.graph import Graph
-from basivo_orch.flows.models import Flow, FlowVersion, Run, RunStatus, TriggerKind
+from basivo_orch.flows.models import Flow, FlowVersion, RunStatus, TriggerKind
 
 WEBHOOK_FLOW = Graph.model_validate(
     {
