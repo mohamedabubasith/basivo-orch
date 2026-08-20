@@ -44,7 +44,9 @@ export function CredentialPicker({
   value: string;
   onChange: (value: string) => void;
 }) {
-  const [credentials, setCredentials] = useState<CredentialOption[] | null>(null);
+  const [credentials, setCredentials] = useState<CredentialOption[] | null>(
+    null,
+  );
 
   useEffect(() => {
     if (!orgId) return;
@@ -62,7 +64,11 @@ export function CredentialPicker({
 
   return (
     <div>
-      <select value={value} onChange={(event) => onChange(event.target.value)} className={INPUT}>
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className={INPUT}
+      >
         <option value="">
           {provider === "github" || provider === "gitlab"
             ? "Pick a credential…"
@@ -133,7 +139,9 @@ export function ModelPicker({
         if (result.supported && !result.error) setModels(result.models);
         else if (result.error) setFetchError(result.error);
       })
-      .catch(() => !cancelled && setFetchError("Could not fetch the model list."))
+      .catch(
+        () => !cancelled && setFetchError("Could not fetch the model list."),
+      )
       .finally(() => !cancelled && setLoading(false));
     return () => {
       cancelled = true;
@@ -143,12 +151,18 @@ export function ModelPicker({
   if (models && models.length > 0) {
     return (
       <div>
-        <select value={value} onChange={(event) => onChange(event.target.value)} className={INPUT}>
+        <select
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          className={INPUT}
+        >
           {/* A saved model that the key can no longer see (renamed, retired,
               or configured before the credential) must not be silently
               swapped for the first list entry — keep it selectable and let
               the run surface the provider's own error if it is truly gone. */}
-          {value && !models.includes(value) && <option value={value}>{value} (saved)</option>}
+          {value && !models.includes(value) && (
+            <option value={value}>{value} (saved)</option>
+          )}
           {models.map((model) => (
             <option key={model} value={model}>
               {model}
@@ -170,9 +184,14 @@ export function ModelPicker({
         onChange={(event) => onChange(event.target.value)}
         className={cx(INPUT, "font-mono text-[0.8rem]")}
       />
-      {loading && <p className="mt-1 text-[0.68rem] text-ink-500">Fetching model list…</p>}
+      {loading && (
+        <p className="mt-1 text-[0.68rem] text-ink-500">Fetching model list…</p>
+      )}
       {fetchError && (
-        <p className="mt-1 text-[0.68rem]" style={{ color: "var(--status-warn)" }}>
+        <p
+          className="mt-1 text-[0.68rem]"
+          style={{ color: "var(--status-warn)" }}
+        >
           Model list unavailable: {fetchError.slice(0, 120)}
         </p>
       )}
@@ -185,7 +204,6 @@ export function ModelPicker({
   );
 }
 
-
 /**
  * The code node's editor: a real writing surface, not a one-line input.
  *
@@ -195,3 +213,122 @@ export function ModelPicker({
  * and Tab inserts indentation instead of throwing focus to the next field,
  * which is the single behaviour that makes people give up on textarea code.
  */
+interface SkillOption {
+  id: string;
+  name: string;
+  description: string;
+  instruction_chars: number;
+  resource_count: number;
+}
+
+/**
+ * Which of the workspace's skills this agent may use.
+ *
+ * Checkboxes rather than a multi-select, because the description has to be
+ * visible while choosing: it is what the agent reads when deciding whether to
+ * open the skill, so a picker that shows only names hides the thing that
+ * actually determines behaviour.
+ *
+ * The count of selected skills is shown as prompt weight, not as a number of
+ * items — ten skills cost ten lines, and saying so is what stops someone
+ * ticking every box "just in case" and wondering later why runs got slower.
+ */
+export function SkillPicker({
+  orgId,
+  value,
+  onChange,
+}: {
+  orgId?: string | null;
+  value: string[];
+  onChange: (value: string[]) => void;
+}) {
+  const [skills, setSkills] = useState<SkillOption[] | null>(null);
+
+  useEffect(() => {
+    if (!orgId) return;
+    let cancelled = false;
+    api
+      .get<SkillOption[]>(`/api/v1/orgs/${orgId}/skills`)
+      .then((list) => !cancelled && setSkills(list))
+      .catch(() => !cancelled && setSkills([]));
+    return () => {
+      cancelled = true;
+    };
+  }, [orgId]);
+
+  if (skills === null)
+    return <p className="text-[0.7rem] text-ink-500">Loading skills…</p>;
+
+  if (skills.length === 0)
+    return (
+      <p className="text-[0.7rem] leading-relaxed text-ink-500">
+        No skills in this workspace yet. Write one under{" "}
+        <a
+          href="/app/skills"
+          className="text-brand-300 underline underline-offset-2"
+        >
+          Skills
+        </a>{" "}
+        — a procedure the agent opens when it applies, instead of a longer
+        prompt on every run.
+      </p>
+    );
+
+  const selected = new Set(value);
+  // What ticking a box actually costs: one catalogue line each, now; the body
+  // only if the agent opens it.
+  const lines = selected.size;
+
+  function toggle(id: string) {
+    const next = new Set(selected);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    // Kept in library order rather than click order, so two agents with the
+    // same skills produce the same graph JSON.
+    onChange(
+      skills!.filter((skill) => next.has(skill.id)).map((skill) => skill.id),
+    );
+  }
+
+  return (
+    <div>
+      <ul className="max-h-64 space-y-1 overflow-y-auto rounded-lg border border-ink-700 bg-ink-950/40 p-1.5">
+        {skills.map((skill) => {
+          const on = selected.has(skill.id);
+          return (
+            <li key={skill.id}>
+              <label
+                className={cx(
+                  "flex cursor-pointer gap-2.5 rounded-lg p-2 transition-colors",
+                  on ? "bg-ink-800/70" : "hover:bg-ink-800/40",
+                )}
+              >
+                <input
+                  type="checkbox"
+                  checked={on}
+                  onChange={() => toggle(skill.id)}
+                  className="mt-0.5 h-3.5 w-3.5 flex-none accent-[var(--color-brand-400)]"
+                />
+                <span className="min-w-0">
+                  <span className="block font-mono text-[0.72rem] text-ink-100">
+                    {skill.name}
+                  </span>
+                  <span className="mt-0.5 block text-[0.68rem] leading-relaxed text-ink-500">
+                    {skill.description}
+                  </span>
+                </span>
+              </label>
+            </li>
+          );
+        })}
+      </ul>
+      <p className="mt-1.5 text-[0.68rem] leading-relaxed text-ink-500">
+        {lines === 0
+          ? "None selected — the agent is not told the library exists."
+          : `${lines} skill${lines > 1 ? "s" : ""} offered: ${lines} line${
+              lines > 1 ? "s" : ""
+            } of prompt now, and the full instructions only if the agent opens one.`}
+      </p>
+    </div>
+  );
+}

@@ -127,9 +127,7 @@ async def test_telegram_without_an_image_sends_a_message():
         return httpx.Response(200, json={"ok": True, "result": {"message_id": 3, "chat": {}}})
 
     result, _, _ = await run_post(
-        SocialPostConfig(
-            platform="telegram", credential_id="cred", text="text only", target="@c"
-        ),
+        SocialPostConfig(platform="telegram", credential_id="cred", text="text only", target="@c"),
         handler,
         provider="telegram",
     )
@@ -267,9 +265,7 @@ async def test_a_credential_for_another_platform_is_refused():
         ctx = make_context(_Recorder(), http, provider="discord")
         with pytest.raises(NodeError, match="not 'telegram'"):
             await SocialPostNode().run(
-                SocialPostConfig(
-                    platform="telegram", credential_id="cred", text="hi", target="@c"
-                ),
+                SocialPostConfig(platform="telegram", credential_id="cred", text="hi", target="@c"),
                 ctx,
             )
 

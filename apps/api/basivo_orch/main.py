@@ -19,6 +19,7 @@ from basivo_orch.flows.events import RedisClient
 from basivo_orch.flows.router import external_router, hooks_router, management_router
 from basivo_orch.gate import gate_is_active, warn_if_gate_is_inert
 from basivo_orch.logging import configure_logging, get_logger
+from basivo_orch.skills.router import router as skills_router
 
 log = get_logger(__name__)
 
@@ -125,6 +126,7 @@ def create_app() -> FastAPI:
     # the paths the SOW specifies, because those go into other people's code.
     app.include_router(management_router, prefix=settings.API_V1_PREFIX)
     app.include_router(credentials_router, prefix=settings.API_V1_PREFIX)
+    app.include_router(skills_router, prefix=settings.API_V1_PREFIX)
     app.include_router(external_router)
     app.include_router(hooks_router)
 

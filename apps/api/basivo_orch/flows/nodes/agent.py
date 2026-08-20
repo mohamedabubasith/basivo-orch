@@ -68,6 +68,14 @@ from basivo_orch.flows.nodes.base import Node, NodeContext, NodeError, NodeResul
 from basivo_orch.flows.nodes.code import PythonExecutionError, run_python
 from basivo_orch.flows.nodes.http import assert_public_url
 from basivo_orch.flows.nodes.models import build_chat_model
+from basivo_orch.flows.nodes.skills import (
+    LoadedSkill,
+    SkillBudget,
+    skill_tools,
+)
+from basivo_orch.flows.nodes.skills import (
+    catalogue as skill_catalogue,
+)
 from basivo_orch.flows.templating import render_value
 
 #: Which Model class a provider's responses are shaped like. Most providers
@@ -238,6 +246,21 @@ class AgentConfig(BaseModel):
         default=None, ge=0, description="Abort the run if this is exceeded mid-loop."
     )
 
+    # -- skills ----------------------------------------------------------------
+    #: Ids of skills from the workspace library this agent may use.
+    #:
+    #: The agent is told only their names and descriptions; it reads a body by
+    #: calling `load_skill`, so listing ten skills costs ten lines of prompt
+    #: rather than ten procedures. Skills deleted from the library are skipped
+    #: with a `skill.missing` step rather than failing the run.
+    skills: list[str] = Field(default_factory=list, max_length=25, title="Skills")
+    #: Total characters of skill text one run may pull in. The ceiling that
+    #: keeps "the agent may consult the library" from meaning "every run
+    #: carries the library".
+    skill_budget_chars: int = Field(
+        default=60000, ge=1000, le=400000, title="Skill budget (characters)"
+    )
+
     # -- memory ----------------------------------------------------------------
     #: Whether this agent remembers earlier runs.
     #:
@@ -248,7 +271,7 @@ class AgentConfig(BaseModel):
     #: "conversation" — the human turn and the final reply of previous runs are
     #: replayed before the new prompt, so the agent can be told "the fix you
     #: suggested didn't work" and know what fix that was.
-    memory: Literal["off", "conversation"] = "off"
+    memory: Literal["off", "conversation"] = Field(default="off", title="Memory")
     #: Which conversation to load. Supports {{ references }}, and normally
     #: should use one: `{{ input.payload.issue.number }}` keeps one thread per
     #: GitHub issue, `{{ input.payload.chat_id }}` one per chat. An empty key
@@ -258,13 +281,14 @@ class AgentConfig(BaseModel):
     memory_key: str = Field(
         default="",
         max_length=300,
+        title="Memory key",
         description="One thread per rendered value. Supports {{ references }}.",
     )
     #: How many past turns to replay, newest kept. This is a cost control as
     #: much as a relevance one: history is resent in full on every model call,
     #: so an unbounded memory makes each run more expensive than the last until
     #: it hits the context limit.
-    memory_window: int = Field(default=20, ge=2, le=200)
+    memory_window: int = Field(default=20, ge=2, le=200, title="Memory window")
 
     # -- output ----------------------------------------------------------------
     response_format: Literal["text", "json"] = "text"
@@ -272,6 +296,47 @@ class AgentConfig(BaseModel):
     # -- transport -------------------------------------------------------------
     base_url: str = Field(default="", max_length=300, description="Overrides the credential's.")
     request_timeout_seconds: float = Field(default=120.0, ge=5, le=600)
+
+
+async def _load_skills(
+    config: AgentConfig, ctx: NodeContext
+) -> tuple[list[LoadedSkill], list[Any]]:
+    """Fetch the selected skills and build the tools that read them.
+
+    Returns ([], []) when none are selected, so an agent without skills gets no
+    extra tools at all — an empty `load_skill` in the list would be a tool the
+    model can only fail with.
+    """
+    if not config.skills or ctx.load_skills is None:
+        return [], []
+
+    skills = await ctx.load_skills(list(config.skills))
+    missing = len(config.skills) - len(skills)
+    if missing > 0:
+        # Named as a count, not ids: the ids are in the graph, and what the
+        # person reading the log needs to know is that the agent was offered
+        # less than the flow says it was.
+        await ctx.step(
+            "skill.missing",
+            {
+                "expected": len(config.skills),
+                "found": len(skills),
+                "note": "Skills removed from the library are skipped.",
+            },
+        )
+    if not skills:
+        return [], []
+
+    budget = SkillBudget(limit=config.skill_budget_chars)
+    tools = skill_tools(ctx, skills, budget=budget)
+    await ctx.step(
+        "skill.offered",
+        {
+            "skills": [skill.name for skill in skills],
+            "budget_chars": budget.limit,
+        },
+    )
+    return skills, tools
 
 
 def _memory_subject(config: AgentConfig, template: dict[str, Any]) -> str:
@@ -381,6 +446,8 @@ class AgentNode(Node):
             stop=config.stop_sequences or None,
         )
 
+        skills, skill_extras = await _load_skills(config, ctx)
+
         template = ctx.template_context()
         system = str(render_value(config.system, template)) if config.system else ""
         prompt = render_value(config.prompt, template)
@@ -397,6 +464,9 @@ class AgentNode(Node):
             # instead of an opaque `UnexpectedModelBehavior` from a validator
             # that was never going to accept an open-ended shape.
             system = (f"{system}\n\nRespond with a single JSON object and nothing else.").strip()
+
+        if skills:
+            system = (system + skill_catalogue(skills)).strip()
 
         tool_budget = {"used": 0}
 
@@ -438,7 +508,9 @@ class AgentNode(Node):
             )
 
         totals = RunTotals()
-        tools = [guard(definition) for definition in config.tools]
+        # Skill tools first: they are the ones the catalogue told the model
+        # about by name, and a model scanning a tool list finds them sooner.
+        tools = [*skill_extras, *[guard(definition) for definition in config.tools]]
 
         if config.sub_agents and config.team_mode == "handover":
             await ctx.step(
@@ -449,6 +521,7 @@ class AgentNode(Node):
                     "mode": "handover",
                     "team": ["main", *[sub.name for sub in config.sub_agents]],
                     "tools": [tool.name for tool in config.tools],
+                    "skills": [skill.name for skill in skills],
                 },
             )
             members = [
@@ -555,6 +628,7 @@ class AgentNode(Node):
                 "provider": config.provider,
                 "model": config.model,
                 "tools": [tool.name for tool in config.tools],
+                "skills": [skill.name for skill in skills],
                 "sub_agents": [sub.name for sub in config.sub_agents],
                 "max_iterations": config.max_iterations,
             },

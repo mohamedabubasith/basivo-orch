@@ -5,6 +5,7 @@ import { ThemeProvider } from "./lib/theme";
 import { Landing } from "./routes/Landing";
 import { ApiKeys } from "./routes/app/ApiKeys";
 import { Credentials } from "./routes/app/Credentials";
+import { Skills } from "./routes/app/Skills";
 import { AppShell, RequireAuth, RequireVerified } from "./routes/app/AppShell";
 import { Builder } from "./routes/app/Builder";
 import { Dashboard } from "./routes/app/Dashboard";
@@ -69,6 +70,7 @@ function AppRoutes() {
             <Route path="runs/:runId" element={<RunDetail />} />
             <Route path="api-keys" element={<ApiKeys />} />
             <Route path="credentials" element={<Credentials />} />
+            <Route path="skills" element={<Skills />} />
             <Route path="security" element={<Security />} />
           </Route>
         </Route>

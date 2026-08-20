@@ -48,6 +48,7 @@ from basivo_orch.flows.models import (
     RunStatus,
     TriggerKind,
 )
+from basivo_orch.skills.models import Skill
 from tests.flows.fakes import FakeChatModel, says, tool_call, turn_number
 
 
@@ -726,6 +727,133 @@ async def test_memory_is_not_readable_across_tenants(session, organization, monk
     await Engine(session, run=run, graph=graph, redis_client=None).execute()
 
     assert seen[0] == ["hello"], "the other tenant's turn must not appear"
+
+
+async def test_an_agent_loads_a_skill_from_the_library_mid_run(
+    session, organization, make_run, monkeypatch
+):
+    """Skills through the real store: catalogue in the prompt, body on demand.
+
+    The assertion that matters is the negative one — the procedure is absent
+    from the first model call. If it were pasted into the system prompt this
+    test would still pass on "the agent followed it", which is why the prompt
+    itself is inspected.
+    """
+    seen: list[list[str]] = []
+
+    async def fake_build_model(_ctx, **_kwargs):
+        def respond(messages):
+            seen.append([str(m.content) for m in messages])
+            if turn_number(messages) == 0:
+                return tool_call("load_skill", {"name": "refund-policy"}, call_id="s1")
+            return says("Refund approved under the 30-day rule.")
+
+        return FakeChatModel(respond=respond)
+
+    monkeypatch.setattr("basivo_orch.flows.nodes.agent.build_chat_model", fake_build_model)
+
+    skill = Skill(
+        organization_id=organization.id,
+        name="refund-policy",
+        description="Use when a customer asks for money back, including chargebacks.",
+        instructions="# Refunds\n\nUnder 30 days, refund in full without asking.",
+        resources=[{"name": "exceptions.md", "content": "Enterprise: ask legal."}],
+    )
+    session.add(skill)
+    await session.commit()
+    await session.refresh(skill)
+
+    graph = Graph.model_validate(
+        {
+            "nodes": [
+                {"id": "t", "type": "trigger.manual", "config": {}},
+                {
+                    "id": "support",
+                    "type": "agent.llm",
+                    "config": {
+                        "prompt": "The customer wants a refund.",
+                        "skills": [str(skill.id)],
+                    },
+                },
+            ],
+            "edges": [{"source": "t", "target": "support"}],
+        }
+    )
+
+    run = await run_graph(session, make_run, graph)
+    assert run.status is RunStatus.SUCCEEDED
+    assert run.output["result"]["text"] == "Refund approved under the 30-day rule."
+
+    # Turn one: the catalogue, not the procedure.
+    assert '"refund-policy"' in seen[0][0]
+    assert "refund in full" not in " ".join(seen[0])
+    # Turn two: the procedure, having been asked for.
+    assert "refund in full" in " ".join(seen[1])
+    # The bundled file rode along with neither.
+    assert "ask legal" not in " ".join(seen[1])
+
+    events = await replay(session, run.id)
+    steps = [e.data.get("step") for e in events if e.type == "node.step"]
+    assert steps.index("skill.offered") < steps.index("skill.loaded")
+
+    # The library learns what earns its place.
+    await session.refresh(skill)
+    assert skill.load_count == 1
+
+
+async def test_another_workspaces_skill_is_invisible_to_the_engine(
+    session, organization, make_run, monkeypatch
+):
+    """The id is in the graph, so the tenant filter is the only thing stopping
+    a copied flow from reading someone else's process."""
+    seen: list[list[str]] = []
+
+    async def fake_build_model(_ctx, **_kwargs):
+        def respond(messages):
+            seen.append([str(m.content) for m in messages])
+            return says("ok")
+
+        return FakeChatModel(respond=respond)
+
+    monkeypatch.setattr("basivo_orch.flows.nodes.agent.build_chat_model", fake_build_model)
+
+    intruder = Organization(name="Other", slug=f"other-{uuid.uuid4().hex[:8]}")
+    session.add(intruder)
+    await session.flush()
+    theirs = Skill(
+        organization_id=intruder.id,
+        name="their-secret-process",
+        description="Use when handling their most valuable accounts.",
+        instructions="Never discount below 40%.",
+    )
+    session.add(theirs)
+    await session.commit()
+    await session.refresh(theirs)
+
+    graph = Graph.model_validate(
+        {
+            "nodes": [
+                {"id": "t", "type": "trigger.manual", "config": {}},
+                {
+                    "id": "a",
+                    "type": "agent.llm",
+                    "config": {"prompt": "hello", "skills": [str(theirs.id)]},
+                },
+            ],
+            "edges": [{"source": "t", "target": "a"}],
+        }
+    )
+
+    run = await run_graph(session, make_run, graph)
+
+    # The run survives — a missing skill is not a failure — but nothing of
+    # theirs reaches the model, not even the name.
+    assert run.status is RunStatus.SUCCEEDED
+    assert "their-secret-process" not in " ".join(seen[0])
+    assert "Never discount" not in " ".join(seen[0])
+    events = await replay(session, run.id)
+    missing = [e.data for e in events if e.data.get("step") == "skill.missing"]
+    assert missing and missing[0]["found"] == 0
 
 
 EXERCISED_NODE_TYPES = {

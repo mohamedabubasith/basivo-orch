@@ -219,9 +219,7 @@ def test_a_composition_with_no_timeline_is_caught_before_rendering():
     exposed timeline renders *successfully* as a motionless video."""
     from basivo_orch.flows.nodes.video import composition_problems
 
-    still = (
-        '<div id="stage" data-composition-id="p" data-duration="5"><h1>Hi</h1></div>'
-    )
+    still = '<div id="stage" data-composition-id="p" data-duration="5"><h1>Hi</h1></div>'
     assert composition_problems(still) == [
         "missing the paused GSAP timeline exposed on window.__timelines"
     ]

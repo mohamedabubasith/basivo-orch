@@ -25,6 +25,7 @@ HTTP are where the wall-clock actually goes; the database work is microseconds.
 from __future__ import annotations
 
 import asyncio
+import uuid
 from collections import defaultdict
 from datetime import UTC, datetime
 from typing import Any
@@ -236,6 +237,69 @@ class Engine:
             row.turns = turns
             row.updated_at = datetime.now(UTC)
             await self.session.commit()
+
+    async def _load_skills(self, skill_ids: list[str]) -> list[Any]:
+        """Selected skills, tenant-scoped, in the order the node lists them.
+
+        Missing ids are skipped rather than raising: a flow whose skill was
+        deleted from the library keeps running, and the node logs which ones
+        vanished. Failing the run would let a library edit take down every
+        workflow that referenced it.
+        """
+        from sqlalchemy import select as _select
+
+        from basivo_orch.flows.nodes.skills import LoadedSkill
+        from basivo_orch.skills.models import Skill
+
+        wanted: list[uuid.UUID] = []
+        for value in skill_ids:
+            try:
+                wanted.append(uuid.UUID(str(value)))
+            except (ValueError, AttributeError, TypeError):
+                continue
+        if not wanted:
+            return []
+
+        async with self._db:
+            result = await self.session.execute(
+                _select(Skill).where(
+                    Skill.id.in_(wanted),
+                    Skill.organization_id == self.run.organization_id,
+                )
+            )
+            found = {row.id: row for row in result.scalars()}
+
+        return [
+            LoadedSkill(
+                id=str(found[key].id),
+                name=found[key].name,
+                description=found[key].description,
+                instructions=found[key].instructions,
+                resources=list(found[key].resources or []),
+            )
+            for key in wanted
+            if key in found
+        ]
+
+    async def _record_skill_load(self, skill_id: str) -> None:
+        """Bump the usage counter. Best effort — a run must not fail over it."""
+        from sqlalchemy import update as _update
+
+        from basivo_orch.skills.models import Skill
+
+        try:
+            async with self._db:
+                await self.session.execute(
+                    _update(Skill)
+                    .where(Skill.id == uuid.UUID(str(skill_id)))
+                    # An expression, not a read-modify-write: several nodes can
+                    # load the same skill in one wave, and Python-side
+                    # increments would lose all but the last.
+                    .values(load_count=Skill.load_count + 1)
+                )
+                await self.session.commit()
+        except Exception:  # pragma: no cover - telemetry, never load-bearing
+            log.warning("skill.load_count_failed", skill_id=str(skill_id))
 
     async def execute(self) -> Run:
         http = self._http or httpx.AsyncClient(
@@ -505,6 +569,8 @@ class Engine:
                 load_artifact=self._load_artifact,
                 load_memory=self._load_memory,
                 save_memory=self._save_memory,
+                load_skills=self._load_skills,
+                record_skill_load=self._record_skill_load,
                 http=http,
             )
 

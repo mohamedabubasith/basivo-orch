@@ -429,9 +429,7 @@ async def probe_composition(
     return visible, errors
 
 
-def review(
-    html: str, visible: dict[float, list[str]], errors: list[str]
-) -> list[str]:
+def review(html: str, visible: dict[float, list[str]], errors: list[str]) -> list[str]:
     """Everything wrong with this composition, phrased for the model that wrote it."""
     problems = composition_problems(html)
     problems += [f"JavaScript error: {error}" for error in errors]
@@ -486,9 +484,7 @@ class VideoGeneratorConfig(BaseModel):
     save_preview: bool = True
 
     def dimensions(self) -> tuple[int, int]:
-        return {"landscape": (1920, 1080), "square": (1080, 1080), "story": (1080, 1920)}[
-            self.size
-        ]
+        return {"landscape": (1920, 1080), "square": (1080, 1080), "story": (1080, 1920)}[self.size]
 
 
 class VideoGeneratorNode(Node):
@@ -551,9 +547,10 @@ class VideoGeneratorNode(Node):
             html = strip_code_fences(message_text_of(reply))
 
             problems = review(
-                html, *await probe_composition(
+                html,
+                *await probe_composition(
                     html, width=width, height=height, duration=float(config.duration_seconds)
-                )
+                ),
             )
             await ctx.step(
                 "video.attempt",
@@ -597,7 +594,11 @@ class VideoGeneratorNode(Node):
                 width=width,
                 height=height,
                 config=RenderConfig(
-                    html="x", size="custom", width=width, height=height, scale=1,
+                    html="x",
+                    size="custom",
+                    width=width,
+                    height=height,
+                    scale=1,
                     wait_for_fonts=False,
                 ),
             )

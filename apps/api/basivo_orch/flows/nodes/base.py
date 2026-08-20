@@ -117,6 +117,13 @@ class NodeContext:
     #: Replace what it remembers. Called after a run with the windowed turns.
     save_memory: Callable[..., Awaitable[None]] | None = None
 
+    #: Fetch selected skills from the workspace library, in the order asked
+    #: for, skipping any that have been deleted. Engine-provided: the node
+    #: never touches SQL.
+    load_skills: Callable[..., Awaitable[list[Any]]] | None = None
+    #: Count a skill as used, so the library can show what earns its place.
+    record_skill_load: Callable[..., Awaitable[None]] | None = None
+
     def template_context(self) -> dict[str, Any]:
         return {
             "input": self.input,

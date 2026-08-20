@@ -73,7 +73,8 @@ export function RequireVerified() {
   }, []);
 
   if (required === null) return <PageLoader label="Loading" />;
-  if (required && user && !user.is_verified) return <Navigate to="/confirm-email" replace />;
+  if (required && user && !user.is_verified)
+    return <Navigate to="/confirm-email" replace />;
   return <Outlet />;
 }
 
@@ -127,6 +128,17 @@ const NAV: { heading: string; items: NavItem[] }[] = [
           <svg viewBox="0 0 24 24" {...stroke}>
             <circle cx="12" cy="12" r="8.5" />
             <path d="M12 7.5V12l3 2" />
+          </svg>
+        ),
+      },
+      {
+        to: "/app/skills",
+        label: "Skills",
+        icon: (
+          // An open book: the agent looks something up.
+          <svg viewBox="0 0 24 24" {...stroke}>
+            <path d="M12 6.5C10.5 5.2 8.4 4.7 5 5v13c3.4-.3 5.5.2 7 1.5 1.5-1.3 3.6-1.8 7-1.5V5c-3.4-.3-5.5.2-7 1.5Z" />
+            <path d="M12 6.5v13" />
           </svg>
         ),
       },
@@ -274,7 +286,10 @@ function WorkspaceGate() {
     return (
       <Alert>
         {error}{" "}
-        <button onClick={() => void refresh()} className="underline underline-offset-2">
+        <button
+          onClick={() => void refresh()}
+          className="underline underline-offset-2"
+        >
           Try again
         </button>
       </Alert>
@@ -309,10 +324,21 @@ function WorkspaceGate() {
 
 /* ---------------------------------------------------------------- sidebar --- */
 
-function SidebarContent({ collapsed, onToggle }: { collapsed: boolean; onToggle?: () => void }) {
+function SidebarContent({
+  collapsed,
+  onToggle,
+}: {
+  collapsed: boolean;
+  onToggle?: () => void;
+}) {
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      <div className={cx("flex h-14 flex-none items-center", collapsed ? "justify-center" : "px-5")}>
+      <div
+        className={cx(
+          "flex h-14 flex-none items-center",
+          collapsed ? "justify-center" : "px-5",
+        )}
+      >
         {collapsed ? <Logo className="[&>span:last-child]:hidden" /> : <Logo />}
       </div>
 
@@ -329,13 +355,19 @@ function SidebarContent({ collapsed, onToggle }: { collapsed: boolean; onToggle?
             <ul className="space-y-0.5">
               {group.items.map((item) => (
                 <li key={item.to}>
-                  <NavLink to={item.to} end={item.end} title={collapsed ? item.label : undefined}>
+                  <NavLink
+                    to={item.to}
+                    end={item.end}
+                    title={collapsed ? item.label : undefined}
+                  >
                     {({ isActive }) => (
                       <span
                         className={cx(
                           "relative flex items-center rounded-lg py-1.5 text-[0.86rem] transition-colors",
                           collapsed ? "justify-center px-2" : "gap-3 px-3",
-                          isActive ? "text-ink-100" : "text-ink-400 hover:text-ink-100",
+                          isActive
+                            ? "text-ink-100"
+                            : "text-ink-400 hover:text-ink-100",
                         )}
                       >
                         {/* One element that travels between items, rather than
@@ -350,7 +382,11 @@ function SidebarContent({ collapsed, onToggle }: { collapsed: boolean; onToggle?
                           <motion.span
                             layoutId="nav-active"
                             className="absolute inset-0 rounded-lg bg-ink-100/[0.07]"
-                            transition={{ type: "spring", stiffness: 400, damping: 34 }}
+                            transition={{
+                              type: "spring",
+                              stiffness: 400,
+                              damping: 34,
+                            }}
                           />
                         )}
                         <span
@@ -361,7 +397,11 @@ function SidebarContent({ collapsed, onToggle }: { collapsed: boolean; onToggle?
                         >
                           {item.icon}
                         </span>
-                        {!collapsed && <span className="relative truncate">{item.label}</span>}
+                        {!collapsed && (
+                          <span className="relative truncate">
+                            {item.label}
+                          </span>
+                        )}
                       </span>
                     )}
                   </NavLink>
@@ -389,7 +429,10 @@ function SidebarContent({ collapsed, onToggle }: { collapsed: boolean; onToggle?
           >
             <svg
               viewBox="0 0 24 24"
-              className={cx("h-4 w-4 transition-transform", collapsed && "rotate-180")}
+              className={cx(
+                "h-4 w-4 transition-transform",
+                collapsed && "rotate-180",
+              )}
               {...stroke}
             >
               <path d="M14 7l-5 5 5 5" />
@@ -420,10 +463,18 @@ function WorkspaceSwitcher() {
           {(current?.name ?? "?").charAt(0).toUpperCase()}
         </span>
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-sm text-ink-100">{current?.name}</span>
-          <span className="block truncate text-xs text-ink-500 capitalize">{current?.role}</span>
+          <span className="block truncate text-sm text-ink-100">
+            {current?.name}
+          </span>
+          <span className="block truncate text-xs text-ink-500 capitalize">
+            {current?.role}
+          </span>
         </span>
-        <svg viewBox="0 0 24 24" className="h-4 w-4 flex-none text-ink-500" {...stroke}>
+        <svg
+          viewBox="0 0 24 24"
+          className="h-4 w-4 flex-none text-ink-500"
+          {...stroke}
+        >
           <path d="M8 10l4-4 4 4M8 14l4 4 4-4" />
         </svg>
       </button>
@@ -449,12 +500,19 @@ function WorkspaceSwitcher() {
                   }}
                   className={cx(
                     "flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm transition-colors hover:bg-ink-800",
-                    workspace.id === current?.id ? "text-ink-100" : "text-ink-300",
+                    workspace.id === current?.id
+                      ? "text-ink-100"
+                      : "text-ink-300",
                   )}
                 >
-                  <span className="min-w-0 flex-1 truncate">{workspace.name}</span>
+                  <span className="min-w-0 flex-1 truncate">
+                    {workspace.name}
+                  </span>
                   {workspace.id === current?.id && (
-                    <svg viewBox="0 0 12 12" className="h-3.5 w-3.5 flex-none text-brand-400">
+                    <svg
+                      viewBox="0 0 12 12"
+                      className="h-3.5 w-3.5 flex-none text-brand-400"
+                    >
                       <path
                         d="M2.5 6.4 4.8 8.7 9.5 3.9"
                         fill="none"
@@ -483,7 +541,10 @@ function AccountBlock({ collapsed }: { collapsed: boolean }) {
   useCloseOnOutside(ref, open, () => setOpen(false));
 
   return (
-    <div className="relative flex-none border-t border-ink-800/70 p-3" ref={ref}>
+    <div
+      className="relative flex-none border-t border-ink-800/70 p-3"
+      ref={ref}
+    >
       <button
         onClick={() => setOpen((value) => !value)}
         aria-haspopup="menu"
@@ -500,12 +561,21 @@ function AccountBlock({ collapsed }: { collapsed: boolean }) {
         {!collapsed && (
           <>
             <span className="min-w-0 flex-1 text-left">
-              <span className="block truncate text-sm text-ink-200">{user?.email}</span>
-              <span className="block text-xs" style={{ color: "var(--status-good)" }}>
+              <span className="block truncate text-sm text-ink-200">
+                {user?.email}
+              </span>
+              <span
+                className="block text-xs"
+                style={{ color: "var(--status-good)" }}
+              >
                 {user?.is_verified ? "Email confirmed" : "Email unconfirmed"}
               </span>
             </span>
-            <svg viewBox="0 0 24 24" className="h-4 w-4 flex-none text-ink-500" {...stroke}>
+            <svg
+              viewBox="0 0 24 24"
+              className="h-4 w-4 flex-none text-ink-500"
+              {...stroke}
+            >
               <path d="M6 9l6 6 6-6" />
             </svg>
           </>
@@ -554,7 +624,8 @@ function useCloseOnOutside(
     const onDown = (event: MouseEvent) => {
       if (!ref.current?.contains(event.target as Node)) close();
     };
-    const onEscape = (event: KeyboardEvent) => event.key === "Escape" && close();
+    const onEscape = (event: KeyboardEvent) =>
+      event.key === "Escape" && close();
     document.addEventListener("mousedown", onDown);
     document.addEventListener("keydown", onEscape);
     return () => {
@@ -566,7 +637,11 @@ function useCloseOnOutside(
 
 /* -------------------------------------------------------- first workspace --- */
 
-function CreateWorkspace({ onCreated }: { onCreated: (id: string) => void | Promise<void> }) {
+function CreateWorkspace({
+  onCreated,
+}: {
+  onCreated: (id: string) => void | Promise<void>;
+}) {
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -583,10 +658,15 @@ function CreateWorkspace({ onCreated }: { onCreated: (id: string) => void | Prom
           .replace(/[^a-z0-9]+/g, "-")
           .replace(/^-|-$/g, "")
           .slice(0, 40) || "workspace";
-      const created = await api.post<{ id: string }>("/orgs", { name: name.trim(), slug });
+      const created = await api.post<{ id: string }>("/orgs", {
+        name: name.trim(),
+        slug,
+      });
       await onCreated(created.id);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not create the workspace.");
+      setError(
+        err instanceof Error ? err.message : "Could not create the workspace.",
+      );
       setBusy(false);
     }
   }
@@ -598,10 +678,12 @@ function CreateWorkspace({ onCreated }: { onCreated: (id: string) => void | Prom
       transition={{ duration: 0.3 }}
       className="mx-auto max-w-md py-10"
     >
-      <h1 className="text-2xl font-semibold tracking-tight text-ink-100">Create your workspace</h1>
+      <h1 className="text-2xl font-semibold tracking-tight text-ink-100">
+        Create your workspace
+      </h1>
       <p className="mt-2 leading-relaxed text-ink-400">
-        Flows, runs and API keys all live inside a workspace, so there is nothing
-        to show until you have one. You can rename it later.
+        Flows, runs and API keys all live inside a workspace, so there is
+        nothing to show until you have one. You can rename it later.
       </p>
 
       <form onSubmit={submit} className="mt-6 space-y-4" noValidate>

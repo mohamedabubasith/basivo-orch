@@ -54,7 +54,7 @@ async def test_a_row_knows_its_size_and_what_starts_it(session, organization):
 
 async def test_a_row_reports_the_most_recent_run_not_the_first(session, organization):
     flow = await make_flow(session, organization, WEBHOOK_FLOW, publish=True)
-    version = (await service.latest_version(session, flow.id))
+    version = await service.latest_version(session, flow.id)
 
     for status in (RunStatus.SUCCEEDED, RunStatus.FAILED):
         run, _ = await service.create_run(

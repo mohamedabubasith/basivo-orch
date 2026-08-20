@@ -27,12 +27,14 @@ export function nodeSummary(
         ? config.sub_agents.length
         : 0;
       const tools = Array.isArray(config.tools) ? config.tools.length : 0;
+      const skills = Array.isArray(config.skills) ? config.skills.length : 0;
       const extras = [
         tools ? `${tools} tool${tools > 1 ? "s" : ""}` : "",
         team ? `${team} sub-agent${team > 1 ? "s" : ""}` : "",
         // Worth a card slot: whether an agent remembers changes what the same
         // prompt does on the second run, and it is invisible otherwise.
         config.memory === "conversation" ? "remembers" : "",
+        skills ? `${skills} skill${skills > 1 ? "s" : ""}` : "",
       ].filter(Boolean);
       return [model || "no model", ...extras].join(" · ");
     }

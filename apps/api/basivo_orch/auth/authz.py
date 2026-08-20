@@ -126,6 +126,14 @@ class Permission(StrEnum):
     CREDENTIAL_CREATE = "credential:create"
     CREDENTIAL_DELETE = "credential:delete"
 
+    #: Skills are authored content, not secrets: anyone who can build a flow
+    #: can write the instructions their agent follows. Deleting one is held
+    #: higher because flows reference skills by id, and a skill removed from
+    #: under a published flow changes what that flow does.
+    SKILL_READ = "skill:read"
+    SKILL_WRITE = "skill:write"
+    SKILL_DELETE = "skill:delete"
+
 
 #: Which permissions each role carries. The single source of truth for authority.
 #:
@@ -140,6 +148,9 @@ ROLE_PERMISSIONS: dict[Role, frozenset[Permission]] = {
             # the same authority as being able to start one.
             Permission.FLOW_READ,
             Permission.RUN_READ,
+            # Reading the library is how a reviewer answers "why did the agent
+            # say that" without the authority to change the answer.
+            Permission.SKILL_READ,
         }
     ),
     Role.MEMBER: frozenset(
@@ -153,6 +164,8 @@ ROLE_PERMISSIONS: dict[Role, frozenset[Permission]] = {
             Permission.RUN_READ,
             Permission.RUN_CANCEL,
             Permission.CREDENTIAL_READ,
+            Permission.SKILL_READ,
+            Permission.SKILL_WRITE,
         }
     ),
     Role.ADMIN: frozenset(
@@ -183,6 +196,9 @@ ROLE_PERMISSIONS: dict[Role, frozenset[Permission]] = {
             Permission.CREDENTIAL_READ,
             Permission.CREDENTIAL_CREATE,
             Permission.CREDENTIAL_DELETE,
+            Permission.SKILL_READ,
+            Permission.SKILL_WRITE,
+            Permission.SKILL_DELETE,
         }
     ),
     Role.OWNER: frozenset(Permission),

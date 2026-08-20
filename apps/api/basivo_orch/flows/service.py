@@ -237,9 +237,7 @@ async def summarise_flows(
             entry["last_run_at"] = created_at
 
     schedules = await session.execute(
-        select(FlowSchedule.flow_id, FlowSchedule.next_run_at).where(
-            FlowSchedule.flow_id.in_(ids)
-        )
+        select(FlowSchedule.flow_id, FlowSchedule.next_run_at).where(FlowSchedule.flow_id.in_(ids))
     )
     for flow_id, next_run_at in schedules:
         summary[flow_id]["next_run_at"] = next_run_at

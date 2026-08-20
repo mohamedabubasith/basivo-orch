@@ -23,7 +23,9 @@ export const CSRF_HEADER = "X-CSRF-Token";
  * proxy). Requests therefore carry `credentials: "include"`, and the API's
  * CORS_ORIGINS must list this app's origin for any of it to work.
  */
-const API_BASE = (import.meta.env.VITE_API_URL ?? "http://localhost:8000").replace(/\/$/, "");
+const API_BASE = (
+  import.meta.env.VITE_API_URL ?? "http://localhost:8000"
+).replace(/\/$/, "");
 
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
@@ -110,7 +112,9 @@ function captureCsrf(response: Response): void {
 
 async function ensureCsrf(): Promise<string | null> {
   if (csrfToken) return csrfToken;
-  const response = await fetch(`${API_BASE}/auth/csrf`, { credentials: "include" });
+  const response = await fetch(`${API_BASE}/auth/csrf`, {
+    credentials: "include",
+  });
   captureCsrf(response);
   return csrfToken;
 }
@@ -189,6 +193,8 @@ export interface RequestOptions {
   form?: Record<string, string>;
   /** Skip the refresh-and-retry dance. */
   noRetry?: boolean;
+  /** Return the body as text instead of parsing it as JSON. */
+  asText?: boolean;
   signal?: AbortSignal;
 }
 
@@ -205,10 +211,20 @@ async function toError(response: Response): Promise<ApiError> {
       detail = raw;
     } else if (Array.isArray(raw)) {
       // FastAPI validation errors arrive as a list of {loc, msg}.
-      detail = raw.map((e: { msg?: string }) => e?.msg ?? "Invalid value").join(". ");
-    } else if (raw && typeof raw === "object" && typeof raw.reason === "string") {
+      detail = raw
+        .map((e: { msg?: string }) => e?.msg ?? "Invalid value")
+        .join(". ");
+    } else if (
+      raw &&
+      typeof raw === "object" &&
+      typeof raw.reason === "string"
+    ) {
       detail = raw.reason;
-    } else if (raw && typeof raw === "object" && typeof raw.message === "string") {
+    } else if (
+      raw &&
+      typeof raw === "object" &&
+      typeof raw.message === "string"
+    ) {
       // The graph-rejection shape: `{"detail": {"message": "...", "problems":
       // [...]}}`. Without this branch, `err.message` fell through to
       // `response.statusText` — every failed publish or test run read as the
@@ -226,9 +242,12 @@ async function toError(response: Response): Promise<ApiError> {
     LOGIN_BAD_CREDENTIALS: "That email and password do not match an account.",
     LOGIN_USER_NOT_VERIFIED: "Please confirm your email address first.",
     REGISTER_USER_ALREADY_EXISTS: "An account with that email already exists.",
-    RESET_PASSWORD_BAD_TOKEN: "That reset link has expired or was already used.",
-    VERIFY_USER_BAD_TOKEN: "That confirmation link has expired or was already used.",
-    VERIFY_USER_ALREADY_VERIFIED: "That address is already confirmed. You can sign in.",
+    RESET_PASSWORD_BAD_TOKEN:
+      "That reset link has expired or was already used.",
+    VERIFY_USER_BAD_TOKEN:
+      "That confirmation link has expired or was already used.",
+    VERIFY_USER_ALREADY_VERIFIED:
+      "That address is already confirmed. You can sign in.",
   };
   if (code && friendly[code]) detail = friendly[code];
 
@@ -243,7 +262,10 @@ async function toError(response: Response): Promise<ApiError> {
   return new ApiError(response.status, detail, code, retryAfter, parsed);
 }
 
-export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+export async function request<T>(
+  path: string,
+  options: RequestOptions = {},
+): Promise<T> {
   const method = (options.method ?? "GET").toUpperCase();
   const headers = new Headers();
   let body: BodyInit | undefined;
@@ -276,7 +298,9 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
   // An expired access token is the ordinary case, not an error: refresh once
   // and replay. Only for endpoints where a session could plausibly exist.
   const retryable =
-    response.status === 401 && !options.noRetry && !NO_REFRESH_RETRY.includes(path);
+    response.status === 401 &&
+    !options.noRetry &&
+    !NO_REFRESH_RETRY.includes(path);
 
   if (retryable) {
     if (await refresh()) {
@@ -287,7 +311,8 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
     }
   }
 
-  if (response.status === 401 && !NO_REFRESH_RETRY.includes(path)) onSessionEnded();
+  if (response.status === 401 && !NO_REFRESH_RETRY.includes(path))
+    onSessionEnded();
 
   if (!response.ok) {
     // 401 from /auth/login with a step-up header is not a failure — the
@@ -295,7 +320,9 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
     if (response.status === 401) {
       const stepUp = response.headers.get("X-Step-Up-Token");
       if (stepUp) {
-        const methods = (response.headers.get("X-Step-Up-Methods") ?? "totp").split(",");
+        const methods = (
+          response.headers.get("X-Step-Up-Methods") ?? "totp"
+        ).split(",");
         throw new StepUpRequired(stepUp, methods);
       }
     }
@@ -304,14 +331,27 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
 
   if (response.status === 204) return undefined as T;
   const text = await response.text();
+  if (options.asText) return text as T;
   return (text ? JSON.parse(text) : undefined) as T;
 }
 
 export const api = {
-  get: <T>(path: string, o?: RequestOptions) => request<T>(path, { ...o, method: "GET" }),
+  get: <T>(path: string, o?: RequestOptions) =>
+    request<T>(path, { ...o, method: "GET" }),
   post: <T>(path: string, body?: unknown, o?: RequestOptions) =>
     request<T>(path, { ...o, method: "POST", body }),
   patch: <T>(path: string, body?: unknown, o?: RequestOptions) =>
     request<T>(path, { ...o, method: "PATCH", body }),
-  del: <T>(path: string, o?: RequestOptions) => request<T>(path, { ...o, method: "DELETE" }),
+  put: <T>(path: string, body?: unknown, o?: RequestOptions) =>
+    request<T>(path, { ...o, method: "PUT", body }),
+  /**
+   * A response body as text, for endpoints that answer with a file rather
+   * than JSON (a skill's SKILL.md). Goes through `request` so the session
+   * refresh and CSRF handling are the same as everywhere else — a raw fetch
+   * here would be the one call that silently 401s after a token expiry.
+   */
+  text: (path: string, o?: RequestOptions) =>
+    request<string>(path, { ...o, method: "GET", asText: true }),
+  del: <T>(path: string, o?: RequestOptions) =>
+    request<T>(path, { ...o, method: "DELETE" }),
 };

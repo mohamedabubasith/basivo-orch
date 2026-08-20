@@ -19,7 +19,7 @@ import { cx } from "../lib/cx";
 import { NodeIconChip } from "./nodeIcons";
 import type { Suggestion } from "./suggestions";
 import { TemplateInput } from "./TemplateInput";
-import { CredentialPicker, ModelPicker } from "./pickers";
+import { CredentialPicker, ModelPicker, SkillPicker } from "./pickers";
 import { SubAgentEditor } from "./SubAgentEditor";
 import { MODEL_PROVIDERS, VCS_PROVIDERS } from "./providers";
 import { ToolEditor } from "./ToolEditor";
@@ -276,6 +276,12 @@ export function Inspector({
                 isAgent &&
                 (field.key === "memory_key" || field.key === "memory_window") &&
                 (config.memory ?? "off") === "off"
+              ) &&
+              // A budget for skills nobody selected is a number about nothing.
+              !(
+                isAgent &&
+                field.key === "skill_budget_chars" &&
+                !(Array.isArray(config.skills) && config.skills.length > 0)
               ),
           )
           .map((field) => (
@@ -378,6 +384,16 @@ export function Inspector({
                 <CodeArea
                   value={String(config.code ?? "")}
                   onChange={(v) => set("code", v)}
+                />
+              ) : isAgent && field.key === "skills" ? (
+                <SkillPicker
+                  orgId={orgId}
+                  value={
+                    Array.isArray(config.skills)
+                      ? (config.skills as string[])
+                      : []
+                  }
+                  onChange={(skills) => set("skills", skills)}
                 />
               ) : isAgent && field.key === "memory" ? (
                 <div>
