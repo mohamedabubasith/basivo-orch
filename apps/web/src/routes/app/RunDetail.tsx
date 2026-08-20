@@ -305,11 +305,12 @@ function ArtifactViewer({
   const src = `/api/v1/orgs/${orgId}/artifacts/${id}`;
   const isVideo = kind.startsWith("video/");
   const isImage = kind.startsWith("image/");
+  const isAudio = kind.startsWith("audio/");
 
   return (
     <div className="mt-3">
       <p className="mb-1.5 text-[0.7rem] font-medium tracking-wide text-ink-400">
-        {isVideo ? "Video" : isImage ? "Image" : "File"} — {name}
+        {isVideo ? "Video" : isImage ? "Image" : isAudio ? "Narration" : "File"} — {name}
         {size > 0 && ` · ${Math.max(1, Math.round(size / 1024))} KB`}
       </p>
       <div className="overflow-hidden rounded-lg border border-ink-700/70 bg-ink-950/60">
@@ -319,6 +320,11 @@ function ArtifactViewer({
           <video src={src} controls preload="metadata" className="block max-h-[420px] w-full" />
         ) : isImage ? (
           <img src={src} alt={name} className="block max-h-[420px] w-full object-contain" />
+        ) : isAudio ? (
+          // A voice-over is judged by ear and nothing else, so the run page has
+          // to be where you can hear it — the alternative is downloading a file
+          // to check whether the narration is any good.
+          <audio src={src} controls preload="metadata" className="block w-full p-3" />
         ) : (
           <a
             href={src}

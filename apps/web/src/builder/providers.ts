@@ -51,3 +51,31 @@ export const VCS_PROVIDERS: { value: string; label: string }[] = [
 export const PROVIDERS: { value: string; label: string }[] = Object.entries(PROVIDER_LABEL).map(
   ([value, label]) => ({ value, label }),
 );
+
+/**
+ * The voices offered for narration.
+ *
+ * A curated subset of the 54 the model ships: an undifferentiated list of ids
+ * like `af_heart` / `bm_lewis` is not a choice a person can make, so each one
+ * here says what it sounds like. Kept in step with `nodes/speech.py::VOICES`,
+ * which is the list the API actually validates against.
+ */
+export const VOICES: { value: string; label: string }[] = [
+  { value: "af_heart", label: "Heart — warm US female" },
+  { value: "af_bella", label: "Bella — bright US female" },
+  { value: "af_nicole", label: "Nicole — soft US female, close-mic" },
+  { value: "af_nova", label: "Nova — clear US female" },
+  { value: "am_michael", label: "Michael — steady US male" },
+  { value: "am_puck", label: "Puck — lively US male" },
+  { value: "am_onyx", label: "Onyx — deep US male" },
+  { value: "bf_emma", label: "Emma — UK female" },
+  { value: "bf_isabella", label: "Isabella — UK female, measured" },
+  { value: "bm_george", label: "George — UK male" },
+  { value: "bm_lewis", label: "Lewis — UK male, low" },
+  { value: "ef_dora", label: "Dora — Spanish female" },
+  { value: "ff_siwis", label: "Siwis — French female" },
+  { value: "hf_alpha", label: "Alpha — Hindi female" },
+  { value: "if_sara", label: "Sara — Italian female" },
+  { value: "jf_alpha", label: "Alpha — Japanese female" },
+  { value: "zf_xiaoxiao", label: "Xiaoxiao — Mandarin female" },
+];

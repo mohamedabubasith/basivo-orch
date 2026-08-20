@@ -91,9 +91,15 @@ export function nodeSummary(
     case "video.render":
       return `${str(config.template) || "custom"} · ${str(config.quality) || "standard"}`;
     case "video.generate":
-      return `${config.duration_seconds ?? 6}s · ${str(config.size) || "landscape"} · ${
-        shortModel(str(config.model)) || "no model"
-      }`;
+      return [
+        `${config.duration_seconds ?? 6}s`,
+        str(config.size) || "landscape",
+        // Whether it speaks is the first thing anyone asks of a video node.
+        config.narration ? `voiced${config.captions === false ? "" : " + captions"}` : "silent",
+        shortModel(str(config.model)) || "no model",
+      ].join(" · ");
+    case "audio.speak":
+      return `${str(config.voice) || "af_heart"} · ${str(config.format) || "mp3"}`;
     case "social.post":
       return [str(config.platform) || "telegram", str(config.target)]
         .filter(Boolean)

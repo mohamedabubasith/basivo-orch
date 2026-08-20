@@ -27,6 +27,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import shlex
 import shutil
 import tempfile
@@ -272,14 +273,16 @@ def _resolve_variables(raw: str, template_context: dict[str, Any]) -> dict[str, 
 
 def _declared_duration(html: str) -> float:
     """The composition's own `data-duration`, or a conservative default."""
-    import re
-
     match = re.search(r'data-duration=["\']([0-9.]+)["\']', html)
     return float(match.group(1)) if match else 10.0
 
 
 async def _render(
-    html: str, *, variables: dict[str, Any], config: VideoRenderConfig
+    html: str,
+    *,
+    variables: dict[str, Any],
+    config: VideoRenderConfig,
+    assets: dict[str, bytes] | None = None,
 ) -> tuple[bytes, str]:
     """Run the renderer in a scratch project. Returns (bytes, combined logs)."""
     command = hyperframes_command()
@@ -287,6 +290,12 @@ async def _render(
     with tempfile.TemporaryDirectory(prefix="basivo-video-") as workdir:
         project = Path(workdir)
         (project / "index.html").write_text(html, encoding="utf-8")
+        # Narration and any other local media the composition refers to by
+        # relative name. They have to be real files beside index.html: the
+        # renderer mixes audio with ffmpeg from the path on disk, not from
+        # whatever the browser managed to play.
+        for name, blob in (assets or {}).items():
+            (project / Path(name).name).write_bytes(blob)
         output = project / f"out.{config.format}"
 
         argv = [
@@ -483,6 +492,18 @@ class VideoGeneratorConfig(BaseModel):
     #: made without anyone downloading the video.
     save_preview: bool = True
 
+    # -- voice ---------------------------------------------------------------
+    #: Narrate the video. The agent writes a script first, it is spoken, and
+    #: the animation is then authored to the length the voice actually took —
+    #: the other order cuts the tail off every line.
+    narration: bool = False
+    voice: str = Field(default="af_heart", max_length=40, title="Voice")
+    voice_speed: float = Field(default=1.0, ge=0.5, le=2.0, title="Voice speed")
+    #: Word-level captions, timed from the model's own phoneme durations.
+    #: On by default when narrating: short-form video is mostly watched muted,
+    #: so a narrated video without captions says nothing to half its audience.
+    captions: bool = True
+
     def dimensions(self) -> tuple[int, int]:
         return {"landscape": (1920, 1080), "square": (1080, 1080), "story": (1080, 1920)}[self.size]
 
@@ -496,7 +517,16 @@ class VideoGeneratorNode(Node):
     tier = 2
     category = "design"
     config_model = VideoGeneratorConfig
-    output_paths = ("artifact_id", "url", "attempts", "duration_seconds", "preview_artifact_id")
+    output_paths = (
+        "artifact_id",
+        "url",
+        "attempts",
+        "duration_seconds",
+        "preview_artifact_id",
+        "narration_artifact_id",
+        "script",
+        "words",
+    )
     max_attempts = 1
     timeout_seconds = float(RENDER_TIMEOUT_SECONDS + 300)
 
@@ -519,11 +549,37 @@ class VideoGeneratorNode(Node):
             temperature=0.4,
         )
 
+        # The voice comes first. Everything after this — the target duration,
+        # the scene timings offered to the agent — is derived from how long the
+        # narration actually turned out to be.
+        script, narration_audio, spoken_seconds, words = "", b"", 0.0, []
+        if config.narration:
+            script, narration_audio, spoken_seconds, words = await _narrate(
+                config, ctx, model=model, brief=brief, style=style
+            )
+
+        target_seconds = (
+            round(max(float(config.duration_seconds), spoken_seconds + 0.4), 1)
+            if config.narration
+            else float(config.duration_seconds)
+        )
+
         instructions = (
             f"{COMPOSITION_INSTRUCTIONS}\n\n"
-            f"This composition is {width}x{height}, exactly {config.duration_seconds} seconds, "
+            f"This composition is {width}x{height}, exactly {target_seconds:g} seconds, "
             f"{config.fps}fps."
         )
+        if config.narration:
+            instructions += (
+                "\n\nA VOICE IS ALREADY RECORDED for this video and will play over it. "
+                f"It is {spoken_seconds:g} seconds long. The words, and the second each is "
+                "spoken:\n"
+                + _spoken_outline(words)
+                + "\n\nChange scene ON those moments, not on a round number — a cut that "
+                "lands on the word being said is the difference between a video and a "
+                "slideshow with sound. Do not add your own text captions at the bottom of "
+                "the frame; captions are added after you, and two sets would overlap."
+            )
         conversation: list[Any] = [
             SystemMessage(content=instructions),
             HumanMessage(content=brief + (f"\n\nArt direction: {style}" if style else "")),
@@ -611,7 +667,52 @@ class VideoGeneratorNode(Node):
             preview_id = saved_preview["artifact_id"]
             await ctx.step("video.preview", saved_preview)
 
-        await ctx.progress(f"Rendering {config.duration_seconds}s of video")
+        assets: dict[str, bytes] = {}
+        narration_id = ""
+        if config.narration and narration_audio:
+            lines = caption_lines(words) if config.captions else []
+            html, widened = ensure_duration(html, spoken_seconds + 0.3)
+            if widened:
+                # The agent was told the length and wrote something shorter.
+                # Rendering it would cut the voice off mid-word.
+                await ctx.step(
+                    "video.duration_widened",
+                    {"to_seconds": round(spoken_seconds + 0.3, 2), "reason": "narration is longer"},
+                )
+            html, captioned = inject_narration(
+                html,
+                audio_name="narration.wav",
+                audio_seconds=spoken_seconds,
+                lines=lines,
+                width=width,
+                height=height,
+            )
+            assets["narration.wav"] = narration_audio
+            saved_voice = await ctx.save_artifact(
+                narration_audio,
+                filename=f"{config.filename}-narration.wav",
+                content_type="audio/wav",
+                node_id=ctx.node_id,
+            )
+            narration_id = saved_voice["artifact_id"]
+            await ctx.step(
+                "video.narration_attached",
+                {
+                    **saved_voice,
+                    "seconds": spoken_seconds,
+                    "caption_lines": len(lines),
+                    "captions_rendered": captioned,
+                },
+            )
+            if config.captions and not captioned:
+                # Said out loud rather than left as a silent difference between
+                # what was asked for and what came out.
+                await ctx.progress(
+                    "Captions were skipped: the composition has no recognisable #stage to "
+                    "attach them to. The voice is still in the video."
+                )
+
+        await ctx.progress(f"Rendering {target_seconds:g}s of video")
         data, logs = await _render(
             html,
             variables={},
@@ -623,6 +724,7 @@ class VideoGeneratorNode(Node):
                 fps=config.fps,
                 filename=config.filename,
             ),
+            assets=assets,
         )
         if not data:
             raise NodeError(f"The renderer produced no file. Its last words:\n{logs[-1200:]}")
@@ -641,8 +743,13 @@ class VideoGeneratorNode(Node):
             output={
                 **saved,
                 "attempts": attempt,
-                "duration_seconds": float(config.duration_seconds),
+                # The real length, which with narration is the voice's length
+                # rounded up — not the number that was asked for.
+                "duration_seconds": target_seconds,
                 "preview_artifact_id": preview_id,
+                "narration_artifact_id": narration_id,
+                "script": script,
+                "words": words,
                 "format": config.format,
             }
         )
@@ -652,3 +759,339 @@ def message_text_of(message: Any) -> str:
     from basivo_orch.flows.nodes.agent_runtime import message_text
 
     return message_text(message)
+
+
+# ---------------------------------------------------------------------------
+# Narration
+# ---------------------------------------------------------------------------
+#
+# A silent product video is half a product video, and the hard part is not the
+# voice — it is that a scene lasts five seconds while a sentence lasts however
+# long the words take. Two orders are possible and only one of them works:
+#
+#   write the animation, then narrate it  →  the tail of every line gets cut
+#   narrate it, then write the animation  →  the animation fits the voice
+#
+# So the script is written and spoken FIRST, and the composition is authored
+# against a duration that is already known — with the word timings handed to the
+# agent, so it can change scene on the word rather than on a guess.
+#
+# HyperFrames does the mixing. An `<audio src>` inside the stage is collected
+# into the render's ffmpeg graph (verified: `hasAudio: true`, an AAC stream in
+# the output at -22.8 dB mean), so nothing here shells out to mux.
+
+#: The script pass. Deliberately not "write a video" — asking for prose and
+#: markup in one reply gets a worse version of both.
+NARRATION_INSTRUCTIONS = """You write narration for short product videos: the words a voice
+will read aloud, nothing else.
+
+RULES:
+1. Stay inside the word range. It is not advice — the voice takes about
+   {pace} words per second, so going over means the video ends mid-sentence,
+   and coming in far under leaves the end of the video in silence.
+2. Short sentences. A clause a listener has to hold in their head does not
+   survive being heard once.
+3. No stage directions, no scene numbers, no speaker labels, no markdown.
+   Every character you write will be spoken out loud, including brackets.
+4. Numbers as words where they are read as words ("thirty seconds", not "30s").
+5. Open with the thing that matters. A listener decides in two seconds.
+
+Reply with ONLY the narration text."""
+
+#: How many words share one caption line. Six is about a line of large type on
+#: a phone in portrait, and short enough that the line changes often enough to
+#: feel alive rather than static.
+CAPTION_WORDS_PER_LINE = 6
+
+
+def caption_lines(
+    words: list[dict[str, Any]], *, per_line: int = CAPTION_WORDS_PER_LINE
+) -> list[dict[str, Any]]:
+    """Group timed words into caption lines.
+
+    Broken on sentence endings first and on the word count second, so a line
+    never straddles a full stop — a caption that reads "...it yourself. Connect
+    a" is harder to read than one that stops where the speaker stopped.
+    """
+    lines: list[dict[str, Any]] = []
+    current: list[dict[str, Any]] = []
+
+    def flush() -> None:
+        if not current:
+            return
+        lines.append(
+            {
+                "start": current[0]["start"],
+                "end": current[-1]["end"],
+                "words": list(current),
+            }
+        )
+        current.clear()
+
+    for word in words:
+        current.append(word)
+        ends_sentence = word["word"].rstrip("\"'”’)").endswith((".", "!", "?"))
+        if ends_sentence or len(current) >= per_line:
+            flush()
+    flush()
+    return lines
+
+
+def _stage_span(html: str) -> tuple[int, int] | None:
+    """Where the root element opens and closes, by counting nested divs.
+
+    A regex for the closing tag would find the first `</div>` in the document,
+    which is almost never the stage's — the stage contains every clip.
+    """
+    opening = re.search(r"<div\b[^>]*id=[\"']stage[\"'][^>]*>", html)
+    if not opening:
+        return None
+
+    depth = 0
+    for match in re.finditer(r"<div\b[^>]*>|</div\s*>", html[opening.start() :]):
+        if match.group(0).startswith("</"):
+            depth -= 1
+            if depth == 0:
+                return opening.end(), opening.start() + match.start()
+        else:
+            depth += 1
+    return None
+
+
+def composition_id(html: str) -> str:
+    match = re.search(r"data-composition-id=[\"']([^\"']+)[\"']", html)
+    return match.group(1) if match else ""
+
+
+def ensure_duration(html: str, seconds: float) -> tuple[str, bool]:
+    """Widen the root `data-duration` if the narration outlasts it.
+
+    The agent is told the exact length and mostly honours it. When it does not,
+    the render silently cuts the voice off — so the declared duration is
+    checked against the audio we actually have, and the audio wins.
+    """
+    match = re.search(
+        r'(<div\b[^>]*id=["\']stage["\'][^>]*?)data-duration=["\']([0-9.]+)["\']', html
+    )
+    if not match:
+        return html, False
+    declared = float(match.group(2))
+    if declared >= seconds - 0.05:
+        return html, False
+    return (
+        html[: match.start(2)] + f"{seconds:g}" + html[match.end(2) :],
+        True,
+    )
+
+
+def narration_markup(
+    *,
+    audio_name: str,
+    audio_seconds: float,
+    lines: list[dict[str, Any]],
+    width: int,
+    height: int,
+) -> str:
+    """The `<audio>` element, and the caption layer if there are words for it.
+
+    Captions are not decoration: most short-form video is watched with the
+    sound off, so a narrated video without them communicates nothing to a
+    large part of its audience.
+    """
+    audio = (
+        f'\n<audio src="{audio_name}" data-start="0" '
+        f'data-end="{audio_seconds:g}" data-volume="1"></audio>'
+    )
+    if not lines:
+        return audio
+
+    # Sized from the frame rather than fixed, so a 1080x1920 story caption is
+    # not the same 40px as a 1920x1080 landscape one.
+    font = max(20, round(height * 0.042))
+    band = round(height * 0.07)
+    parts = [
+        audio,
+        f'\n<div id="hf-captions" style="position:absolute;left:6%;right:6%;bottom:{band}px;'
+        f"text-align:center;pointer-events:none;z-index:2147483000;"
+        f"font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;"
+        f'font-weight:800;font-size:{font}px;line-height:1.25;letter-spacing:-0.01em">',
+    ]
+    for index, line in enumerate(lines):
+        spans = "".join(
+            f'<span id="hf-w-{index}-{position}" style="opacity:.45;color:#fff;'
+            f'text-shadow:0 2px 12px rgba(0,0,0,.85),0 0 2px rgba(0,0,0,.9)"> '
+            f"{_escape(word['word'])}</span>"
+            for position, word in enumerate(line["words"])
+        )
+        parts.append(
+            f'<div id="hf-line-{index}" style="position:absolute;left:0;right:0;'
+            f'bottom:0;opacity:0">{spans}</div>'
+        )
+    parts.append("</div>")
+    return "".join(parts)
+
+
+def caption_script(composition: str, lines: list[dict[str, Any]]) -> str:
+    """Drive the caption layer from the composition's own timeline.
+
+    Appending to `window.__timelines[id]` rather than using CSS animation,
+    because the renderer produces frames by *seeking* that timeline. A CSS
+    animation would sit at whatever state it was in when the page loaded and
+    every frame would look identical.
+    """
+    if not lines or not composition:
+        return ""
+
+    operations: list[str] = []
+    for index, line in enumerate(lines):
+        operations.append(
+            f'tl.set("#hf-line-{index}",{{opacity:1}},{line["start"]:g});'
+            f'tl.set("#hf-line-{index}",{{opacity:0}},{line["end"] + 0.08:g});'
+        )
+        for position, word in enumerate(line["words"]):
+            # The spoken word brightens; the rest of the line stays readable at
+            # 45%, which is what makes a caption feel spoken rather than typed.
+            operations.append(
+                f'tl.set("#hf-w-{index}-{position}",{{opacity:1}},{word["start"]:g});'
+            )
+    return (
+        "\n<script>(function(){var t=(window.__timelines||{})["
+        + json.dumps(composition)
+        + "];if(!t)return;var tl=t;"
+        + "".join(operations)
+        + "})();</script>"
+    )
+
+
+def inject_narration(
+    html: str,
+    *,
+    audio_name: str,
+    audio_seconds: float,
+    lines: list[dict[str, Any]],
+    width: int,
+    height: int,
+) -> tuple[str, bool]:
+    """Put the voice and the captions into a finished composition.
+
+    Returns (html, captions_added). The markup goes at the END of the stage so
+    captions paint over the scenes, and the script goes after the composition's
+    own so the timeline it appends to already exists.
+    """
+    span = _stage_span(html)
+    if span is None:
+        # No recognisable stage: keep the voice (which needs no anchor) and say
+        # in the log that captions were skipped. A silent-but-rendered video is
+        # a better outcome than failing the run over a caption layer.
+        audio_only = narration_markup(
+            audio_name=audio_name, audio_seconds=audio_seconds, lines=[], width=width, height=height
+        )
+        return html.replace("</body>", audio_only + "\n</body>", 1), False
+
+    _, closing = span
+    markup = narration_markup(
+        audio_name=audio_name,
+        audio_seconds=audio_seconds,
+        lines=lines,
+        width=width,
+        height=height,
+    )
+    with_markup = html[:closing] + markup + html[closing:]
+    script = caption_script(composition_id(html), lines)
+    if script and "</body>" in with_markup:
+        with_markup = with_markup.replace("</body>", script + "\n</body>", 1)
+    return with_markup, bool(script)
+
+
+async def _narrate(
+    config: Any, ctx: NodeContext, *, model: Any, brief: str, style: str
+) -> tuple[str, bytes, float, list[dict[str, Any]]]:
+    """Write the script, speak it, and report how long it really took.
+
+    The word budget is given to the agent and then *checked*, because a model
+    told "about seventy words" will cheerfully write ninety. Overrunning is not
+    a style problem: the video would end while the voice is still talking.
+    """
+    from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+
+    from basivo_orch.flows.nodes.speech import WORDS_PER_SECOND, speak, word_budget
+
+    budget = word_budget(config.duration_seconds)
+    # A floor as well as a ceiling. Asked only for a maximum, a model reliably
+    # writes well under it — the first 30-second video came back with 51 words
+    # of a 75-word budget and ended with nine seconds of silence.
+    floor = max(1, int(budget * 0.85))
+    system = NARRATION_INSTRUCTIONS.format(pace=WORDS_PER_SECOND)
+    ask = (
+        f"{brief}\n\n"
+        + (f"Art direction (for tone, not for the words): {style}\n\n" if style else "")
+        + f"The video is {config.duration_seconds} seconds, so write between {floor} and "
+        f"{budget} words. Use the room — a script well under {floor} words leaves the video "
+        "silent at the end."
+    )
+    conversation: list[Any] = [SystemMessage(content=system), HumanMessage(content=ask)]
+
+    script = ""
+    for attempt in (1, 2):
+        reply = await model.ainvoke(conversation)
+        script = strip_code_fences(message_text_of(reply)).strip()
+        count = len(script.split())
+        await ctx.step(
+            "video.script",
+            {"attempt": attempt, "words": count, "budget": budget, "script": script[:600]},
+        )
+        if count <= budget * 1.15 or attempt == 2:
+            break
+        conversation.append(
+            HumanMessage(content=reply.content if hasattr(reply, "content") else script)
+        )
+        conversation.append(
+            HumanMessage(
+                content=(
+                    f"That is {count} words and the budget is {budget}. It would run past the "
+                    f"end of the video. Cut it to {budget} words or fewer, keeping the opening. "
+                    "Reply with ONLY the narration."
+                )
+            )
+        )
+
+    if not script:
+        raise NodeError("The agent returned an empty narration script.")
+
+    await ctx.progress(f"Speaking {len(script.split())} words as {config.voice}")
+    audio, seconds, words = await speak(script, voice=config.voice, speed=config.voice_speed)
+    await ctx.step(
+        "video.spoken",
+        {
+            "seconds": seconds,
+            "words": len(words),
+            "voice": config.voice,
+            "words_per_second": round(len(script.split()) / seconds, 2) if seconds else None,
+        },
+    )
+    return script, audio, seconds, words
+
+
+def _spoken_outline(words: list[dict[str, Any]], *, every: int = 3) -> str:
+    """The narration as a timing sheet the agent can cut against.
+
+    Every word would be thousands of characters of prompt for a 30-second
+    script and more precision than a scene change needs; every third word is
+    enough to place a cut within a third of a second.
+    """
+    if not words:
+        return ""
+    picked = [
+        f"{word['start']:.1f}s {word['word']}"
+        for index, word in enumerate(words)
+        if index % every == 0
+    ]
+    last = words[-1]
+    picked.append(f"{last['end']:.1f}s (end)")
+    return "  ".join(picked)
+
+
+def _escape(text: str) -> str:
+    return (
+        text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+    )

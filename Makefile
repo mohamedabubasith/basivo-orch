@@ -26,6 +26,9 @@ down: ## Stop them
 logs: ## Tail the container logs
 	docker compose logs -f
 
+speech-model: ## Download the narration voice model (~109MB, once)
+	@cd $(API) && uv run python -c "from basivo_orch.flows.nodes.speech import fetch_model; fetch_model()"
+
 api: ## Run the API on :8000
 	cd $(API) && uv run uvicorn basivo_orch.main:app --reload --port 8000 --no-server-header
 

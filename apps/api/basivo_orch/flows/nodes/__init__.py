@@ -26,6 +26,7 @@ from basivo_orch.flows.nodes.gitops import AutofixNode, CommentNode, TicketNode
 from basivo_orch.flows.nodes.http import HttpRequestNode, assert_public_url
 from basivo_orch.flows.nodes.logic import FALSE_PORT, TRUE_PORT, ConditionNode, SetVariablesNode
 from basivo_orch.flows.nodes.social import SocialPostNode
+from basivo_orch.flows.nodes.speech import SpeakNode
 from basivo_orch.flows.nodes.triggers import (
     ManualTriggerNode,
     ScheduleTriggerNode,
@@ -47,6 +48,7 @@ _NODES: tuple[type[Node], ...] = (
     CommentNode,
     RenderNode,
     SocialPostNode,
+    SpeakNode,
     VideoRenderNode,
     VideoGeneratorNode,
 )

@@ -21,7 +21,7 @@ import type { Suggestion } from "./suggestions";
 import { TemplateInput } from "./TemplateInput";
 import { CredentialPicker, ModelPicker, SkillPicker } from "./pickers";
 import { SubAgentEditor } from "./SubAgentEditor";
-import { MODEL_PROVIDERS, VCS_PROVIDERS } from "./providers";
+import { MODEL_PROVIDERS, VCS_PROVIDERS, VOICES } from "./providers";
 import { ToolEditor } from "./ToolEditor";
 import type { NodeSpec } from "./specs";
 
@@ -282,6 +282,15 @@ export function Inspector({
                 isAgent &&
                 field.key === "skill_budget_chars" &&
                 !(Array.isArray(config.skills) && config.skills.length > 0)
+              ) &&
+              // Voice, speed and captions describe narration that is switched
+              // off — three controls for something that will not happen.
+              !(
+                spec.type === "video.generate" &&
+                (field.key === "voice" ||
+                  field.key === "voice_speed" ||
+                  field.key === "captions") &&
+                !config.narration
               ),
           )
           .map((field) => (
@@ -385,7 +394,19 @@ export function Inspector({
                   value={String(config.code ?? "")}
                   onChange={(v) => set("code", v)}
                 />
-              ) : isAgent && field.key === "skills" ? (
+              ) : field.key === "voice" ? (
+              <select
+                value={String(config.voice ?? "af_heart")}
+                onChange={(event) => set("voice", event.target.value)}
+                className={INPUT}
+              >
+                {VOICES.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            ) : isAgent && field.key === "skills" ? (
                 <SkillPicker
                   orgId={orgId}
                   value={

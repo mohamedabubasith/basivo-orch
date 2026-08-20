@@ -856,7 +856,171 @@ async def test_another_workspaces_skill_is_invisible_to_the_engine(
     assert missing and missing[0]["found"] == 0
 
 
+async def test_a_narrated_video_is_authored_to_the_voice_and_captioned(
+    session, make_run, monkeypatch
+):
+    """The order that makes narration work, proven end to end.
+
+    The script is written and spoken BEFORE the animation exists, the agent is
+    given the real length and the spoken word times, and the caption layer is
+    driven by the composition's own timeline. Each of those is asserted rather
+    than assumed, because each one fails silently: the wrong order cuts the
+    voice off, a CSS-animated caption renders as one frozen frame.
+    """
+    from basivo_orch.flows.nodes import speech as speech_module
+    from basivo_orch.flows.nodes import video as video_module
+
+    prompts: list[str] = []
+    rendered: dict[str, object] = {}
+
+    async def fake_speak(text, *, voice, speed):
+        # Six words, one a second, so the assertions can be exact.
+        words = [
+            {"word": word, "start": float(index), "end": index + 0.9}
+            for index, word in enumerate(text.split()[:6])
+        ]
+        return b"RIFFnarration", 6.0, words
+
+    monkeypatch.setattr(speech_module, "speak", fake_speak)
+
+    async def fake_build_model(_ctx, **_kwargs):
+        def respond(messages):
+            # The whole turn, so the assertions can look at the instructions
+            # and at what was asked for in the same string.
+            prompts.append(" ".join(str(message.content) for message in messages))
+            if len(prompts) == 1:  # the script pass
+                return says("Ship your workflows today. Nothing else needed.")
+            return says(
+                "<!doctype html><html><body>"
+                '<div id="stage" data-composition-id="promo" data-start="0" '
+                'data-duration="4" data-width="1920" data-height="1080" data-fps="30">'
+                '<div class="clip" data-start="0" data-duration="4" data-track-index="0">'
+                "<h1>Visible</h1></div></div>"
+                "<script>window.__timelines={promo:1};</script></body></html>"
+            )
+
+        return FakeChatModel(respond=respond)
+
+    monkeypatch.setattr("basivo_orch.flows.nodes.models.build_chat_model", fake_build_model)
+
+    async def fake_probe(html, *, width, height, duration):
+        return {1.0: ["Visible"]}, []
+
+    monkeypatch.setattr(video_module, "probe_composition", fake_probe)
+
+    async def fake_render(html, *, variables, config, assets=None):
+        rendered["html"] = html
+        rendered["assets"] = assets or {}
+        return b"\x00\x00\x00\x18ftypmp42" + b"0" * 200, "ok"
+
+    monkeypatch.setattr(video_module, "_render", fake_render)
+
+    graph = Graph.model_validate(
+        {
+            "nodes": [
+                {"id": "t", "type": "trigger.manual", "config": {}},
+                {
+                    "id": "promo",
+                    "type": "video.generate",
+                    "name": "Narrated promo",
+                    "config": {
+                        "brief": "A 4 second promo for a workflow tool.",
+                        "duration_seconds": 4,
+                        "narration": True,
+                        "captions": True,
+                        "save_preview": False,
+                        "provider": "openai",
+                        "model": "gpt-4o-mini",
+                    },
+                },
+            ],
+            "edges": [{"source": "t", "target": "promo"}],
+        }
+    )
+
+    run = await run_graph(session, make_run, graph)
+    assert run.status is RunStatus.SUCCEEDED, run.error
+
+    # The agent was asked for words first, and markup second.
+    assert "narration for short product videos" in prompts[0]
+    # A range, not just a ceiling: asked only for a maximum, models come in far
+    # under it and the video ends in silence.
+    assert "between 8 and 10 words" in prompts[0]
+    # The composition pass knew the real length and when each word lands.
+    assert "6 seconds long" in prompts[1]
+    assert "0.0s Ship" in prompts[1]
+
+    html = rendered["html"]
+    # The voice is in the project, and referenced from inside the stage.
+    assert rendered["assets"]["narration.wav"] == b"RIFFnarration"
+    assert '<audio src="narration.wav"' in html
+    assert html.index("<audio") < html.index("</div></body>") if "</div></body>" in html else True
+    # Captions exist, and are driven by the composition's timeline rather than
+    # by CSS — a CSS animation renders as one frozen frame.
+    assert 'id="hf-captions"' in html
+    assert "window.__timelines" in html and 'tl.set("#hf-w-0-0"' in html
+    # The composition declared 4s; the voice is 6s, so the render was widened.
+    assert 'data-duration="6.3"' in html
+
+    events = await replay(session, run.id)
+    steps = [e.data.get("step") for e in events if e.type == "node.step"]
+    assert steps.index("video.script") < steps.index("video.spoken") < steps.index("video.attempt")
+    assert "video.duration_widened" in steps
+    attached = [e.data for e in events if e.data.get("step") == "video.narration_attached"][0]
+    assert attached["captions_rendered"] is True
+    assert attached["seconds"] == 6.0
+
+    assert run.output["result"]["duration_seconds"] == 6.4
+    assert run.output["result"]["narration_artifact_id"]
+
+
+async def test_the_speak_node_produces_playable_narration_in_a_run(session, make_run, monkeypatch):
+    """audio.speak on its own, so it can feed a poster, a bot, or a video."""
+    from basivo_orch.flows.nodes import speech as speech_module
+
+    async def fake_speak(text, *, voice, speed):
+        assert text == "Your build is green."
+        return b"RIFF" + b"0" * 200, 1.8, [{"word": "Your", "start": 0.0, "end": 0.3}]
+
+    monkeypatch.setattr(speech_module, "speak", fake_speak)
+
+    graph = Graph.model_validate(
+        {
+            "nodes": [
+                {"id": "t", "type": "trigger.manual", "config": {}},
+                {
+                    "id": "voice",
+                    "type": "audio.speak",
+                    "name": "Say it",
+                    "config": {
+                        "text": "{{ input.line }}",
+                        "voice": "am_michael",
+                        "format": "wav",
+                    },
+                },
+            ],
+            "edges": [{"source": "t", "target": "voice"}],
+        }
+    )
+
+    run = await run_graph(session, make_run, graph, payload={"line": "Your build is green."})
+    assert run.status is RunStatus.SUCCEEDED, run.error
+    result = run.output["result"]
+    assert result["duration_seconds"] == 1.8
+    assert result["word_count"] == 4
+    assert result["artifact_id"]
+
+    # Stored as audio, so the run page offers a player rather than a download.
+    from basivo_orch.flows.models import Artifact
+
+    artifacts = (
+        (await session.execute(select(Artifact).where(Artifact.run_id == run.id))).scalars().all()
+    )
+    assert [a.content_type for a in artifacts] == ["audio/wav"]
+
+
 EXERCISED_NODE_TYPES = {
+    "audio.speak",
     "design.render",
     "video.render",
     "video.generate",
@@ -1179,7 +1343,7 @@ async def test_a_video_node_takes_its_copy_from_an_agent_and_stores_the_file(
 
     captured: dict[str, object] = {}
 
-    async def fake_render(html, *, variables, config):
+    async def fake_render(html, *, variables, config, assets=None):
         captured["variables"] = variables
         captured["template_applied"] = "Auto-fix shipped" in json.dumps(variables)
         return b"\x00\x00\x00\x18ftypmp42" + b"0" * 400, "ok"
@@ -1282,7 +1446,7 @@ async def test_the_video_generator_revises_until_the_composition_actually_shows_
 
     monkeypatch.setattr(video_module, "probe_composition", fake_probe)
 
-    async def fake_render(html, *, variables, config):
+    async def fake_render(html, *, variables, config, assets=None):
         assert "Visible" in html, "the blank composition was rendered anyway"
         return b"\x00\x00\x00\x18ftypmp42" + b"0" * 200, "ok"
 
