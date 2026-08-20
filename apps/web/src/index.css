@@ -247,10 +247,58 @@
      was translucent with backdrop-blur on every card, which is exactly the
      glassmorphism-everywhere look that now reads as a template. Blur belongs
      on the two sticky bars, nowhere else. */
+  /* Glass, not a flat panel.
+   *
+   * This was a solid fill with a hairline, which is legible and completely
+   * inert — the thing that read as "static". A surface now has translucency,
+   * a blur behind it, a light inner top edge and a real drop shadow, so a card
+   * sits *above* the page instead of being drawn onto it. That is the whole
+   * difference between a document and an interface. */
   .surface {
-    background: var(--color-ink-850);
+    background: color-mix(in oklab, var(--color-ink-850) 72%, transparent);
+    backdrop-filter: blur(16px) saturate(140%);
+    -webkit-backdrop-filter: blur(16px) saturate(140%);
     border: 1px solid var(--edge);
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+    box-shadow:
+      /* the inner highlight along the top edge — where the light is */
+      inset 0 1px 0 color-mix(in oklab, var(--color-ink-100) 8%, transparent),
+      0 1px 2px rgba(0, 0, 0, 0.10),
+      0 12px 32px -18px rgba(0, 0, 0, 0.45);
+  }
+
+  /* Ambient light behind the content. Two very soft, very large radial pools
+   * of brand colour, fixed to the viewport so scrolling moves content across
+   * the light rather than dragging the light along — the cheapest way to make
+   * a page feel like it has air in it. */
+  .ambient {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    background:
+      radial-gradient(
+        60rem 40rem at 12% -8%,
+        color-mix(in oklab, var(--color-brand-500) 38%, transparent),
+        transparent 70%
+      ),
+      radial-gradient(
+        50rem 34rem at 92% 8%,
+        color-mix(in oklab, var(--color-accent-500) 30%, transparent),
+        transparent 72%
+      );
+    opacity: var(--decor-glow);
+  }
+
+  /* A number worth reading gets the brand gradient rather than plain ink. */
+  .metric-gradient {
+    background: linear-gradient(
+      135deg,
+      var(--color-ink-100) 0%,
+      color-mix(in oklab, var(--color-brand-300) 70%, var(--color-ink-100)) 100%
+    );
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
   }
 
   .grid-bg {

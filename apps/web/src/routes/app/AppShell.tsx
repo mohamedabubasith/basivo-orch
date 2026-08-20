@@ -250,7 +250,7 @@ export function AppShell() {
             <Logo />
           </header>
 
-          <main className="mx-auto max-w-6xl px-5 py-8 sm:px-8 sm:py-10">
+          <main className="relative mx-auto max-w-6xl px-5 py-8 sm:px-8 sm:py-10">
             <WorkspaceGate />
           </main>
         </div>

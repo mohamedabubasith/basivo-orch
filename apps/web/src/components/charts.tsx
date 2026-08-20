@@ -32,7 +32,20 @@ export function StatTile({
   flat?: boolean;
 }) {
   return (
-    <div className={flat ? "relative overflow-hidden p-5" : "surface relative overflow-hidden rounded-xl p-5"}>
+    <div
+      className={
+        flat
+          ? "group/tile relative overflow-hidden p-5 transition-colors hover:bg-ink-100/[0.03]"
+          : "surface group/tile relative overflow-hidden rounded-xl p-5 transition-colors hover:bg-ink-100/[0.03]"
+      }
+    >
+      {/* A pool of the metric's own colour, bottom-left, revealed on hover.
+          Depth that responds is what separates an interface from a printout. */}
+      <span
+        aria-hidden="true"
+        className="pointer-events-none absolute -bottom-16 -left-10 h-40 w-40 rounded-full opacity-0 blur-3xl transition-opacity duration-500 group-hover/tile:opacity-100"
+        style={{ background: tone ? STATUS[tone] : "var(--series)" }}
+      />
       {/* A left rail rather than a top hairline. The inset top line rendered
           as a detached stroke floating above the strip's own border — an
           artifact, not a flourish — and a rail reads as part of the tile at
@@ -50,7 +63,10 @@ export function StatTile({
       {/* A single number is a stat tile, never a one-bar bar chart. Tabular
           numerals so a row of tiles reads as one aligned instrument panel. */}
       <p
-        className="mt-2 text-[2rem] leading-none font-semibold tracking-tight text-ink-100 [font-variant-numeric:tabular-nums]"
+        className={
+          "relative mt-2 text-[2rem] leading-none font-semibold tracking-tight [font-variant-numeric:tabular-nums] " +
+          (tone ? "" : "metric-gradient")
+        }
         style={tone ? { color: STATUS[tone] } : undefined}
       >
         {value}

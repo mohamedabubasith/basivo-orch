@@ -22,8 +22,6 @@ import { motion } from "motion/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, Link as RouterLink, useNavigate, useParams } from "react-router-dom";
 import {
-  Background,
-  BackgroundVariant,
   Controls,
   MiniMap,
   ReactFlow,
@@ -812,30 +810,27 @@ function BuilderInner() {
                 "--xy-controls-button-color-default": "var(--color-ink-300)",
                 "--xy-controls-button-color-hover-default": "var(--color-brand-300)",
                 "--xy-controls-button-border-color-default": "var(--edge)",
+                // The grid, painted here rather than with <Background>.
+                // That component renders inside `.react-flow__viewport`, which
+                // is the element the pan/zoom transform is applied to — so its
+                // squares scaled with the zoom. Drawn on the outer element the
+                // grid is a fixed surface the graph moves over, which is what
+                // a drafting surface behaves like.
+                backgroundImage: `
+                  linear-gradient(to right,
+                    color-mix(in oklab, var(--canvas-line) 55%, transparent) 1px,
+                    transparent 1px),
+                  linear-gradient(to bottom,
+                    color-mix(in oklab, var(--canvas-line) 55%, transparent) 1px,
+                    transparent 1px)
+                `,
+                backgroundSize: "26px 26px",
               } as React.CSSProperties
             }
             className="[&_.react-flow__attribution]:!bg-transparent [&_.react-flow__attribution]:!text-ink-600 [&_.react-flow__attribution_a]:!text-ink-600"
           >
             {/* Lines, not dots — a boxed grid reads as a drafting surface,
                 and it is what every peer tool trains people to expect. */}
-            {/* Two layers: a wide faint grid for the drafting-surface feel,
-                and dots on a finer pitch over it for texture. One flat grid
-                read as graph paper and nothing else. */}
-            <Background
-              id="grid"
-              variant={BackgroundVariant.Lines}
-              gap={104}
-              color="var(--canvas-line)"
-              style={{ opacity: 0.5 }}
-            />
-            <Background
-              id="dots"
-              variant={BackgroundVariant.Dots}
-              gap={26}
-              size={1}
-              color="var(--canvas-dot)"
-              style={{ opacity: 0.85 }}
-            />
             <Controls
               showInteractive={false}
               className="!overflow-hidden !rounded-xl !border !border-ink-700/70 !bg-ink-850/90 !shadow-lg !backdrop-blur [&_button]:!h-8 [&_button]:!w-8 [&_button]:!border-0 [&_button]:!border-b [&_button]:!border-ink-700/60 [&_button]:!bg-transparent [&_button]:!fill-ink-300 [&_button:hover]:!bg-ink-800 [&_button:hover]:!fill-brand-300 [&_button:last-child]:!border-b-0"

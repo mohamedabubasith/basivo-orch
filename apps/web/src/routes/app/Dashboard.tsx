@@ -88,7 +88,7 @@ export function Dashboard() {
   const hasRuns = (runs?.total ?? 0) > 0;
 
   return (
-    <div className="space-y-8">
+    <div className="relative space-y-8">
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className="mb-1.5 text-[0.68rem] font-medium tracking-[0.14em] text-brand-400 uppercase">
