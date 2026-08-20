@@ -340,22 +340,27 @@ function SidebarContent({ collapsed, onToggle }: { collapsed: boolean; onToggle?
                       >
                         {/* One element that travels between items, rather than
                             a background per item fading in and out. `layoutId`
-                            is what makes it move instead of teleport. */}
+                            is what makes it move instead of teleport.
+                            No border and no separate dot: the dot sat OUTSIDE
+                            this pill, at -left-1, so it read as a stray mark
+                            floating beside the sidebar rather than as an
+                            indicator of anything. The fill alone says which
+                            item is current. */}
                         {isActive && (
                           <motion.span
                             layoutId="nav-active"
-                            className="absolute inset-0 rounded-lg border border-[var(--edge)] bg-ink-800"
+                            className="absolute inset-0 rounded-lg bg-ink-100/[0.07]"
                             transition={{ type: "spring", stiffness: 400, damping: 34 }}
                           />
                         )}
-                        {isActive && !collapsed && (
-                          <motion.span
-                            layoutId="nav-rail"
-                            className="absolute top-1/2 -left-1 h-1.5 w-1.5 -translate-y-1/2 rounded-full bg-brand-400"
-                            transition={{ type: "spring", stiffness: 400, damping: 34 }}
-                          />
-                        )}
-                        <span className="relative h-[18px] w-[18px] flex-none">{item.icon}</span>
+                        <span
+                          className={cx(
+                            "relative h-[18px] w-[18px] flex-none transition-colors",
+                            isActive && "text-brand-400",
+                          )}
+                        >
+                          {item.icon}
+                        </span>
                         {!collapsed && <span className="relative truncate">{item.label}</span>}
                       </span>
                     )}
