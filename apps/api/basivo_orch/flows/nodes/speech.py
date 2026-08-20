@@ -405,8 +405,13 @@ def fetch_model(*, target: Path | None = None) -> None:
             print(f"have {name} ({path.stat().st_size // 1024 // 1024}MB)")
             continue
         print(f"fetching {name} …")
-        request = urllib.request.Request(url, headers={"user-agent": "basivo-orch"})
-        with urllib.request.urlopen(request, timeout=600) as response, path.open("wb") as out:
+        if not url.startswith("https://"):  # pinned constants, checked anyway
+            raise ValueError(f"Refusing to fetch a model over {url.split(':', 1)[0]}.")
+        request = urllib.request.Request(  # noqa: S310 — https only, checked above
+            url, headers={"user-agent": "basivo-orch"}
+        )
+        response = urllib.request.urlopen(request, timeout=600)  # noqa: S310
+        with response, path.open("wb") as out:
             while chunk := response.read(1 << 20):
                 out.write(chunk)
         print(f"  {name}: {path.stat().st_size // 1024 // 1024}MB")

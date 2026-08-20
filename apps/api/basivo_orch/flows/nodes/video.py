@@ -378,7 +378,42 @@ async def _render(
 
 #: When to look. Early, middle and late catches the common failures: a scene
 #: that never appears, one that leaves and never returns, an empty ending.
+#: Fractions of the composition to look at, for a short clip. Kept for the
+#: 6-second case where three points really is the whole video.
 PROBE_POINTS = (0.15, 0.5, 0.85)
+
+#: How far apart to look, in seconds, once a composition is long enough for
+#: three points to miss things.
+PROBE_EVERY_SECONDS = 2.0
+#: A ceiling on the sampling. Each point is one JS evaluation on an
+#: already-loaded page, so they are cheap — but not free.
+MAX_PROBE_POINTS = 16
+
+
+def probe_moments(duration: float) -> list[float]:
+    """Which seconds to inspect.
+
+    Three points caught a composition that was blank from start to finish, and
+    missed one that was blank for its last eight seconds — 0.85 of 30s is 25.5s,
+    and the dead zone sat between the samples. A 30-second video gets fourteen
+    looks instead of three, which is what it takes to notice a gap rather than
+    a total failure.
+
+    The last look is deliberately close to the end: the most common dead zone
+    is the tail, where the narration has finished and the animation has run
+    out of scenes.
+    """
+    if duration <= 8:
+        return [round(duration * fraction, 2) for fraction in PROBE_POINTS]
+
+    count = min(MAX_PROBE_POINTS, max(5, int(duration / PROBE_EVERY_SECONDS)))
+    step = duration / (count + 1)
+    moments = [round(step * (index + 1), 2) for index in range(count)]
+    tail = round(duration * 0.97, 2)
+    if tail - moments[-1] > 0.3:
+        moments.append(tail)
+    return moments
+
 
 #: Asks the page what a viewer would actually see at time `t`.
 _PROBE_JS = """(t) => {
@@ -392,8 +427,18 @@ _PROBE_JS = """(t) => {
     if (!text) continue;
     const style = getComputedStyle(el);
     const box = el.getBoundingClientRect();
-    if (parseFloat(style.opacity) > 0.05 && style.visibility !== 'hidden'
-        && box.width > 0 && box.height > 0) {
+    // Opacity does NOT inherit as a computed value: a heading inside a
+    // `.clip` at opacity 0 still computes to opacity 1, and reading only its
+    // own style passed a composition that rendered thirty seconds of black.
+    // So the whole ancestor chain is multiplied out.
+    let effective = 1;
+    for (let node = el; node && node.nodeType === 1; node = node.parentElement) {
+      const nodeStyle = node === el ? style : getComputedStyle(node);
+      if (nodeStyle.visibility === 'hidden' || nodeStyle.display === 'none') { effective = 0; break; }
+      effective *= parseFloat(nodeStyle.opacity);
+      if (effective <= 0.05) break;
+    }
+    if (effective > 0.05 && box.width > 0 && box.height > 0) {
       seen.push(text.slice(0, 60));
     }
   }
@@ -425,8 +470,7 @@ async def probe_composition(
             await page.set_content(html, wait_until="load")
             # GSAP arrives from a CDN; the timeline does not exist until it has.
             await page.wait_for_timeout(900)
-            for fraction in PROBE_POINTS:
-                moment = round(duration * fraction, 2)
+            for moment in probe_moments(duration):
                 try:
                     visible[moment] = await page.evaluate(_PROBE_JS, moment)
                 except Exception as exc:  # noqa: BLE001 — a broken page is data
@@ -679,7 +723,7 @@ class VideoGeneratorNode(Node):
                     "video.duration_widened",
                     {"to_seconds": round(spoken_seconds + 0.3, 2), "reason": "narration is longer"},
                 )
-            html, captioned = inject_narration(
+            html, captioned, dropped_audio = inject_narration(
                 html,
                 audio_name="narration.wav",
                 audio_seconds=spoken_seconds,
@@ -687,6 +731,16 @@ class VideoGeneratorNode(Node):
                 width=width,
                 height=height,
             )
+            if dropped_audio:
+                # Worth a line in the log: the composition tried to bring its
+                # own soundtrack, which would have failed the render outright.
+                await ctx.step(
+                    "video.audio_replaced",
+                    {
+                        "dropped": dropped_audio,
+                        "note": "The composition declared its own audio; the narration is used.",
+                    },
+                )
             assets["narration.wav"] = narration_audio
             saved_voice = await ctx.save_artifact(
                 narration_audio,
@@ -837,6 +891,38 @@ def caption_lines(
     return lines
 
 
+#: A paired `<audio>…</audio>`, tempered so one tag cannot swallow the next:
+#: `.*?` across two elements counted them as one and quietly changed what
+#: "how many did we drop" means.
+_AUDIO_PAIR = re.compile(r"<audio\b[^>]*>(?:(?!</audio\b).)*</audio\s*>", re.DOTALL | re.IGNORECASE)
+#: Whatever is left: a self-closed or unclosed tag.
+_AUDIO_LONE = re.compile(r"<audio\b[^>]*/?>", re.IGNORECASE)
+#: Self-closed tags are removed FIRST, and not only for a tidy count: a
+#: `<audio/>` earlier in the document would otherwise act as the opening tag of
+#: the next `</audio>`, and everything between them — real composition markup —
+#: would be deleted with it.
+_AUDIO_SELF = re.compile(r"<audio\b[^>]*/\s*>", re.IGNORECASE)
+
+
+def strip_audio(html: str) -> tuple[str, int]:
+    """Remove `<audio>` elements the composition brought with it.
+
+    Not defensive programming for its own sake — this is the failure it was
+    written for: told "a voice is already recorded for this video", an agent
+    added `<audio src="voice.mp3">` to be helpful. There is no voice.mp3, and
+    the renderer treats a missing media source as a correctness error and
+    refuses to produce anything at all. One hallucinated filename, no video.
+
+    So the narration track is ours alone: whatever the composition declared is
+    dropped, and the element that actually points at the file we wrote is
+    injected afterwards.
+    """
+    stripped, self_closed = _AUDIO_SELF.subn("", html)
+    stripped, paired = _AUDIO_PAIR.subn("", stripped)
+    stripped, lone = _AUDIO_LONE.subn("", stripped)
+    return stripped, self_closed + paired + lone
+
+
 def _stage_span(html: str) -> tuple[int, int] | None:
     """Where the root element opens and closes, by counting nested divs.
 
@@ -909,10 +995,20 @@ def narration_markup(
     # not the same 40px as a 1920x1080 landscape one.
     font = max(20, round(height * 0.042))
     band = round(height * 0.07)
+    # A scrim behind the band, for two reasons. Legibility over a light or busy
+    # background is the obvious one. The other was found by looking at a real
+    # render: an agent told not to write its own subtitles wrote them anyway,
+    # in the same place, and the frame showed both sets of words superimposed
+    # into nonsense. The scrim covers whatever sits behind ours, so the worst
+    # case is a hidden line rather than an unreadable one.
     parts = [
         audio,
-        f'\n<div id="hf-captions" style="position:absolute;left:6%;right:6%;bottom:{band}px;'
-        f"text-align:center;pointer-events:none;z-index:2147483000;"
+        f'\n<div id="hf-captions" style="position:absolute;left:0;right:0;bottom:0;'
+        f"height:{round(font * 3.4)}px;pointer-events:none;z-index:2147483000;"
+        f"background:linear-gradient(to top,rgba(0,0,0,0.86) 0%,"
+        f'rgba(0,0,0,0.74) 60%,rgba(0,0,0,0) 100%)">',
+        f'<div id="hf-caption-text" style="position:absolute;left:6%;right:6%;'
+        f"bottom:{band}px;text-align:center;"
         f"font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;"
         f'font-weight:800;font-size:{font}px;line-height:1.25;letter-spacing:-0.01em">',
     ]
@@ -927,7 +1023,7 @@ def narration_markup(
             f'<div id="hf-line-{index}" style="position:absolute;left:0;right:0;'
             f'bottom:0;opacity:0">{spans}</div>'
         )
-    parts.append("</div>")
+    parts.append("</div></div>")
     return "".join(parts)
 
 
@@ -944,9 +1040,16 @@ def caption_script(composition: str, lines: list[dict[str, Any]]) -> str:
 
     operations: list[str] = []
     for index, line in enumerate(lines):
+        # A line lingers 0.08s past its last word so it does not blink out on
+        # the final syllable — but never past the moment the next line appears,
+        # or both are drawn on the same frame and the words interleave.
+        following = lines[index + 1]["start"] if index + 1 < len(lines) else None
+        hide = line["end"] + 0.08
+        if following is not None:
+            hide = min(hide, following - 0.001)
         operations.append(
             f'tl.set("#hf-line-{index}",{{opacity:1}},{line["start"]:g});'
-            f'tl.set("#hf-line-{index}",{{opacity:0}},{line["end"] + 0.08:g});'
+            f'tl.set("#hf-line-{index}",{{opacity:0}},{hide:g});'
         )
         for position, word in enumerate(line["words"]):
             # The spoken word brightens; the rest of the line stays readable at
@@ -954,12 +1057,20 @@ def caption_script(composition: str, lines: list[dict[str, Any]]) -> str:
             operations.append(
                 f'tl.set("#hf-w-{index}-{position}",{{opacity:1}},{word["start"]:g});'
             )
+    # The timeline may not exist yet: a composition is free to build it on
+    # `load` rather than inline, and a caption layer that gave up in that case
+    # silently produced a video with a voice and no words on screen. So it
+    # waits — and applies once, whichever path gets there first.
     return (
-        "\n<script>(function(){var t=(window.__timelines||{})["
+        "\n<script>(function(){var done=false;var key="
         + json.dumps(composition)
-        + "];if(!t)return;var tl=t;"
-        + "".join(operations)
-        + "})();</script>"
+        + ";function apply(){if(done)return true;var tl=(window.__timelines||{})[key];"
+        "if(!tl||!tl.set)return false;done=true;" + "".join(operations) + "return true;}"
+        "if(!apply()){var n=0;var id=setInterval(function(){"
+        "if(apply()||++n>150)clearInterval(id);},20);"
+        "window.addEventListener('load',apply);"
+        "document.addEventListener('DOMContentLoaded',apply);}"
+        "})();</script>"
     )
 
 
@@ -971,13 +1082,14 @@ def inject_narration(
     lines: list[dict[str, Any]],
     width: int,
     height: int,
-) -> tuple[str, bool]:
+) -> tuple[str, bool, int]:
     """Put the voice and the captions into a finished composition.
 
-    Returns (html, captions_added). The markup goes at the END of the stage so
-    captions paint over the scenes, and the script goes after the composition's
-    own so the timeline it appends to already exists.
+    Returns (html, captions_added, audio_elements_dropped). The markup goes at
+    the END of the stage so captions paint over the scenes, and the script goes
+    after the composition's own so the timeline it appends to already exists.
     """
+    html, dropped = strip_audio(html)
     span = _stage_span(html)
     if span is None:
         # No recognisable stage: keep the voice (which needs no anchor) and say
@@ -986,7 +1098,7 @@ def inject_narration(
         audio_only = narration_markup(
             audio_name=audio_name, audio_seconds=audio_seconds, lines=[], width=width, height=height
         )
-        return html.replace("</body>", audio_only + "\n</body>", 1), False
+        return html.replace("</body>", audio_only + "\n</body>", 1), False, dropped
 
     _, closing = span
     markup = narration_markup(
@@ -1000,7 +1112,7 @@ def inject_narration(
     script = caption_script(composition_id(html), lines)
     if script and "</body>" in with_markup:
         with_markup = with_markup.replace("</body>", script + "\n</body>", 1)
-    return with_markup, bool(script)
+    return with_markup, bool(script), dropped
 
 
 async def _narrate(
@@ -1012,7 +1124,7 @@ async def _narrate(
     told "about seventy words" will cheerfully write ninety. Overrunning is not
     a style problem: the video would end while the voice is still talking.
     """
-    from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+    from langchain_core.messages import HumanMessage, SystemMessage
 
     from basivo_orch.flows.nodes.speech import WORDS_PER_SECOND, speak, word_budget
 
