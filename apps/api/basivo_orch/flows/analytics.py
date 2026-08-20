@@ -294,9 +294,49 @@ async def analytics(
         if n["skipped"] > 0 and n["succeeded"] == 0 and n["failed"] == 0
     ]
 
+    # ---- one bucket per day ---------------------------------------------
+    #
+    # The dashboard has a 1d / 7d / 30d switcher and, until now, nothing that
+    # changed shape over time — the numbers moved but you could not see a
+    # trend, which is the main thing a window control is for.
+    #
+    # Aggregated in Python over a deliberately lean query rather than with a
+    # SQL date function: `date_trunc` is Postgres and `date()` is SQLite, and
+    # two dialect branches to bucket at most a month of runs is a worse trade
+    # than pulling two columns.
+    day_rows = await session.execute(
+        _scoped(
+            select(Run.created_at, Run.status).where(Run.created_at >= since),
+            organization_id,
+            flow_id,
+        )
+    )
+    buckets: dict[str, dict[str, int]] = {}
+    for created_at, status in day_rows:
+        key = created_at.date().isoformat()
+        bucket = buckets.setdefault(key, {"succeeded": 0, "failed": 0, "other": 0})
+        if str(status) == RunStatus.SUCCEEDED.value:
+            bucket["succeeded"] += 1
+        elif str(status) == RunStatus.FAILED.value:
+            bucket["failed"] += 1
+        else:
+            bucket["other"] += 1
+
+    # Every day in the window, including the empty ones. A chart that silently
+    # skips quiet days compresses the axis and invents activity that did not
+    # happen.
+    today = datetime.now(UTC).date()
+    daily = []
+    for offset in range(days - 1, -1, -1):
+        day = today - timedelta(days=offset)
+        key = day.isoformat()
+        counts = buckets.get(key, {"succeeded": 0, "failed": 0, "other": 0})
+        daily.append({"date": key, **counts})
+
     return {
         "window_days": days,
         "generated_at": datetime.now(UTC),
+        "daily": daily,
         "sampled": len(run_durations) >= DURATION_SAMPLE_LIMIT,
         "runs": {
             "total": total_runs,

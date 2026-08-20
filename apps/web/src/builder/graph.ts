@@ -85,7 +85,10 @@ export function toCanvas(
     // has actually run. @xyflow/react ships the dash-offset keyframes for
     // `.animated` in its own stylesheet; this is the flag that turns it on.
     animated: true,
-    style: { stroke: "var(--series)", strokeWidth: 2, opacity: 0.55 },
+    // Set here as well as in defaultEdgeOptions, because a per-edge `style`
+    // overrides the default entirely — raising the default alone changed
+    // nothing for any edge that had actually been drawn.
+    style: { stroke: "var(--series)", strokeWidth: 2.5, opacity: 0.9 },
   }));
 
   return { nodes, edges };

@@ -25,6 +25,7 @@ import {
   Background,
   BackgroundVariant,
   Controls,
+  MiniMap,
   ReactFlow,
   ReactFlowProvider,
   addEdge,
@@ -34,6 +35,7 @@ import {
   type Connection,
   type Edge,
   type NodeChange,
+  MarkerType,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
@@ -44,7 +46,7 @@ import { WorkspaceProvider, useWorkspace } from "../../lib/workspace";
 import { ThemeToggle } from "../../components/ThemeToggle";
 import { Alert, Button, PageLoader, Spinner } from "../../components/ui";
 import { FlowNodeCard } from "../../builder/FlowNodeCard";
-import { NodeIconChip } from "../../builder/nodeIcons";
+import { NodeIconChip, nodeAccent } from "../../builder/nodeIcons";
 import { Inspector } from "../../builder/Inspector";
 import {
   attachProblems,
@@ -763,7 +765,11 @@ function BuilderInner() {
               // The series colour rather than a neutral grey: this line *is*
               // the thing carrying data from one node to the next, so it gets
               // the hue reserved for identity rather than chrome.
-              style: { stroke: "var(--series)", strokeWidth: 2, opacity: 0.55 },
+              // 2px at 55% opacity was a hairline nobody could see against
+              // the grid, let alone grab. An edge is the data path; it should
+              // be the second most visible thing on the canvas after a node.
+              style: { stroke: "var(--series)", strokeWidth: 2.5, opacity: 0.9 },
+              markerEnd: { type: MarkerType.ArrowClosed, color: "var(--series)", width: 18, height: 18 },
             }}
             // Not a `bg-*` utility: @xyflow/react's own stylesheet puts an
             // explicit `background-color: var(--xy-background-color, ...)`
@@ -776,18 +782,80 @@ function BuilderInner() {
             // wins without a specificity fight — confirmed by the fact that a
             // competing class here rendered pure white in light mode with no
             // visible error.
-            style={{ "--xy-background-color": "var(--canvas-bg)" } as React.CSSProperties}
+            // Same lesson as the background, applied to the rest of the
+            // chrome: @xyflow/react styles its minimap and controls from its
+            // own injected stylesheet, which loads after Tailwind and wins
+            // ties by source order. Classes on those components lost silently
+            // and rendered white boxes on a white canvas. These custom
+            // properties are the library's supported override point.
+            style={
+              {
+                // The names end in `-default` — that is the whole reason the
+                // first attempt at this changed nothing and the minimap stayed
+                // a white box on a grey canvas. `base.css` declares
+                // `--xy-<thing>-default` and each rule reads
+                // `var(--xy-<thing>-props, var(--xy-<thing>, var(--xy-<thing>-default)))`.
+                "--xy-background-color-default": "var(--canvas-bg)",
+                // Not ink-850: that is near-white in light mode, so the map
+                // was a white box on a pale canvas. The canvas colour plus a
+                // border reads as a recessed inset in both themes.
+                "--xy-minimap-background-color-default": "var(--canvas-bg)",
+                "--xy-minimap-mask-background-color-default":
+                  "color-mix(in oklab, var(--canvas-bg) 62%, transparent)",
+                "--xy-minimap-node-background-color-default": "var(--color-ink-500)",
+                "--xy-edge-stroke-default": "var(--series)",
+                "--xy-edge-stroke-width-default": "2.5",
+                "--xy-handle-background-color-default": "var(--color-ink-400)",
+                "--xy-connectionline-stroke-default": "var(--color-brand-400)",
+                "--xy-controls-button-background-color-default": "var(--color-ink-850)",
+                "--xy-controls-button-background-color-hover-default": "var(--color-ink-800)",
+                "--xy-controls-button-color-default": "var(--color-ink-300)",
+                "--xy-controls-button-color-hover-default": "var(--color-brand-300)",
+                "--xy-controls-button-border-color-default": "var(--edge)",
+              } as React.CSSProperties
+            }
             className="[&_.react-flow__attribution]:!bg-transparent [&_.react-flow__attribution]:!text-ink-600 [&_.react-flow__attribution_a]:!text-ink-600"
           >
             {/* Lines, not dots — a boxed grid reads as a drafting surface,
                 and it is what every peer tool trains people to expect. */}
+            {/* Two layers: a wide faint grid for the drafting-surface feel,
+                and dots on a finer pitch over it for texture. One flat grid
+                read as graph paper and nothing else. */}
             <Background
+              id="grid"
               variant={BackgroundVariant.Lines}
-              gap={26}
+              gap={104}
               color="var(--canvas-line)"
-              style={{ opacity: 0.55 }}
+              style={{ opacity: 0.5 }}
             />
-            <Controls className="!border-ink-700 !bg-ink-850 [&_button]:!border-ink-700 [&_button]:!bg-ink-850 [&_button]:!fill-ink-300" />
+            <Background
+              id="dots"
+              variant={BackgroundVariant.Dots}
+              gap={26}
+              size={1}
+              color="var(--canvas-dot)"
+              style={{ opacity: 0.85 }}
+            />
+            <Controls
+              showInteractive={false}
+              className="!overflow-hidden !rounded-xl !border !border-ink-700/70 !bg-ink-850/90 !shadow-lg !backdrop-blur [&_button]:!h-8 [&_button]:!w-8 [&_button]:!border-0 [&_button]:!border-b [&_button]:!border-ink-700/60 [&_button]:!bg-transparent [&_button]:!fill-ink-300 [&_button:hover]:!bg-ink-800 [&_button:hover]:!fill-brand-300 [&_button:last-child]:!border-b-0"
+            />
+            {/* Only once there is a graph worth navigating. On a three-node
+                flow the map is an empty box with two dashes in it — chrome
+                that has not earned its corner of the canvas. */}
+            {nodes.length >= 6 && (
+            <MiniMap
+              pannable
+              zoomable
+              ariaLabel="Flow overview"
+              nodeStrokeWidth={0}
+              nodeBorderRadius={4}
+              nodeColor={(node) => nodeAccent(String(node.data?.nodeType ?? ""))}
+              maskColor="color-mix(in oklab, var(--canvas-bg) 72%, transparent)"
+              className="!bottom-4 !rounded-xl !border !border-ink-700/70 !bg-ink-850/85 !shadow-lg !backdrop-blur"
+              style={{ width: 168, height: 108 }}
+            />
+            )}
           </ReactFlow>
 
           {nodes.length === 0 && (
@@ -991,10 +1059,51 @@ function Palette({
   hasTrigger: boolean;
   onAdd: (spec: NodeSpec) => void;
 }) {
-  const groups = useMemo(() => groupSpecs(specs), [specs]);
+  const [query, setQuery] = useState("");
+  // Fifteen node types is past the point where scanning works. Matching on
+  // label AND type means both "video" and "social.post" find the right thing,
+  // which are the two ways people actually search a palette.
+  const matching = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    if (!needle) return specs;
+    return specs.filter(
+      (spec) =>
+        spec.label.toLowerCase().includes(needle) ||
+        spec.type.toLowerCase().includes(needle) ||
+        spec.description.toLowerCase().includes(needle),
+    );
+  }, [specs, query]);
+  const groups = useMemo(() => groupSpecs(matching), [matching]);
 
   return (
-    <div className="w-[228px] flex-none overflow-y-auto border-r border-ink-800/70 bg-ink-900/50 p-3">
+    <div className="flex w-[228px] flex-none flex-col border-r border-ink-800/70 bg-ink-900/50">
+      <div className="flex-none p-3 pb-2">
+        <div className="relative">
+          <svg
+            viewBox="0 0 24 24"
+            className="pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2 text-ink-500"
+            fill="none"
+            aria-hidden="true"
+          >
+            <circle cx="10.5" cy="10.5" r="6" stroke="currentColor" strokeWidth="1.8" />
+            <path d="M15 15l4 4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+          </svg>
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search nodes"
+            aria-label="Search nodes"
+            className="w-full rounded-lg border border-ink-700 bg-ink-950/60 py-1.5 pr-2 pl-8 text-xs text-ink-100 outline-none placeholder:text-ink-500 focus:border-brand-400"
+          />
+        </div>
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3">
+      {groups.length === 0 && (
+        <p className="px-1 py-6 text-center text-xs text-ink-500">
+          Nothing matches “{query}”.
+        </p>
+      )}
       {groups.map((group) => (
         <div key={group.heading} className="mb-4">
           <p className="mb-1.5 px-1 text-[0.66rem] font-medium tracking-[0.12em] text-ink-500 uppercase">
@@ -1040,7 +1149,11 @@ function Palette({
           </ul>
         </div>
       ))}
-      <p className="px-1 text-[0.66rem] leading-relaxed text-ink-600">
+      </div>
+
+      {/* Pinned below the scroll area rather than trailing the list: a hint
+          you have to scroll fifteen nodes to reach is a hint nobody reads. */}
+      <p className="flex-none border-t border-ink-800/70 px-4 py-2.5 text-[0.66rem] leading-relaxed text-ink-600">
         Drag onto the canvas, or click to drop one at the top left.
       </p>
     </div>

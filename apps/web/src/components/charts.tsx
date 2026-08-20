@@ -33,11 +33,15 @@ export function StatTile({
 }) {
   return (
     <div className={flat ? "relative overflow-hidden p-5" : "surface relative overflow-hidden rounded-xl p-5"}>
-      {/* The tile's one allowed flourish: a hairline in the metric's colour. */}
+      {/* A left rail rather than a top hairline. The inset top line rendered
+          as a detached stroke floating above the strip's own border — an
+          artifact, not a flourish — and a rail reads as part of the tile at
+          any width. Same device as the canvas node cards, so the two screens
+          share a vocabulary. */}
       <span
         aria-hidden="true"
-        className="absolute inset-x-4 top-0 h-px"
-        style={{ background: tone ? STATUS[tone] : "var(--series)", opacity: 0.7 }}
+        className="absolute inset-y-0 left-0 w-[3px]"
+        style={{ background: tone ? STATUS[tone] : "var(--series)", opacity: 0.85 }}
       />
       <div className="flex items-start justify-between gap-3">
         <p className="text-sm text-ink-400">{label}</p>

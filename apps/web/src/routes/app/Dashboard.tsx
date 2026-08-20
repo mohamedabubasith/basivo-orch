@@ -7,6 +7,7 @@ import { useWorkspace } from "../../lib/workspace";
 import { BarList, Panel, StatTile, StatusPip, type BarDatum } from "../../components/charts";
 import { formatMs, formatPercent } from "../../lib/viz";
 import { Badge, Card, Spinner } from "../../components/ui";
+import { RunsChart } from "./RunsChart";
 
 interface NodeStat {
   node_id: string;
@@ -26,6 +27,7 @@ interface NodeStat {
 
 interface Analytics {
   window_days: number;
+  daily: { date: string; succeeded: number; failed: number; other: number }[];
   runs: {
     total: number;
     succeeded: number;
@@ -186,13 +188,17 @@ export function Dashboard() {
             />
           </div>
 
+          <div className="surface rounded-2xl p-5">
+            <RunsChart daily={data.daily ?? []} />
+          </div>
+
           <div className="grid gap-6 lg:grid-cols-2">
             <Panel
               title="Where the time goes"
               description="Share of total run time by node. “The flow is slow” is not actionable; one node at 78% is."
             >
               <BarList
-                data={data.nodes.slice(0, 8).map<BarDatum>((node, i) => ({
+                data={data.nodes.slice(0, 5).map<BarDatum>((node, i) => ({
                   key: node.node_id,
                   label: node.node_name,
                   value: node.share_of_runtime,
@@ -216,7 +222,7 @@ export function Dashboard() {
                   // "what is broken"; leading with a healthy node because it
                   // happens to be slow buries the answer.
                   .sort((a, b) => (b.failure_rate ?? 0) - (a.failure_rate ?? 0))
-                  .slice(0, 8)
+                  .slice(0, 5)
                   .map<BarDatum>((node) => ({
                     key: node.node_id,
                     label: node.node_name,

@@ -22,6 +22,7 @@ import { Handle, Position, type NodeProps } from "@xyflow/react";
 import { cx } from "../lib/cx";
 import type { FlowNode } from "./graph";
 import { NodeIconChip, nodeAccent } from "./nodeIcons";
+import { nodeSummary } from "./nodeSummary";
 
 const STATUS = {
   running: { color: "var(--series)", label: "Running" },
@@ -37,6 +38,7 @@ export function FlowNodeCard({ data, selected }: NodeProps<FlowNode>) {
   const status = data.runStatus ? STATUS[data.runStatus] : null;
   const ports = data.ports.length > 0 ? data.ports : ["out"];
   const accent = nodeAccent(data.nodeType);
+  const summary = nodeSummary(data.nodeType, data.config ?? {});
 
   return (
     <motion.div
@@ -48,8 +50,11 @@ export function FlowNodeCard({ data, selected }: NodeProps<FlowNode>) {
       transition={{ type: "spring", stiffness: 420, damping: 28 }}
       whileHover={{ y: -2 }}
       className={cx(
-        "group relative w-[248px] rounded-2xl border transition-colors duration-150",
-        "shadow-[0_1px_2px_rgba(0,0,0,0.16),0_10px_28px_-14px_rgba(0,0,0,0.55)]",
+        "group relative w-[236px] overflow-hidden rounded-xl border transition-colors duration-150",
+        // Two shadows: a tight one for the edge and a wide soft one for lift.
+        // A single flat border made these read as list rows rather than
+        // objects sitting on a surface.
+        "shadow-[0_1px_2px_rgba(0,0,0,0.10),0_12px_24px_-16px_rgba(0,0,0,0.45)]",
         selected
           ? "border-brand-400 ring-2 ring-brand-400/25"
           : data.problem
@@ -60,14 +65,19 @@ export function FlowNodeCard({ data, selected }: NodeProps<FlowNode>) {
         // The identity colour runs faintly through the whole card, not only
         // the icon chip — a flat `bg-ink-850` box with a coloured icon in the
         // corner read as plain no matter how good the icon was.
-        background: `color-mix(in oklab, ${accent} 5%, var(--color-ink-850))`,
+        // 5% of an accent over a near-white surface is invisible, which is
+        // exactly how these looked in light mode: plain white boxes. The wash
+        // is stronger and the identity now lives mostly in the rail below.
+        background: `color-mix(in oklab, ${accent} 9%, var(--color-ink-850))`,
       }}
     >
-      {/* A hairline in the node's accent. Identity you can read at low zoom,
-          when the label has stopped being legible. */}
+      {/* A full-height rail rather than a 1px top hairline. This is the thing
+          you read at low zoom, when labels have stopped being legible — a
+          canvas of a dozen nodes should sort into triggers / agents / devops
+          by colour before you focus on any one of them. */}
       <span
-        className="absolute inset-x-3 top-0 h-px rounded-full"
-        style={{ background: accent, opacity: 0.85 }}
+        className="absolute inset-y-0 left-0 w-[3px]"
+        style={{ background: accent }}
         aria-hidden="true"
       />
 
@@ -78,18 +88,23 @@ export function FlowNodeCard({ data, selected }: NodeProps<FlowNode>) {
         <Handle
           type="target"
           position={Position.Left}
-          className="!h-3 !w-3 !border-2 !border-ink-950 !bg-ink-400 transition-colors hover:!bg-brand-400"
+          className="!h-3.5 !w-3.5 !border-2 !border-[var(--color-ink-900)] !bg-ink-400 transition-all hover:!scale-125 hover:!bg-brand-400"
         />
       )}
 
-      <div className="flex items-center gap-3 px-3.5 py-3">
-        <NodeIconChip type={data.nodeType} />
+      <div className="flex items-start gap-2.5 py-2.5 pr-3.5 pl-3">
+        <NodeIconChip type={data.nodeType} size={8} />
 
         <div className="min-w-0 flex-1">
           <p className="truncate text-[0.82rem] leading-tight font-medium text-ink-100">
             {data.label}
           </p>
-          <p className="mt-0.5 truncate font-mono text-[0.65rem] text-ink-500">{data.nodeType}</p>
+          {/* What this node will actually do — which model, which repository,
+              which channel. Without it a canvas of four agents is four
+              identical cards and every question means opening one. */}
+          <p className="mt-1 truncate text-[0.68rem] leading-tight text-ink-400" title={summary}>
+            {summary || data.nodeType}
+          </p>
         </div>
       </div>
 
@@ -149,7 +164,7 @@ export function FlowNodeCard({ data, selected }: NodeProps<FlowNode>) {
               position={Position.Right}
               style={{ position: "relative", right: 0, top: 0, transform: "none" }}
               className={cx(
-                "!h-3 !w-3 !border-2 !border-ink-950 transition-transform hover:!scale-125",
+                "!h-3.5 !w-3.5 !border-2 !border-[var(--color-ink-900)] transition-transform hover:!scale-125",
                 port === "false"
                   ? "!bg-[var(--status-warn)]"
                   : port === "true"
