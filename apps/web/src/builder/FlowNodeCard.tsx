@@ -36,6 +36,14 @@ const PORT_LABEL: Record<string, string> = {
   out: "",
   true: "true",
   false: "false",
+  handover: "hand over",
+};
+
+/** Ports whose label and handle are tinted, so a branch reads at a glance. */
+const PORT_TINT: Record<string, string> = {
+  true: "var(--status-good)",
+  false: "var(--status-warn)",
+  handover: "var(--series)",
 };
 
 export function FlowNodeCard({ data, selected }: NodeProps<FlowNode>) {
@@ -184,12 +192,7 @@ export function FlowNodeCard({ data, selected }: NodeProps<FlowNode>) {
             {ports.length > 1 && (
               <span
                 className="absolute right-4 text-[0.62rem] whitespace-nowrap"
-                style={{
-                  color:
-                    port === "false"
-                      ? "var(--status-warn)"
-                      : "var(--status-good)",
-                }}
+                style={{ color: PORT_TINT[port] ?? "var(--status-good)" }}
               >
                 {PORT_LABEL[port] ?? port}
               </span>
@@ -198,20 +201,14 @@ export function FlowNodeCard({ data, selected }: NodeProps<FlowNode>) {
               id={port}
               type="source"
               position={Position.Right}
+              className="!h-3.5 !w-3.5 !border-2 !border-[var(--color-ink-900)] transition-transform hover:!scale-125"
               style={{
                 position: "relative",
                 right: 0,
                 top: 0,
                 transform: "none",
+                background: PORT_TINT[port] ?? "var(--color-brand-400)",
               }}
-              className={cx(
-                "!h-3.5 !w-3.5 !border-2 !border-[var(--color-ink-900)] transition-transform hover:!scale-125",
-                port === "false"
-                  ? "!bg-[var(--status-warn)]"
-                  : port === "true"
-                    ? "!bg-[var(--status-good)]"
-                    : "!bg-brand-400",
-              )}
             />
           </div>
         ))}

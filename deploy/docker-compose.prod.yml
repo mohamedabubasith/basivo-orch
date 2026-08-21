@@ -218,6 +218,11 @@ services:
     build:
       context: ../apps/web
       dockerfile: Dockerfile
+      args:
+        # So the landing page's "Sign in" opens the console rather than the app
+        # on the marketing hostname, where the session would belong to the
+        # wrong origin.
+        CONSOLE_ORIGIN: ${CONSOLE_SCHEME:-https}://${CONSOLE_ADDRESS}
     image: basivo-web:latest
     restart: unless-stopped
     logging: *logging

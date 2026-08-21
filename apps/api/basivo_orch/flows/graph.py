@@ -13,6 +13,11 @@ from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
+#: Kept as literals rather than imported from the node modules: this validator
+#: runs on every save, and importing the node package pulls in langchain.
+HANDOVER_PORT = "handover"
+AGENT_TYPE = "agent.llm"
+
 MAX_NODES = 200
 MAX_EDGES = 500
 
@@ -121,6 +126,22 @@ def validate_graph(graph: Graph, *, known_types: dict[str, Any]) -> None:
     for trigger in triggers:
         if graph.incoming(trigger.id):
             problems.append(f"Trigger {trigger.id!r} cannot have inputs.")
+
+    # A handover edge means "another agent takes the conversation", so the thing
+    # on the other end has to be an agent. Wired to a render or a post it would
+    # look connected on the canvas and simply never fire, because the agent is
+    # offered a transfer tool per *agent* downstream and would find none.
+    by_id = {node.id: node for node in graph.nodes}
+    for edge in graph.edges:
+        if edge.source_handle != HANDOVER_PORT:
+            continue
+        target = by_id.get(edge.target)
+        if target is not None and target.type != AGENT_TYPE:
+            problems.append(
+                f"The handover from {edge.source!r} goes to {edge.target!r}, which is a "
+                f"{target.type}. Handover passes a conversation to another agent, so it "
+                "can only connect to an AI Agent."
+            )
 
     if problems:
         raise GraphError(problems)

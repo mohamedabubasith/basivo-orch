@@ -11,6 +11,9 @@ import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 import { cx } from "../lib/cx";
 
+/** Sentinel value for the "add one" row in a credential dropdown. */
+const ADD_CREDENTIAL = "__add_credential__";
+
 const INPUT =
   "w-full rounded-lg border border-ink-700 bg-ink-950/60 px-2.5 py-2 text-sm text-ink-100 outline-none focus:border-brand-400";
 
@@ -47,6 +50,7 @@ export function CredentialPicker({
   const [credentials, setCredentials] = useState<CredentialOption[] | null>(
     null,
   );
+  const [reloads, setReloads] = useState(0);
 
   useEffect(() => {
     if (!orgId) return;
@@ -58,15 +62,36 @@ export function CredentialPicker({
     return () => {
       cancelled = true;
     };
-  }, [orgId]);
+  }, [orgId, reloads]);
+
+  // Refetch when the tab regains focus. Someone who has just added a
+  // credential in the other tab expects to find it here without reloading the
+  // builder, which would cost them the graph they have not saved yet.
+  useEffect(() => {
+    const refresh = () => setReloads((count) => count + 1);
+    window.addEventListener("focus", refresh);
+    return () => window.removeEventListener("focus", refresh);
+  }, []);
 
   const matching = (credentials ?? []).filter((c) => c.provider === provider);
+
+  function choose(next: string) {
+    if (next !== ADD_CREDENTIAL) {
+      onChange(next);
+      return;
+    }
+    // A new tab, not a navigation. The builder holds unsaved graph edits, and
+    // sending someone to another page to fetch a key would throw away the flow
+    // they were in the middle of drawing. The list refreshes when they come
+    // back, so the credential they just made is simply there.
+    window.open("/app/credentials", "_blank", "noopener");
+  }
 
   return (
     <div>
       <select
         value={value}
-        onChange={(event) => onChange(event.target.value)}
+        onChange={(event) => choose(event.target.value)}
         className={INPUT}
       >
         <option value="">
@@ -79,19 +104,16 @@ export function CredentialPicker({
             {credential.name} (…{credential.hint || "????"})
           </option>
         ))}
+        {/* In the list itself, not only in a hint below it. Someone who opens
+            this dropdown and finds nothing for their provider is looking for
+            exactly this, and a sentinel option is reachable by keyboard and on
+            a phone in a way a floating button beside the field is not. */}
+        <option value={ADD_CREDENTIAL}>+ Add a credential…</option>
       </select>
       {credentials !== null && matching.length === 0 && (
         <p className="mt-1.5 text-[0.68rem] leading-relaxed text-ink-500">
-          No saved credential for this provider yet.{" "}
-          <a
-            href="/app/credentials"
-            target="_blank"
-            rel="noreferrer"
-            className="text-ink-300 underline decoration-dotted underline-offset-2 hover:text-ink-100"
-          >
-            Add one
-          </a>
-          , or leave this on the server's key if one is configured.
+          No saved credential for this provider yet. Add one from the list
+          above, or leave this on the server's key if one is configured.
         </p>
       )}
     </div>

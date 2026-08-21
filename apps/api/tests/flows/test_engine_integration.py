@@ -1019,6 +1019,109 @@ async def test_the_speak_node_produces_playable_narration_in_a_run(session, make
     assert [a.content_type for a in artifacts] == ["audio/wav"]
 
 
+async def test_two_agent_nodes_hand_over_on_the_canvas(session, make_run, monkeypatch):
+    """Handover between NODES, not sub-agents inside one node.
+
+    The point of doing it this way: the colleague is a node on the canvas with
+    its own model, tools, skills, memory and cost row, its turn is its own step
+    in the run log, and who may hand to whom is an edge someone drew rather
+    than a list buried in one node's configuration.
+
+    Also asserted: the front desk's own default edge does NOT fire. An agent
+    that transferred has not answered, and running the rest of the flow on a
+    non-answer is the failure this routing exists to prevent.
+    """
+    seen: dict[str, list[str]] = {}
+
+    async def fake_build_model(ctx, **_kwargs):
+        def respond(messages):
+            seen.setdefault(ctx.node_id, []).append(str(messages[-1].content))
+            if ctx.node_id == "desk":
+                return tool_call(
+                    "transfer_to_refunds",
+                    {"reason": "they want money back"},
+                    call_id="h1",
+                )
+            return says("Refunded in full.")
+
+        return FakeChatModel(respond=respond)
+
+    # Patched where `agent.py` bound it, not where it is defined: the module
+    # imports the name at import time, so patching the source has no effect.
+    monkeypatch.setattr("basivo_orch.flows.nodes.agent.build_chat_model", fake_build_model)
+
+    graph = Graph.model_validate(
+        {
+            "nodes": [
+                {"id": "t", "type": "trigger.manual", "config": {}},
+                {
+                    "id": "desk",
+                    "type": "agent.llm",
+                    "name": "Front desk",
+                    "config": {"prompt": "{{ input.text }}", "purpose": "First contact"},
+                },
+                {
+                    "id": "refunds",
+                    "type": "agent.llm",
+                    "name": "Refunds",
+                    "config": {
+                        "prompt": "{{ input.text }}",
+                        "purpose": "Refunds, billing disputes and chargebacks",
+                    },
+                },
+                {
+                    "id": "shipping",
+                    "type": "agent.llm",
+                    "name": "Shipping",
+                    "config": {"prompt": "{{ input.text }}", "purpose": "Late parcels"},
+                },
+                {
+                    "id": "log",
+                    "type": "data.set",
+                    "name": "After answering",
+                    "config": {"assignments": [{"name": "done", "value": "yes"}]},
+                },
+            ],
+            "edges": [
+                {"source": "t", "target": "desk"},
+                {"source": "desk", "target": "refunds", "source_handle": "handover"},
+                {"source": "desk", "target": "shipping", "source_handle": "handover"},
+                {"source": "desk", "target": "log"},
+            ],
+        }
+    )
+
+    run = await run_graph(session, make_run, graph, payload={"text": "I want a refund"})
+    assert run.status is RunStatus.SUCCEEDED, run.error
+
+    # The desk was told who its colleagues are, and what each one handles.
+    prompt = " ".join(seen["desk"])
+    assert "I want a refund" in prompt
+
+    # Refunds ran and received the reason as its input.
+    assert "refunds" in seen, "the chosen colleague never ran"
+    assert "they want money back" in " ".join(seen["refunds"])
+
+    # The two paths not taken did not run.
+    executions = await nodes_for(session, run.id)
+    assert executions["refunds"].status is NodeStatus.SUCCEEDED
+    assert executions["shipping"].status is NodeStatus.SKIPPED, "a handover is not a committee"
+    assert executions["log"].status is NodeStatus.SKIPPED, (
+        "the default edge must not fire: the desk transferred rather than answered"
+    )
+
+    desk_output = executions["desk"].output_summary or {}
+    assert (desk_output.get("preview") or {}).get("handover_to") == "refunds"
+
+    events = await replay(session, run.id)
+    handovers = [e.data for e in events if e.data.get("step") == "agent.handover"]
+    assert handovers and handovers[0]["to"] == "Refunds"
+    assert handovers[0]["reason"] == "they want money back"
+
+    # And the run's answer is the colleague's, not the desk's.
+    assert run.output["result"]["text"] == "Refunded in full."
+
+
 EXERCISED_NODE_TYPES = {
     "audio.speak",
     "design.render",

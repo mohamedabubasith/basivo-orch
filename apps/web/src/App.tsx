@@ -1,6 +1,14 @@
-import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { useEffect } from "react";
+import {
+  BrowserRouter,
+  Navigate,
+  Route,
+  Routes,
+  useLocation,
+} from "react-router-dom";
 
 import { AuthProvider } from "./lib/auth";
+import { consoleOrigin, isAppRoute } from "./lib/consoleOrigin";
 import { ThemeProvider } from "./lib/theme";
 import { Landing } from "./routes/Landing";
 import { ApiKeys } from "./routes/app/ApiKeys";
@@ -33,7 +41,27 @@ import { VerifyEmail } from "./routes/auth/VerifyEmail";
  * Page transitions belong *inside* whatever should survive them, so the
  * animation now lives around the shell's <Outlet /> and the chrome stays put.
  */
+/**
+ * Send an app route rendered on the wrong hostname to the console.
+ *
+ * The server redirects a hard navigation, but React Router handles an in-app
+ * click without ever asking the server — so clicking through from the landing
+ * page used to open the whole application on the marketing hostname, where any
+ * session it created belonged to the wrong origin. This is the client-side half
+ * of the same rule: the app has one home.
+ */
+function useConsoleGuard() {
+  const location = useLocation();
+  useEffect(() => {
+    const origin = consoleOrigin();
+    if (origin && isAppRoute(location.pathname)) {
+      window.location.replace(origin + location.pathname + location.search);
+    }
+  }, [location.pathname, location.search]);
+}
+
 function AppRoutes() {
+  useConsoleGuard();
   return (
     <Routes>
       <Route path="/" element={<Landing />} />

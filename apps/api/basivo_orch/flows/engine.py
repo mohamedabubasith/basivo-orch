@@ -336,6 +336,32 @@ class Engine:
         except Exception:  # pragma: no cover - telemetry, never load-bearing
             log.warning("skill.load_count_failed", skill_id=str(skill_id))
 
+    def _downstream(self, node_id: str, port: str) -> list[dict[str, str]]:
+        """Which nodes are wired to one of this node's output ports.
+
+        The graph is the engine's business, not a node's, so this is handed over
+        as a callable rather than the graph itself. An agent uses it to learn
+        the colleagues it may hand over to: the edges the flow's author drew are
+        the team, which means the team is visible on the canvas instead of
+        buried in one node's configuration.
+        """
+        found: list[dict[str, str]] = []
+        for edge in self.graph.outgoing(node_id):
+            if (edge.source_handle or DEFAULT_PORT) != port:
+                continue
+            target = self.graph.node(edge.target)
+            if target is None:
+                continue
+            found.append(
+                {
+                    "id": target.id,
+                    "name": target.name or target.id,
+                    "type": target.type,
+                    "purpose": str((target.config or {}).get("purpose", "")),
+                }
+            )
+        return found
+
     async def execute(self) -> Run:
         http = self._http or httpx.AsyncClient(
             # Flows call third-party endpoints; the pool is shared across the
@@ -458,8 +484,15 @@ class Engine:
                 fired = outcome.ports or [DEFAULT_PORT]
                 for edge in self.graph.outgoing(node_id):
                     port = edge.source_handle or DEFAULT_PORT
-                    if port in fired:
-                        self._arrivals[edge.target].add(port)
+                    if port not in fired:
+                        continue
+                    # A node may narrow a port to particular targets. Several
+                    # nodes can share one port — three agents on a handover
+                    # port — and firing all of them would be a committee, not a
+                    # handover.
+                    if outcome.route_to is not None and edge.target not in outcome.route_to:
+                        continue
+                    self._arrivals[edge.target].add(port)
 
     async def _settle(
         self, node_id: str, trigger_id: str, http: httpx.AsyncClient, gate: asyncio.Semaphore
@@ -606,6 +639,7 @@ class Engine:
                 save_memory=self._save_memory,
                 load_skills=self._load_skills,
                 record_skill_load=self._record_skill_load,
+                downstream=lambda port, _id=node.id: self._downstream(_id, port),
                 http=http,
             )
 

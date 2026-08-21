@@ -9,6 +9,8 @@ import {
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 
+import { consoleOrigin } from "../../lib/consoleOrigin";
+
 import { Backdrop } from "../Backdrop";
 import { Badge, Button, Logo } from "../ui";
 import { LogStream } from "./LogStream";
@@ -93,6 +95,38 @@ function Counter({ to, suffix = "" }: { to: number; suffix?: string }) {
 
 /* ----------------------------------------------------------------- nav --- */
 
+/**
+ * A link into the application.
+ *
+ * Where the landing page has its own hostname this must be a real navigation
+ * rather than a client-side route: a session cookie belongs to one origin, so
+ * a visitor who signed up "here" would find the console asking them to sign in
+ * again, with nothing on screen explaining why.
+ */
+function AppLink({
+  to,
+  children,
+  className,
+}: {
+  to: string;
+  children: ReactNode;
+  className?: string;
+}) {
+  const origin = consoleOrigin();
+  if (origin) {
+    return (
+      <a href={origin + to} className={className}>
+        {children}
+      </a>
+    );
+  }
+  return (
+    <Link to={to} className={className}>
+      {children}
+    </Link>
+  );
+}
+
 export function Nav() {
   const [scrolled, setScrolled] = useState(false);
 
@@ -135,12 +169,12 @@ export function Nav() {
           </div>
 
           <div className="flex items-center gap-2">
-            <Link to="/login">
+            <AppLink to="/login">
               <Button variant="ghost">Sign in</Button>
-            </Link>
-            <Link to="/register">
+            </AppLink>
+            <AppLink to="/register">
               <Button>Start free</Button>
-            </Link>
+            </AppLink>
           </div>
         </nav>
       </header>
@@ -247,11 +281,11 @@ export function Hero() {
           </p>
 
           <div className="mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row">
-            <Link to="/register" className="w-full sm:w-auto">
+            <AppLink to="/register" className="w-full sm:w-auto">
               <Button size="lg" full className="sm:w-auto">
                 Start building free
               </Button>
-            </Link>
+            </AppLink>
             <a href="#observability" className="w-full sm:w-auto">
               <Button size="lg" variant="secondary" full className="sm:w-auto">
                 See the run view
@@ -513,12 +547,12 @@ export function CTA() {
                 next.
               </p>
               <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
-                <Link to="/register" className="w-full sm:w-auto">
+                <AppLink to="/register" className="w-full sm:w-auto">
                   <Button size="lg" full className="sm:w-auto">
                     Create your account
                   </Button>
-                </Link>
-                <Link to="/login" className="w-full sm:w-auto">
+                </AppLink>
+                <AppLink to="/login" className="w-full sm:w-auto">
                   <Button
                     size="lg"
                     variant="secondary"
@@ -527,7 +561,7 @@ export function CTA() {
                   >
                     Sign in
                   </Button>
-                </Link>
+                </AppLink>
               </div>
             </div>
           </div>

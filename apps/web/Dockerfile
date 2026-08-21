@@ -17,6 +17,14 @@ COPY . .
 # origin served the page. Baking in a hostname would mean rebuilding the image
 # to change domains.
 ENV VITE_API_URL=""
+
+# The console's origin, when the landing page has a hostname of its own. This
+# one HAS to be baked in: a session cookie belongs to a single origin, so the
+# app needs one home, and the bundle cannot work out which of the two hostnames
+# serving it is that home. Empty for a single-hostname deployment, where every
+# link stays relative.
+ARG CONSOLE_ORIGIN=""
+ENV VITE_CONSOLE_ORIGIN=$CONSOLE_ORIGIN
 RUN npm run build
 
 

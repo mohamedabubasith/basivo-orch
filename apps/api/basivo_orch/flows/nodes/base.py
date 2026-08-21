@@ -21,6 +21,11 @@ from pydantic import BaseModel
 #: The port a node's output leaves by. Branching nodes name others.
 DEFAULT_PORT = "out"
 
+#: The Agent node's second output: the conversation leaves this way when one
+#: agent hands it to another. Named here rather than in `agent.py` so the graph
+#: validator can check what is wired to it without importing a node module.
+HANDOVER_PORT = "handover"
+
 #: Alias for `type[BaseModel]`.
 #:
 #: Node subclasses declare a class attribute called `type` (the node's stable
@@ -124,6 +129,11 @@ class NodeContext:
     #: Count a skill as used, so the library can show what earns its place.
     record_skill_load: Callable[..., Awaitable[None]] | None = None
 
+    #: Nodes wired to one of this node's output ports, as
+    #: [{"id", "name", "type", "purpose"}]. How an agent discovers the
+    #: colleagues it may hand over to: the edges on the canvas are the team.
+    downstream: Callable[[str], list[dict[str, str]]] | None = None
+
     def template_context(self) -> dict[str, Any]:
         return {
             "input": self.input,
@@ -155,6 +165,14 @@ class NodeResult:
     metrics: dict[str, Any] = field(default_factory=dict)
     #: Variables to merge into the run's variable bag.
     variables: dict[str, Any] = field(default_factory=dict)
+    #: Restrict a fired port to specific targets, by node id.
+    #:
+    #: A port answers "which way out"; this answers "which of the several nodes
+    #: wired to that way out". An agent with three colleagues on its handover
+    #: port picks one of them, and the other two must not run — without this
+    #: the port would fan out to all three, which is a committee rather than a
+    #: handover.
+    route_to: list[str] | None = None
 
 
 class Node(ABC):

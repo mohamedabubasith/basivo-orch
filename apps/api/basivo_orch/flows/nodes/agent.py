@@ -64,7 +64,14 @@ from basivo_orch.flows.nodes.agent_runtime import (
     run_agent,
     run_team,
 )
-from basivo_orch.flows.nodes.base import Node, NodeContext, NodeError, NodeResult
+from basivo_orch.flows.nodes.base import (
+    DEFAULT_PORT,
+    HANDOVER_PORT,
+    Node,
+    NodeContext,
+    NodeError,
+    NodeResult,
+)
 from basivo_orch.flows.nodes.code import PythonExecutionError, run_python
 from basivo_orch.flows.nodes.http import assert_public_url
 from basivo_orch.flows.nodes.models import build_chat_model
@@ -246,6 +253,22 @@ class AgentConfig(BaseModel):
         default=None, ge=0, description="Abort the run if this is exceeded mid-loop."
     )
 
+    # -- handover --------------------------------------------------------------
+    #: One line saying what this agent is for. Shown to an agent that may hand
+    #: over to it, and it is the whole basis of that decision — so describe the
+    #: situation it handles, not the job title. "Refunds, billing disputes and
+    #: chargebacks" beats "billing agent".
+    purpose: str = Field(
+        default="",
+        max_length=300,
+        title="What this agent handles",
+        description="Read by an agent deciding whether to hand over to this one.",
+    )
+    #: Whether this agent may hand the conversation to an agent wired to its
+    #: handover port. Off unless something is wired there, so an agent that
+    #: works alone is never told about a mechanism it cannot use.
+    handover: bool = Field(default=True, title="Allow handover")
+
     # -- skills ----------------------------------------------------------------
     #: Ids of skills from the workspace library this agent may use.
     #:
@@ -296,6 +319,65 @@ class AgentConfig(BaseModel):
     # -- transport -------------------------------------------------------------
     base_url: str = Field(default="", max_length=300, description="Overrides the credential's.")
     request_timeout_seconds: float = Field(default=120.0, ge=5, le=600)
+
+
+def _handover_tools(
+    ctx: NodeContext, colleagues: list[dict[str, str]], chosen: dict[str, str]
+) -> list[Any]:
+    """One `transfer_to_…` tool per agent wired to the handover port.
+
+    Deliberately not a sub-agent running inside this one. The colleague is a
+    node on the canvas: it has its own model, tools, skills, memory and cost
+    row, and its turn appears in the run log as its own step rather than as a
+    nested stream inside this node's. What one agent may hand to another is
+    then an edge someone drew, and a question anyone can answer by looking.
+    """
+    from basivo_orch.flows.nodes.agent_runtime import build_tool
+
+    tools: list[Any] = []
+    for colleague in colleagues:
+        target_id = colleague["id"]
+        name = _tool_name(colleague["name"])
+
+        async def transfer(reason: str = "", _id: str = target_id, _label: str = colleague["name"]):
+            # Recorded, not just acted on: "who decided to escalate this, and
+            # why" is the first question asked of any handover after the fact.
+            chosen["id"] = _id
+            chosen["reason"] = reason
+            await ctx.step("agent.handover", {"to": _label, "to_id": _id, "reason": reason[:400]})
+            return f"Handed over to {_label}. Stop and say nothing further."
+
+        tools.append(
+            build_tool(
+                name=f"transfer_to_{name}",
+                description=(
+                    f"Hand this conversation to {colleague['name']}"
+                    + (f", which handles: {colleague['purpose']}" if colleague["purpose"] else "")
+                    + ". Use it when the request is theirs rather than yours. They reply to the "
+                    "person directly, so do not answer as well."
+                ),
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "reason": {
+                            "type": "string",
+                            "description": "Why this belongs to them, in one line.",
+                        }
+                    },
+                    "required": [],
+                },
+                execute=transfer,
+            )
+        )
+    return tools
+
+
+def _tool_name(label: str) -> str:
+    """A node name as something a model can type as a tool call."""
+    import re as _re
+
+    slug = _re.sub(r"[^a-z0-9]+", "_", label.strip().lower()).strip("_")
+    return slug[:40] or "agent"
 
 
 async def _load_skills(
@@ -419,11 +501,19 @@ class AgentNode(Node):
         "text",
         "json",
         "stop_reason",
+        "handover_to",
+        "handover_reason",
         "tool_calls",
         "usage.input_tokens",
         "usage.output_tokens",
         "usage.cost_usd",
     )
+
+    #: A second way out, for handing the conversation to another agent node.
+    #: Wire it to other agents on the canvas: whatever is connected becomes the
+    #: team, so who can talk to whom is a thing you can see rather than a list
+    #: buried in one node's configuration.
+    ports = (DEFAULT_PORT, HANDOVER_PORT)
 
     max_attempts = 2
     retry_backoff_seconds = 2.0
@@ -507,10 +597,41 @@ class AgentNode(Node):
                 execute=call,
             )
 
+        # Whoever the author wired to the handover port. An empty list when
+        # nothing is connected, so an agent working alone is never told about a
+        # mechanism it has no use for.
+        colleagues = (
+            [
+                node
+                for node in (ctx.downstream(HANDOVER_PORT) if ctx.downstream else [])
+                if node["type"] == AgentNode.type
+            ]
+            if config.handover
+            else []
+        )
+        handover: dict[str, str] = {}
+
         totals = RunTotals()
         # Skill tools first: they are the ones the catalogue told the model
         # about by name, and a model scanning a tool list finds them sooner.
-        tools = [*skill_extras, *[guard(definition) for definition in config.tools]]
+        tools = [
+            *skill_extras,
+            *_handover_tools(ctx, colleagues, handover),
+            *[guard(definition) for definition in config.tools],
+        ]
+
+        if colleagues:
+            system = (
+                system
+                + "\n\n## Other agents you can hand this to\n\n"
+                + "\n".join(
+                    f"- {c['name']}"
+                    + (f" — {c['purpose']}" if c["purpose"] else "")
+                    for c in colleagues
+                )
+                + "\n\nIf the request belongs to one of them, call its transfer tool and stop. "
+                "If it is yours, answer it yourself and do not transfer."
+            ).strip()
 
         if config.sub_agents and config.team_mode == "handover":
             await ctx.step(
@@ -669,19 +790,31 @@ class AgentNode(Node):
             },
         )
 
+        handed_to = handover.get("id")
         return NodeResult(
             output={
-                "text": text,
+                # The receiving agent reads `{{ input.text }}` like any other
+                # downstream node, so a handover carries the conversation
+                # rather than starting a new one. When nothing was said before
+                # transferring, the reason is what travels.
+                "text": text or handover.get("reason", ""),
                 "json": json_output,
-                "stop_reason": totals.stop_reason,
+                "stop_reason": "handover" if handed_to else totals.stop_reason,
                 "tool_calls": totals.tool_calls,
                 "delegations": totals.delegations,
+                "handover_to": handed_to or "",
+                "handover_reason": handover.get("reason", ""),
                 "usage": {
                     "input_tokens": totals.input_tokens,
                     "output_tokens": totals.output_tokens,
                     "cost_usd": round(totals.cost_usd, 6),
                 },
             },
+            # Exactly one of the two ports fires. An agent that transferred has
+            # not answered, so continuing down the default edge as well would
+            # run the rest of the flow on a non-answer.
+            ports=[HANDOVER_PORT] if handed_to else [DEFAULT_PORT],
+            route_to=[handed_to] if handed_to else None,
             metrics={
                 "tokens_in": totals.input_tokens,
                 "tokens_out": totals.output_tokens,
