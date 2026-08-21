@@ -10,6 +10,7 @@ database, a worker OOM-killed mid-render.
 from __future__ import annotations
 
 import asyncio
+import uuid
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -222,3 +223,124 @@ async def test_artifacts_past_retention_are_deleted(session, organization):
 
     # Retention off keeps everything.
     assert await sweep_artifacts(session, days=0) == 0
+
+
+# ---------------------------------------------------------------------------
+# Bandwidth and memory on the HTTP node
+# ---------------------------------------------------------------------------
+
+
+async def test_an_oversized_response_is_stopped_not_downloaded_then_rejected():
+    """The limit used to run *after* `response.content`.
+
+    That meant a 2GB reply was fully downloaded and fully in memory before
+    being refused: a bandwidth bill and an OOM-killed worker, in exchange for
+    an error message. This counts the bytes the server was actually asked for.
+    """
+    import httpx
+
+    from basivo_orch.flows.nodes.base import NodeError
+    from basivo_orch.flows.nodes.http import MAX_RESPONSE_BYTES, HttpRequestConfig, HttpRequestNode
+
+    sent = {"bytes": 0}
+    chunk = b"x" * 65536
+
+    async def endless(request: httpx.Request) -> httpx.Response:
+        async def stream():
+            # Twenty times the cap, offered a chunk at a time — an async
+            # generator, because an async client streams through
+            # AsyncByteStream and a sync one is silently read whole.
+            for _ in range((MAX_RESPONSE_BYTES * 20) // len(chunk)):
+                sent["bytes"] += len(chunk)
+                yield chunk
+
+        return httpx.Response(200, headers={"content-type": "text/plain"}, content=stream())
+
+    recorder = _Recorder()
+    async with httpx.AsyncClient(transport=httpx.MockTransport(endless)) as client:
+        with pytest.raises(NodeError, match="was stopped"):
+            await HttpRequestNode().run(
+                HttpRequestConfig(url="https://example.com/huge"),
+                _context(recorder, http=client),
+            )
+
+    # The transfer stopped near the cap rather than running to 100MB.
+    assert sent["bytes"] <= MAX_RESPONSE_BYTES + 2 * len(chunk), (
+        f"downloaded {sent['bytes']} bytes for a {MAX_RESPONSE_BYTES}-byte limit"
+    )
+
+
+async def test_a_declared_oversize_length_costs_no_bytes_at_all():
+    """A server that announces 900MB is refused before the body is read."""
+    import httpx
+
+    from basivo_orch.flows.nodes.base import NodeError
+    from basivo_orch.flows.nodes.http import HttpRequestConfig, HttpRequestNode
+
+    async def honest(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"content-type": "application/octet-stream", "content-length": "943718400"},
+            content=b"",
+        )
+
+    recorder = _Recorder()
+    async with httpx.AsyncClient(transport=httpx.MockTransport(honest)) as client:
+        with pytest.raises(NodeError, match="Nothing was downloaded"):
+            await HttpRequestNode().run(
+                HttpRequestConfig(url="https://example.com/big.iso"),
+                _context(recorder, http=client),
+            )
+
+
+async def test_a_normal_response_still_parses():
+    """The streaming rewrite must not change what a well-behaved reply does."""
+    import httpx
+
+    from basivo_orch.flows.nodes.http import HttpRequestConfig, HttpRequestNode
+
+    async def ok(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"status": "green", "count": 3})
+
+    recorder = _Recorder()
+    async with httpx.AsyncClient(transport=httpx.MockTransport(ok)) as client:
+        result = await HttpRequestNode().run(
+            HttpRequestConfig(url="https://example.com/api"),
+            _context(recorder, http=client),
+        )
+    assert result.output["body"] == {"status": "green", "count": 3}
+    assert result.output["status"] == 200
+
+
+class _Recorder:
+    def __init__(self) -> None:
+        self.steps: list[tuple[str, dict]] = []
+
+    async def step(self, kind: str, data: dict) -> None:
+        self.steps.append((kind, data))
+
+    async def progress(self, message: str) -> None:
+        pass
+
+
+def _context(recorder: _Recorder, *, http):
+    from basivo_orch.flows.nodes.base import NodeContext
+
+    async def resolve_credential(_id: str):
+        return None
+
+    return NodeContext(
+        run_id=uuid.uuid4(),
+        organization_id=uuid.uuid4(),
+        node_id="http_1",
+        node_name="Fetch",
+        attempt=1,
+        input={},
+        outputs={},
+        variables={},
+        trigger={},
+        progress=recorder.progress,
+        step=recorder.step,
+        resolve_credential=resolve_credential,
+        http=http,
+    )

@@ -12,6 +12,7 @@ tools, so the check lives here rather than being left to the caller.
 from __future__ import annotations
 
 import ipaddress
+import json
 import socket
 from typing import Any, Literal
 from urllib.parse import urlparse
@@ -98,6 +99,39 @@ class HttpRequestConfig(BaseModel):
     fail_on_error_status: bool = True
 
 
+async def _read_capped(response: httpx.Response, method: str, url: str) -> bytes:
+    """Read a response body, refusing to exceed `MAX_RESPONSE_BYTES`.
+
+    Two guards, because they catch different lies. A declared `content-length`
+    over the limit is refused before a single byte of body is transferred. A
+    server that declares nothing — or under-declares — is caught by counting
+    what actually arrives and closing the connection the moment it goes over.
+    """
+    declared = response.headers.get("content-length")
+    if declared and declared.isdigit() and int(declared) > MAX_RESPONSE_BYTES:
+        await response.aclose()
+        raise NodeError(
+            f"{method} {url} declares {int(declared)} bytes and the limit is "
+            f"{MAX_RESPONSE_BYTES}. Nothing was downloaded."
+        )
+
+    chunks: list[bytes] = []
+    total = 0
+    try:
+        async for chunk in response.aiter_bytes():
+            total += len(chunk)
+            if total > MAX_RESPONSE_BYTES:
+                raise NodeError(
+                    f"{method} {url} sent more than {MAX_RESPONSE_BYTES} bytes; the transfer "
+                    "was stopped. Fetch large files with a URL a later node can hand on, "
+                    "rather than through this node."
+                )
+            chunks.append(chunk)
+    finally:
+        await response.aclose()
+    return b"".join(chunks)
+
+
 class HttpRequestNode(Node):
     type = "http.request"
     label = "HTTP Request"
@@ -134,15 +168,20 @@ class HttpRequestNode(Node):
         current = url
         for hop in range(MAX_REDIRECTS + 1):
             try:
-                response = await ctx.http.request(
+                # Streamed, not fetched whole. The size limit below used to run
+                # after `response.content`, which meant a 2GB reply was already
+                # downloaded and already in memory before being rejected — a
+                # bill for the bandwidth and an OOM-killed worker, in exchange
+                # for an error message. Now the transfer is stopped instead.
+                request = ctx.http.build_request(
                     config.method,
                     current,
                     headers=headers,
                     params=params or None,
                     timeout=config.timeout_seconds,
-                    follow_redirects=False,
                     **kwargs,
                 )
+                response = await ctx.http.send(request, stream=True, follow_redirects=False)
             except httpx.TimeoutException as exc:
                 raise NodeError(
                     f"{config.method} {current} timed out after {config.timeout_seconds}s.",
@@ -155,6 +194,7 @@ class HttpRequestNode(Node):
             # httpx's own following, a public URL that 302s to 169.254.169.254
             # would sail straight past the check above.
             if response.is_redirect and (location := response.headers.get("location")):
+                await response.aclose()
                 if hop == MAX_REDIRECTS:
                     raise NodeError(f"Too many redirects from {url}.")
                 current = str(httpx.URL(current).join(location))
@@ -163,19 +203,21 @@ class HttpRequestNode(Node):
                 continue
             break
 
-        raw = response.content
-        if len(raw) > MAX_RESPONSE_BYTES:
-            raise NodeError(f"Response is {len(raw)} bytes; the limit is {MAX_RESPONSE_BYTES}.")
+        raw = await _read_capped(response, config.method, url)
 
         content_type = response.headers.get("content-type", "")
+        # Decoded from the bytes we captured, not from the response: a streamed
+        # body is consumed and closed, so `.json()` and `.text` would raise
+        # rather than return what we already hold.
+        text = raw.decode(response.encoding or "utf-8", errors="replace")
         parsed_body: Any
         if "json" in content_type:
             try:
-                parsed_body = response.json()
+                parsed_body = json.loads(text)
             except ValueError:
-                parsed_body = response.text
+                parsed_body = text
         else:
-            parsed_body = response.text
+            parsed_body = text
 
         if config.fail_on_error_status and response.status_code >= 400:
             raise NodeError(
