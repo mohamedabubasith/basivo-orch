@@ -51,6 +51,7 @@ import { Alert, Button, PageLoader, Spinner } from "../../components/ui";
 import { FlowNodeCard } from "../../builder/FlowNodeCard";
 import { NodeIconChip, nodeAccent } from "../../builder/nodeIcons";
 import { Inspector } from "../../builder/Inspector";
+import { TestRunPanel } from "../../builder/TestRunPanel";
 import {
   attachProblems,
   edgeId,
@@ -695,33 +696,18 @@ function BuilderInner() {
               )}
             </Button>
             {testPanelOpen && (
-              <div className="surface absolute top-full right-0 z-30 mt-2 w-96 rounded-2xl p-4 shadow-xl shadow-black/40">
-                <p className="text-sm font-medium text-ink-100">
-                  Run with this input
-                </p>
-                <p className="mt-1 text-xs leading-relaxed text-ink-500">
-                  Sent as the trigger payload. The first node reads it as{" "}
-                  <code className="text-ink-400">{"{{ input }}"}</code>. Runs
-                  the latest saved version.
-                </p>
-                <textarea
-                  value={testInput}
-                  onChange={(event) => setTestInput(event.target.value)}
-                  rows={6}
-                  spellCheck={false}
-                  placeholder='{"name": "Ada"}'
-                  className="mt-3 w-full resize-y rounded-lg border border-ink-700 bg-ink-950/60 px-2.5 py-2 font-mono text-xs text-ink-100 outline-none focus:border-brand-400"
-                />
-                <div className="mt-3 flex justify-end gap-2">
-                  <Button
-                    variant="ghost"
-                    onClick={() => setTestPanelOpen(false)}
-                  >
-                    Cancel
-                  </Button>
-                  <Button onClick={() => void testRun()}>Run now</Button>
-                </div>
-              </div>
+              <TestRunPanel
+                value={testInput}
+                onChange={setTestInput}
+                onRun={() => void testRun()}
+                onClose={() => setTestPanelOpen(false)}
+                triggerType={
+                  nodes.find((node) =>
+                    node.data.nodeType.startsWith("trigger."),
+                  )?.data.nodeType
+                }
+                running={busy === "run"}
+              />
             )}
           </div>
           <Button

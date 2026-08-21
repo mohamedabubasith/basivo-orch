@@ -14,7 +14,12 @@ import { Landing } from "./routes/Landing";
 import { ApiKeys } from "./routes/app/ApiKeys";
 import { Credentials } from "./routes/app/Credentials";
 import { Skills } from "./routes/app/Skills";
-import { AppShell, RequireAuth, RequireVerified } from "./routes/app/AppShell";
+import {
+  AppShell,
+  RedirectIfSignedIn,
+  RequireAuth,
+  RequireVerified,
+} from "./routes/app/AppShell";
 import { Builder } from "./routes/app/Builder";
 import { Dashboard } from "./routes/app/Dashboard";
 import { EmailGate } from "./routes/app/EmailGate";
@@ -66,10 +71,16 @@ function AppRoutes() {
     <Routes>
       <Route path="/" element={<Landing />} />
 
-      <Route path="/login" element={<Login />} />
-      <Route path="/register" element={<Register />} />
+      {/* Wrapped, so a signed-in visitor opening any of these in a second tab
+          lands in the app instead of being shown a sign-in form. /two-factor is
+          deliberately outside: it runs mid-sign-in, when there is no session
+          yet by design. */}
+      <Route element={<RedirectIfSignedIn />}>
+        <Route path="/login" element={<Login />} />
+        <Route path="/register" element={<Register />} />
+        <Route path="/forgot-password" element={<ForgotPassword />} />
+      </Route>
       <Route path="/two-factor" element={<TwoFactor />} />
-      <Route path="/forgot-password" element={<ForgotPassword />} />
       {/* These two paths are fixed by the API: it emails
           `{FRONTEND_BASE_URL}/auth/verify?token=…` and
           `/auth/reset-password?token=…`. They must match

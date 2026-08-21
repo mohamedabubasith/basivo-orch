@@ -143,7 +143,14 @@ export function Inspector({
   const isAgent = spec.type === "agent.llm";
   // The autofix node embeds an LLM config under the same field names the
   // Agent uses, so the provider/model/credential pickers apply to both.
-  const usesLlm = isAgent || spec.type === "git.autofix";
+  // Derived from the schema, not a list of node types. It was a list, and the
+  // Video Generator — which calls a model exactly like the others — was left
+  // off it, so its provider rendered as a free-text box and its credential
+  // asked for a UUID nobody can supply. Any node carrying both a `provider`
+  // and a `credential_id` gets the pickers, so the next one is right by
+  // default rather than by remembering.
+  const keys = new Set(list.map((field) => field.key));
+  const usesLlm = keys.has("provider") && keys.has("credential_id");
   const usesGit =
     spec.type === "git.ticket" ||
     spec.type === "git.autofix" ||

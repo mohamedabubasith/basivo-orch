@@ -51,6 +51,26 @@ export function RequireAuth() {
 }
 
 /**
+ * The mirror of `RequireAuth`: a signed-in visitor has no use for the sign-in
+ * page.
+ *
+ * Cookies are shared across tabs, so opening /login in a second tab was always
+ * *authenticated* — the route simply never looked, and rendered the form to
+ * someone who was already in. Which reads exactly like being signed out.
+ *
+ * `loading` is held rather than flashed for the same reason it is in
+ * `RequireAuth`: rendering the form during the session probe and correcting it
+ * a moment later is the bug, not the fix.
+ */
+export function RedirectIfSignedIn() {
+  const { user, loading } = useAuth();
+
+  if (loading) return <PageLoader label="Checking your session" />;
+  if (user) return <Navigate to="/app" replace />;
+  return <Outlet />;
+}
+
+/**
  * Gate for a confirmed email address.
  *
  * Mirrors the server rule rather than restating it — `require_verified_email`
