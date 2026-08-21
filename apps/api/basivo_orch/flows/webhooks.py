@@ -58,7 +58,7 @@ def authenticate_hook(
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
             "This hook URL only works when the flow's webhook trigger has "
-            "'Require signature' on — its secret is what authenticates callers "
+            "'Require signature' on. Its secret is what authenticates callers "
             "here. Turn it on, set a secret, and republish.",
         )
     key = secret.encode()
@@ -84,7 +84,7 @@ def ensure_method_allowed(config: WebhookTriggerConfig, method: str) -> None:
     if method not in config.methods:
         raise HTTPException(
             status.HTTP_405_METHOD_NOT_ALLOWED,
-            f"This webhook accepts {', '.join(config.methods)} — not {method}.",
+            f"This webhook accepts {', '.join(config.methods)}. Not {method}.",
         )
 
 

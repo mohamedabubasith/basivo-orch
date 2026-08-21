@@ -269,7 +269,7 @@ export function SkillPicker({
         >
           Skills
         </a>{" "}
-        — a procedure the agent opens when it applies, instead of a longer
+        as a procedure the agent opens when it applies, instead of a longer
         prompt on every run.
       </p>
     );
@@ -324,7 +324,7 @@ export function SkillPicker({
       </ul>
       <p className="mt-1.5 text-[0.68rem] leading-relaxed text-ink-500">
         {lines === 0
-          ? "None selected — the agent is not told the library exists."
+          ? "None selected. The agent is not told the library exists."
           : `${lines} skill${lines > 1 ? "s" : ""} offered: ${lines} line${
               lines > 1 ? "s" : ""
             } of prompt now, and the full instructions only if the agent opens one.`}

@@ -40,7 +40,11 @@ function Reveal({
 /** A progress bar tied to page scroll. Cheap orientation on a long page. */
 function ScrollProgress() {
   const { scrollYProgress } = useScroll();
-  const scaleX = useSpring(scrollYProgress, { stiffness: 120, damping: 30, mass: 0.2 });
+  const scaleX = useSpring(scrollYProgress, {
+    stiffness: 120,
+    damping: 30,
+    mass: 0.2,
+  });
   return (
     <motion.div
       aria-hidden="true"
@@ -101,45 +105,45 @@ export function Nav() {
 
   return (
     <>
-    <ScrollProgress />
-    <header
-      className={`fixed inset-x-0 top-0 z-50 transition-all duration-300 ${
-        scrolled
-          ? "border-b border-ink-700/60 bg-ink-950/80 backdrop-blur-xl"
-          : "border-b border-transparent"
-      }`}
-    >
-      <nav className="mx-auto flex h-16 max-w-6xl items-center justify-between px-5">
-        <Link to="/" className="rounded-lg" aria-label="Basivo home">
-          <Logo />
-        </Link>
-
-        <div className="hidden items-center gap-7 md:flex">
-          {[
-            ["Observability", "#observability"],
-            ["Features", "#features"],
-            ["How it works", "#how"],
-          ].map(([label, href]) => (
-            <a
-              key={href}
-              href={href}
-              className="text-sm text-ink-300 transition-colors hover:text-ink-100"
-            >
-              {label}
-            </a>
-          ))}
-        </div>
-
-        <div className="flex items-center gap-2">
-          <Link to="/login">
-            <Button variant="ghost">Sign in</Button>
+      <ScrollProgress />
+      <header
+        className={`fixed inset-x-0 top-0 z-50 transition-all duration-300 ${
+          scrolled
+            ? "border-b border-ink-700/60 bg-ink-950/80 backdrop-blur-xl"
+            : "border-b border-transparent"
+        }`}
+      >
+        <nav className="mx-auto flex h-16 max-w-6xl items-center justify-between px-5">
+          <Link to="/" className="rounded-lg" aria-label="Basivo home">
+            <Logo />
           </Link>
-          <Link to="/register">
-            <Button>Start free</Button>
-          </Link>
-        </div>
-      </nav>
-    </header>
+
+          <div className="hidden items-center gap-7 md:flex">
+            {[
+              ["Observability", "#observability"],
+              ["Features", "#features"],
+              ["How it works", "#how"],
+            ].map(([label, href]) => (
+              <a
+                key={href}
+                href={href}
+                className="text-sm text-ink-300 transition-colors hover:text-ink-100"
+              >
+                {label}
+              </a>
+            ))}
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Link to="/login">
+              <Button variant="ghost">Sign in</Button>
+            </Link>
+            <Link to="/register">
+              <Button>Start free</Button>
+            </Link>
+          </div>
+        </nav>
+      </header>
     </>
   );
 }
@@ -178,13 +182,19 @@ export function Hero() {
   const { scrollY } = useScroll();
   // The panel drifts slower than the page. Subtle — 60px over a full screen —
   // because parallax that announces itself is worse than none.
-  const panelY: MotionValue<number> = useTransform(scrollY, [0, 600], [0, reduceMotion ? 0 : 60]);
-  const panelOpacity = useTransform(scrollY, [0, 500], [1, reduceMotion ? 1 : 0.72]);
+  const panelY: MotionValue<number> = useTransform(
+    scrollY,
+    [0, 600],
+    [0, reduceMotion ? 0 : 60],
+  );
+  const panelOpacity = useTransform(
+    scrollY,
+    [0, 500],
+    [1, reduceMotion ? 1 : 0.72],
+  );
 
   return (
-    <section
-      className="relative overflow-hidden pt-32 pb-20"
-    >
+    <section className="relative overflow-hidden pt-32 pb-20">
       <Backdrop />
 
       <div className="relative mx-auto max-w-6xl px-5">
@@ -196,7 +206,7 @@ export function Hero() {
         >
           <Badge className="mb-6">
             <span className="h-1.5 w-1.5 rounded-full bg-ok-500" />
-            Beta — building in the open
+            Beta: building in the open
           </Badge>
 
           <h1 className="text-[2.6rem] leading-[1.08] font-semibold tracking-tight text-balance text-ink-100 sm:text-6xl">
@@ -206,7 +216,11 @@ export function Hero() {
                 className="inline-block"
                 initial={reduceMotion ? false : { opacity: 0, y: 18 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.5, delay: 0.05 * i, ease: [0.21, 0.5, 0.35, 1] }}
+                transition={{
+                  duration: 0.5,
+                  delay: 0.05 * i,
+                  ease: [0.21, 0.5, 0.35, 1],
+                }}
               >
                 {word}&nbsp;
               </motion.span>
@@ -215,15 +229,19 @@ export function Hero() {
               className="text-gradient inline-block"
               initial={reduceMotion ? false : { opacity: 0, y: 18 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.5, delay: 0.25, ease: [0.21, 0.5, 0.35, 1] }}
+              transition={{
+                duration: 0.5,
+                delay: 0.25,
+                ease: [0.21, 0.5, 0.35, 1],
+              }}
             >
               pull request by breakfast
             </motion.span>
           </h1>
 
           <p className="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-pretty text-ink-300">
-            Draw the pipeline once: a bug report arrives, an agent reads it —
-            screenshot and all — finds the cause in your repository, and opens
+            Draw the pipeline once: a bug report arrives, an agent reads it
+            (screenshot and all), finds the cause in your repository, and opens
             a pull request for a human to review. Then watch every step of it
             run: which tool was called, how many tokens, what it cost.
           </p>
@@ -249,7 +267,11 @@ export function Hero() {
           style={{ y: panelY, opacity: panelOpacity }}
           initial={reduceMotion ? false : { opacity: 0, y: 32, scale: 0.98 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
-          transition={{ duration: 0.7, delay: 0.15, ease: [0.21, 0.5, 0.35, 1] }}
+          transition={{
+            duration: 0.7,
+            delay: 0.15,
+            ease: [0.21, 0.5, 0.35, 1],
+          }}
         >
           <div
             aria-hidden="true"
@@ -273,7 +295,7 @@ const OBSERVABILITY = [
   },
   {
     title: "Step-level timing",
-    body: "Duration and token cost per node, so you can see which step is slow and which one is expensive — usually not the same step.",
+    body: "Duration and token cost per node, so you can see which step is slow and which one is expensive. Usually not the same step.",
   },
   {
     title: "Retries you can read",
@@ -281,13 +303,16 @@ const OBSERVABILITY = [
   },
   {
     title: "Structured, not stringly",
-    body: "Levelled, timestamped, node-attributed lines. Query them instead of scrolling — the same data the run view renders is the data you can export.",
+    body: "Levelled, timestamped, node-attributed lines. Query them instead of scrolling. The same data the run view renders is the data you can export.",
   },
 ];
 
 export function Observability() {
   return (
-    <section id="observability" className="relative border-t border-ink-800/70 py-24">
+    <section
+      id="observability"
+      className="relative border-t border-ink-800/70 py-24"
+    >
       <div className="mx-auto max-w-6xl px-5">
         <Reveal className="mx-auto max-w-2xl text-center">
           <Badge className="mb-5">Observability</Badge>
@@ -296,8 +321,8 @@ export function Observability() {
           </h2>
           <p className="mt-4 text-lg leading-relaxed text-pretty text-ink-300">
             That is fine until something breaks. Basivo treats the run log as
-            the product: it is the first thing you see, not a tab you go
-            looking for.
+            the product: it is the first thing you see, not a tab you go looking
+            for.
           </p>
         </Reveal>
 
@@ -305,8 +330,12 @@ export function Observability() {
           {OBSERVABILITY.map((item, i) => (
             <Reveal key={item.title} delay={i * 0.07}>
               <div className="surface h-full rounded-2xl p-6 transition-colors duration-300 hover:border-ink-500">
-                <h3 className="text-base font-semibold text-ink-100">{item.title}</h3>
-                <p className="mt-2.5 text-[0.95rem] leading-relaxed text-ink-400">{item.body}</p>
+                <h3 className="text-base font-semibold text-ink-100">
+                  {item.title}
+                </h3>
+                <p className="mt-2.5 text-[0.95rem] leading-relaxed text-ink-400">
+                  {item.body}
+                </p>
               </div>
             </Reveal>
           ))}
@@ -336,7 +365,7 @@ const FEATURES = [
   },
   {
     title: "Posters and video, rendered",
-    body: "A model writes the layout; a browser renders it with real fonts. Your headline is your headline — not an image model's ninety-percent guess at typography.",
+    body: "A model writes the layout; a browser renders it with real fonts. Your headline is your headline, not an image model's ninety-percent guess at typography.",
     icon: "M3.5 5.5h13v13h-13zM16.5 10l4-2.5v9l-4-2.5M7 9.5v5l4-2.5z",
   },
   {
@@ -351,10 +380,12 @@ const FEATURES = [
   },
 ];
 
-
 export function Features() {
   return (
-    <section id="features" className="relative border-t border-ink-800/70 py-24">
+    <section
+      id="features"
+      className="relative border-t border-ink-800/70 py-24"
+    >
       <div className="mx-auto max-w-6xl px-5">
         <Reveal className="mx-auto max-w-2xl text-center">
           <Badge className="mb-5">Platform</Badge>
@@ -372,7 +403,12 @@ export function Features() {
                 className="group surface h-full rounded-2xl p-6 transition-colors duration-300 hover:border-ink-500 hover:bg-ink-800/50"
               >
                 <div className="mb-4 inline-flex h-10 w-10 items-center justify-center rounded-xl border border-ink-600/60 bg-ink-850 text-brand-300 transition-colors group-hover:border-brand-400/50 group-hover:text-brand-400">
-                  <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" aria-hidden="true">
+                  <svg
+                    viewBox="0 0 24 24"
+                    className="h-5 w-5"
+                    fill="none"
+                    aria-hidden="true"
+                  >
                     <path
                       d={feature.icon}
                       stroke="currentColor"
@@ -382,8 +418,12 @@ export function Features() {
                     />
                   </svg>
                 </div>
-                <h3 className="text-base font-semibold text-ink-100">{feature.title}</h3>
-                <p className="mt-2 text-[0.95rem] leading-relaxed text-ink-400">{feature.body}</p>
+                <h3 className="text-base font-semibold text-ink-100">
+                  {feature.title}
+                </h3>
+                <p className="mt-2 text-[0.95rem] leading-relaxed text-ink-400">
+                  {feature.body}
+                </p>
               </motion.div>
             </Reveal>
           ))}
@@ -399,7 +439,7 @@ const STEPS = [
   {
     n: "01",
     title: "Draw it once",
-    body: "Pick a trigger — a webhook, a schedule, a GitHub issue — then add the steps: an agent, a condition, a repair, a render, a post.",
+    body: "Pick a trigger (a webhook, a schedule, a GitHub issue), then add the steps: an agent, a condition, a repair, a render, a post.",
   },
   {
     n: "02",
@@ -409,7 +449,7 @@ const STEPS = [
   {
     n: "03",
     title: "Read what happened",
-    body: "Every step keeps its input, output, duration, tokens and cost — and the files it made. Posters and video play in the run itself.",
+    body: "Every step keeps its input, output, duration, tokens and cost, and the files it made. Posters and video play in the run itself.",
   },
 ];
 
@@ -428,9 +468,15 @@ export function HowItWorks() {
           {STEPS.map((step, i) => (
             <Reveal key={step.n} delay={i * 0.1}>
               <div className="relative h-full">
-                <span className="font-mono text-sm text-brand-400/70">{step.n}</span>
-                <h3 className="mt-3 text-lg font-semibold text-ink-100">{step.title}</h3>
-                <p className="mt-2 text-[0.95rem] leading-relaxed text-ink-400">{step.body}</p>
+                <span className="font-mono text-sm text-brand-400/70">
+                  {step.n}
+                </span>
+                <h3 className="mt-3 text-lg font-semibold text-ink-100">
+                  {step.title}
+                </h3>
+                <p className="mt-2 text-[0.95rem] leading-relaxed text-ink-400">
+                  {step.body}
+                </p>
                 {i < STEPS.length - 1 && (
                   <span
                     aria-hidden="true"
@@ -463,7 +509,8 @@ export function CTA() {
                 Ship your first pipeline today
               </h2>
               <p className="mx-auto mt-4 max-w-lg text-lg text-pretty text-ink-300">
-                Free while we are in beta. Your feedback shapes what we build next.
+                Free while we are in beta. Your feedback shapes what we build
+                next.
               </p>
               <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
                 <Link to="/register" className="w-full sm:w-auto">
@@ -472,7 +519,12 @@ export function CTA() {
                   </Button>
                 </Link>
                 <Link to="/login" className="w-full sm:w-auto">
-                  <Button size="lg" variant="secondary" full className="sm:w-auto">
+                  <Button
+                    size="lg"
+                    variant="secondary"
+                    full
+                    className="sm:w-auto"
+                  >
                     Sign in
                   </Button>
                 </Link>
@@ -493,7 +545,8 @@ export function Footer() {
       <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-4 px-5 sm:flex-row">
         <Logo />
         <p className="text-sm text-ink-500">
-          © {new Date().getFullYear()} Basivo. Beta software — expect sharp edges.
+          © {new Date().getFullYear()} Basivo. Beta software. Expect sharp
+          edges.
         </p>
       </div>
     </footer>

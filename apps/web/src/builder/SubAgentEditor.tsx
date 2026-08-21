@@ -51,7 +51,9 @@ export function SubAgentEditor({
   /** Decides the tool each entry becomes, so the row shows the real name. */
   teamMode: string;
 }) {
-  const agents: SubAgentValue[] = Array.isArray(value) ? (value as SubAgentValue[]) : [];
+  const agents: SubAgentValue[] = Array.isArray(value)
+    ? (value as SubAgentValue[])
+    : [];
   const [open, setOpen] = useState<number | null>(null);
   // The row names the tool the parent will actually see. Showing `ask_` while
   // the mode generates `transfer_to_` is a small lie that costs someone an
@@ -59,7 +61,9 @@ export function SubAgentEditor({
   const prefix = teamMode === "handover" ? "transfer_to_" : "ask_";
 
   function update(index: number, patch: Partial<SubAgentValue>) {
-    onChange(agents.map((agent, i) => (i === index ? { ...agent, ...patch } : agent)));
+    onChange(
+      agents.map((agent, i) => (i === index ? { ...agent, ...patch } : agent)),
+    );
   }
 
   function remove(index: number) {
@@ -68,7 +72,10 @@ export function SubAgentEditor({
   }
 
   function add() {
-    onChange([...agents, { name: `agent_${agents.length + 1}`, description: "" }]);
+    onChange([
+      ...agents,
+      { name: `agent_${agents.length + 1}`, description: "" },
+    ]);
     setOpen(agents.length);
   }
 
@@ -109,7 +116,12 @@ export function SubAgentEditor({
                 fill="none"
                 aria-hidden="true"
               >
-                <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                <path
+                  d="M6 9l6 6 6-6"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                />
               </svg>
             </button>
 
@@ -120,7 +132,12 @@ export function SubAgentEditor({
               onClick={() => remove(index)}
               className="absolute top-1.5 right-8 rounded-md p-1.5 text-ink-500 transition-colors hover:bg-ink-800 hover:text-[var(--status-bad)]"
             >
-              <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" aria-hidden="true">
+              <svg
+                viewBox="0 0 24 24"
+                className="h-3.5 w-3.5"
+                fill="none"
+                aria-hidden="true"
+              >
                 <path
                   d="M4.5 6.5h15M9.5 6V4.8c0-.7.6-1.3 1.3-1.3h2.4c.7 0 1.3.6 1.3 1.3V6M7 6.5l.8 12a1.6 1.6 0 0 0 1.6 1.5h5.2a1.6 1.6 0 0 0 1.6-1.5l.8-12"
                   stroke="currentColor"
@@ -138,7 +155,12 @@ export function SubAgentEditor({
                   <input
                     value={agent.name ?? ""}
                     onChange={(event) =>
-                      update(index, { name: event.target.value.replace(/[^a-zA-Z0-9_-]/g, "_") })
+                      update(index, {
+                        name: event.target.value.replace(
+                          /[^a-zA-Z0-9_-]/g,
+                          "_",
+                        ),
+                      })
                     }
                     className={`${INPUT} font-mono`}
                   />
@@ -149,8 +171,8 @@ export function SubAgentEditor({
                       {agent.name || "name"}
                     </code>
                     {teamMode === "handover"
-                      ? " — and control moves to it."
-                      : " — and its answer comes back."}
+                      ? " and control moves to it."
+                      : " and its answer comes back."}
                   </p>
                 </div>
 
@@ -159,12 +181,15 @@ export function SubAgentEditor({
                   <textarea
                     rows={2}
                     value={agent.description ?? ""}
-                    onChange={(event) => update(index, { description: event.target.value })}
+                    onChange={(event) =>
+                      update(index, { description: event.target.value })
+                    }
                     placeholder="Researches facts and returns short answers."
                     className={INPUT}
                   />
                   <p className="mt-1 text-[0.68rem] text-ink-500">
-                    The parent reads this to decide when to involve it. Vague here means it never does.
+                    The parent reads this to decide when to involve it. Vague
+                    here means it never does.
                   </p>
                 </div>
 
@@ -173,7 +198,9 @@ export function SubAgentEditor({
                   <textarea
                     rows={3}
                     value={agent.system ?? ""}
-                    onChange={(event) => update(index, { system: event.target.value })}
+                    onChange={(event) =>
+                      update(index, { system: event.target.value })
+                    }
                     placeholder="You are a careful researcher. Answer in one sentence."
                     className={INPUT}
                   />
@@ -188,7 +215,9 @@ export function SubAgentEditor({
                       <label className={LABEL}>Provider</label>
                       <select
                         value={agent.provider ?? parentProvider}
-                        onChange={(event) => update(index, { provider: event.target.value })}
+                        onChange={(event) =>
+                          update(index, { provider: event.target.value })
+                        }
                         className={INPUT}
                       >
                         {MODEL_PROVIDERS.map((option) => (
@@ -224,7 +253,9 @@ export function SubAgentEditor({
                         max={15}
                         value={agent.max_iterations ?? 4}
                         onChange={(event) =>
-                          update(index, { max_iterations: Number(event.target.value) })
+                          update(index, {
+                            max_iterations: Number(event.target.value),
+                          })
                         }
                         className={INPUT}
                       />

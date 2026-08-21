@@ -298,7 +298,7 @@ class SpeakNode(Node):
     type = "audio.speak"
     label = "Speak"
     description = (
-        "Turn text into narration with a real voice, on this machine — no API "
+        "Turn text into narration with a real voice, on this machine. No API "
         "key, no per-word cost. Reports when each word is spoken, so captions "
         "can land on the word."
     )
@@ -328,7 +328,7 @@ class SpeakNode(Node):
             text = str(text)
         text = text.strip()
         if not text:
-            raise NodeError("There is nothing to say — the text rendered empty.")
+            raise NodeError("There is nothing to say. The text rendered empty.")
 
         words = len([w for w in re.split(r"\s+", text) if w])
         await ctx.step(
@@ -407,7 +407,7 @@ async def _to_mp3(wav: bytes) -> bytes:
         raise NodeError(
             "ffmpeg could not encode the narration as MP3: "
             + (err.decode(errors="replace")[:300] or "no output")
-            + " — set format to wav to skip the conversion."
+            + ". Set format to wav to skip the conversion."
         )
     return out
 

@@ -23,8 +23,14 @@ export function PageHeader({
             {eyebrow}
           </p>
         )}
-        <h1 className="text-2xl font-semibold tracking-tight text-ink-100">{title}</h1>
-        {subtitle && <p className="mt-1.5 max-w-2xl leading-relaxed text-ink-400">{subtitle}</p>}
+        <h1 className="text-2xl font-semibold tracking-tight text-ink-100">
+          {title}
+        </h1>
+        {subtitle && (
+          <p className="mt-1.5 max-w-2xl leading-relaxed text-ink-400">
+            {subtitle}
+          </p>
+        )}
       </div>
       {action}
     </header>
@@ -57,7 +63,11 @@ export function RelativeTime({ value }: { value: string | null }) {
 
   for (const [unit, size] of UNITS) {
     if (Math.abs(delta) < size) {
-      return <time title={date.toLocaleString()}>{format.format(Math.round(delta), unit)}</time>;
+      return (
+        <time title={date.toLocaleString()}>
+          {format.format(Math.round(delta), unit)}
+        </time>
+      );
     }
     delta /= size;
   }
@@ -66,7 +76,7 @@ export function RelativeTime({ value }: { value: string | null }) {
 
 /** Milliseconds as something a person reads without counting digits. */
 export function duration(ms: number | null): string {
-  if (ms === null) return "—";
+  if (ms === null) return "-";
   if (ms < 1000) return `${ms}ms`;
   if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
   return `${Math.floor(ms / 60_000)}m ${Math.round((ms % 60_000) / 1000)}s`;

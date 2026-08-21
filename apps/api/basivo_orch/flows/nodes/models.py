@@ -137,7 +137,7 @@ async def build_chat_model(
     endpoint = resolved_base or OPENAI_COMPATIBLE[provider]
     if not endpoint and provider != "openai":
         raise NodeError(
-            f"{provider} needs a base URL. Set one on the credential — it is different "
+            f"{provider} needs a base URL. Set one on the credential. It is different "
             "for every deployment."
         )
     kwargs: dict[str, Any] = dict(common)

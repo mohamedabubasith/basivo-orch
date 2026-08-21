@@ -40,7 +40,10 @@ export function Backdrop({ className }: { className?: string }) {
   return (
     <div
       aria-hidden="true"
-      className={cx("pointer-events-none absolute inset-0 overflow-hidden", className)}
+      className={cx(
+        "pointer-events-none absolute inset-0 overflow-hidden",
+        className,
+      )}
     >
       <div className="grid-bg animate-grid absolute inset-0 [mask-image:radial-gradient(ellipse_at_50%_-10%,black_25%,transparent_75%)]" />
 
@@ -52,14 +55,30 @@ export function Backdrop({ className }: { className?: string }) {
       >
         <defs>
           <linearGradient id="beam-violet" x1="0" y1="0" x2="1" y2="0">
-            <stop offset="0" stopColor="var(--color-brand-500)" stopOpacity="0" />
+            <stop
+              offset="0"
+              stopColor="var(--color-brand-500)"
+              stopOpacity="0"
+            />
             <stop offset="0.5" stopColor="var(--color-brand-400)" />
-            <stop offset="1" stopColor="var(--color-accent-500)" stopOpacity="0" />
+            <stop
+              offset="1"
+              stopColor="var(--color-accent-500)"
+              stopOpacity="0"
+            />
           </linearGradient>
           <linearGradient id="beam-teal" x1="0" y1="0" x2="1" y2="0">
-            <stop offset="0" stopColor="var(--color-accent-500)" stopOpacity="0" />
+            <stop
+              offset="0"
+              stopColor="var(--color-accent-500)"
+              stopOpacity="0"
+            />
             <stop offset="0.5" stopColor="var(--color-accent-400)" />
-            <stop offset="1" stopColor="var(--color-brand-400)" stopOpacity="0" />
+            <stop
+              offset="1"
+              stopColor="var(--color-brand-400)"
+              stopOpacity="0"
+            />
           </linearGradient>
         </defs>
 

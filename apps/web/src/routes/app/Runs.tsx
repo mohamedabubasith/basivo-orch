@@ -83,7 +83,9 @@ export function Runs() {
   // refreshes itself — but only while something is actually moving, rather
   // than polling an idle workspace forever.
   useEffect(() => {
-    const inFlight = runs?.some((run) => run.status === "running" || run.status === "pending");
+    const inFlight = runs?.some(
+      (run) => run.status === "running" || run.status === "pending",
+    );
     if (!inFlight) return;
     const timer = setInterval(() => void load(), 4000);
     return () => clearInterval(timer);
@@ -102,21 +104,23 @@ export function Runs() {
       <div className="flex flex-wrap items-center gap-3">
         <div className="flex items-center gap-1 self-start rounded-xl border border-ink-700/60 bg-ink-900/50 p-1">
           {FILTERS.map((option) => (
-          <button
-            key={option.key}
-            onClick={() => setFilter(option.key)}
-            className={cx(
-              "relative rounded-lg px-3 py-1.5 text-sm transition-colors",
-              filter === option.key ? "text-ink-100" : "text-ink-400 hover:text-ink-200",
-            )}
-          >
-            {filter === option.key && (
-              <motion.span
-                layoutId="run-filter-pill"
-                className="absolute inset-0 rounded-lg bg-ink-800"
-                transition={{ type: "spring", stiffness: 380, damping: 30 }}
-              />
-            )}
+            <button
+              key={option.key}
+              onClick={() => setFilter(option.key)}
+              className={cx(
+                "relative rounded-lg px-3 py-1.5 text-sm transition-colors",
+                filter === option.key
+                  ? "text-ink-100"
+                  : "text-ink-400 hover:text-ink-200",
+              )}
+            >
+              {filter === option.key && (
+                <motion.span
+                  layoutId="run-filter-pill"
+                  className="absolute inset-0 rounded-lg bg-ink-800"
+                  transition={{ type: "spring", stiffness: 380, damping: 30 }}
+                />
+              )}
               <span className="relative">{option.label}</span>
             </button>
           ))}
@@ -145,8 +149,8 @@ export function Runs() {
           </p>
           {filter === "all" && (
             <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-ink-500">
-              Publish a flow and trigger it — from this app, an HTTP call or a
-              schedule — and every execution shows up here with per-node timing.
+              Publish a flow and trigger it ( from this app, an HTTP call or a
+              schedule ) and every execution shows up here with per-node timing.
             </p>
           )}
         </Card>
@@ -157,7 +161,10 @@ export function Runs() {
               key={run.id}
               initial={{ opacity: 0, y: 6 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: Math.min(index * 0.02, 0.2), duration: 0.22 }}
+              transition={{
+                delay: Math.min(index * 0.02, 0.2),
+                duration: 0.22,
+              }}
             >
               <Link
                 to={`/app/runs/${run.id}`}
@@ -165,8 +172,12 @@ export function Runs() {
               >
                 <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
                   <StatusLabel status={run.status} />
-                  <span className="font-mono text-xs text-ink-500">{run.id.slice(0, 8)}</span>
-                  <span className="text-xs text-ink-500 capitalize">{run.trigger}</span>
+                  <span className="font-mono text-xs text-ink-500">
+                    {run.id.slice(0, 8)}
+                  </span>
+                  <span className="text-xs text-ink-500 capitalize">
+                    {run.trigger}
+                  </span>
                   <span className="ml-auto font-mono text-xs text-ink-300">
                     {duration(run.duration_ms)}
                   </span>
@@ -193,9 +204,11 @@ export function Runs() {
 }
 
 function StatusLabel({ status }: { status: RunStatus }) {
-  if (status === "succeeded") return <StatusPip tone="good">Succeeded</StatusPip>;
+  if (status === "succeeded")
+    return <StatusPip tone="good">Succeeded</StatusPip>;
   if (status === "failed") return <StatusPip tone="bad">Failed</StatusPip>;
-  if (status === "cancelled") return <StatusPip tone="warn">Cancelled</StatusPip>;
+  if (status === "cancelled")
+    return <StatusPip tone="warn">Cancelled</StatusPip>;
   return (
     <span className="inline-flex items-center gap-1.5 text-xs text-ink-300">
       <span className="relative flex h-2 w-2">

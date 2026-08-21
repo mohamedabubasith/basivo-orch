@@ -20,7 +20,12 @@
 
 import { motion } from "motion/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, Link as RouterLink, useNavigate, useParams } from "react-router-dom";
+import {
+  Link,
+  Link as RouterLink,
+  useNavigate,
+  useParams,
+} from "react-router-dom";
 import {
   Controls,
   MiniMap,
@@ -56,7 +61,12 @@ import {
   type Graph,
 } from "../../builder/graph";
 import { buildSuggestions } from "../../builder/suggestions";
-import { groupSpecs, initialConfig, loadSpecs, type NodeSpec } from "../../builder/specs";
+import {
+  groupSpecs,
+  initialConfig,
+  loadSpecs,
+  type NodeSpec,
+} from "../../builder/specs";
 import { duration } from "./bits";
 
 const NODE_TYPES = { basivo: FlowNodeCard };
@@ -129,7 +139,11 @@ async function pollRun(
     const snapshot = await api.get<RunDetail>(url);
     onSnapshot(snapshot);
     if (TERMINAL_RUN_STATUSES.has(snapshot.status)) return snapshot;
-    if (!warned && snapshot.status === "queued" && Date.now() - startedAt > QUEUE_PATIENCE_MS) {
+    if (
+      !warned &&
+      snapshot.status === "queued" &&
+      Date.now() - startedAt > QUEUE_PATIENCE_MS
+    ) {
       warned = true;
       onStuckInQueue();
     }
@@ -167,8 +181,13 @@ function BuilderInner() {
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
-  const [busy, setBusy] = useState<null | "save" | "validate" | "publish" | "run">(null);
-  const [banner, setBanner] = useState<{ tone: "ok" | "bad"; text: string } | null>(null);
+  const [busy, setBusy] = useState<
+    null | "save" | "validate" | "publish" | "run"
+  >(null);
+  const [banner, setBanner] = useState<{
+    tone: "ok" | "bad";
+    text: string;
+  } | null>(null);
   const [problems, setProblems] = useState<string[]>([]);
   const [run, setRun] = useState<RunDetail | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -183,7 +202,9 @@ function BuilderInner() {
   /** Paint each canvas node with its status from a run snapshot. */
   const paintNodes = useCallback(
     (snapshot: RunDetail) => {
-      const byId = new Map(snapshot.nodes.map((execution) => [execution.node_id, execution]));
+      const byId = new Map(
+        snapshot.nodes.map((execution) => [execution.node_id, execution]),
+      );
       setNodes((current) =>
         current.map((node) => {
           const execution = byId.get(node.id);
@@ -205,7 +226,9 @@ function BuilderInner() {
   );
 
   useEffect(() => {
-    void loadConfig().then((config) => setPublicBase(config.public_base_url ?? ""));
+    void loadConfig().then((config) =>
+      setPublicBase(config.public_base_url ?? ""),
+    );
   }, []);
 
   // The payload someone crafts to exercise a flow is worth keeping — retyping
@@ -264,7 +287,11 @@ function BuilderInner() {
       onNodesChange(changes);
       // Selection and measurement are not edits. Without this filter the flow
       // is "unsaved" the moment it is opened and clicked once.
-      if (changes.some((change) => change.type !== "select" && change.type !== "dimensions")) {
+      if (
+        changes.some(
+          (change) => change.type !== "select" && change.type !== "dimensions",
+        )
+      ) {
         markDirty();
       }
     },
@@ -277,7 +304,11 @@ function BuilderInner() {
         addEdge(
           {
             ...connection,
-            id: edgeId(connection.source, connection.target, connection.sourceHandle),
+            id: edgeId(
+              connection.source,
+              connection.target,
+              connection.sourceHandle,
+            ),
             type: "smoothstep",
             animated: true,
             style: { stroke: "var(--series)", strokeWidth: 2, opacity: 0.55 },
@@ -311,7 +342,10 @@ function BuilderInner() {
       const rightmost = nodes.reduce((far, node) =>
         node.position.x > far.position.x ? node : far,
       );
-      return { x: rightmost.position.x + NODE_WIDTH + 72, y: rightmost.position.y };
+      return {
+        x: rightmost.position.x + NODE_WIDTH + 72,
+        y: rightmost.position.y,
+      };
     }
 
     const rect = canvasRef.current?.getBoundingClientRect();
@@ -359,14 +393,18 @@ function BuilderInner() {
   }
 
   function updateSelected(patch: (node: FlowNode) => FlowNode) {
-    setNodes((current) => current.map((node) => (node.id === selected ? patch(node) : node)));
+    setNodes((current) =>
+      current.map((node) => (node.id === selected ? patch(node) : node)),
+    );
     markDirty();
   }
 
   function deleteSelected() {
     setNodes((current) => current.filter((node) => node.id !== selected));
     setEdges((current) =>
-      current.filter((edge) => edge.source !== selected && edge.target !== selected),
+      current.filter(
+        (edge) => edge.source !== selected && edge.target !== selected,
+      ),
     );
     setSelected(null);
     markDirty();
@@ -376,7 +414,9 @@ function BuilderInner() {
     setBusy("save");
     setBanner(null);
     try {
-      const saved = await api.patch<FlowDetail>(base, { graph: toGraph(nodes, edges) });
+      const saved = await api.patch<FlowDetail>(base, {
+        graph: toGraph(nodes, edges),
+      });
       setFlow(saved);
       setDirty(false);
       setBanner({ tone: "ok", text: `Saved as version ${saved.version}.` });
@@ -384,7 +424,8 @@ function BuilderInner() {
     } catch (err) {
       setBanner({
         tone: "bad",
-        text: err instanceof ApiError ? err.message : "Could not save this flow.",
+        text:
+          err instanceof ApiError ? err.message : "Could not save this flow.",
       });
       return false;
     } finally {
@@ -403,14 +444,19 @@ function BuilderInner() {
       // request. Treating any non-throw as success was exactly the bug this
       // had — an HTTP node with no URL reported "This flow will run", which is
       // the one thing a validate button must never get wrong.
-      const result = await api.post<{ valid: boolean; problems: string[] }>(`${base}/validate`);
+      const result = await api.post<{ valid: boolean; problems: string[] }>(
+        `${base}/validate`,
+      );
       const list = result.valid ? [] : (result.problems ?? []);
       setProblems(list);
       setNodes((current) => attachProblems(current, list));
       setBanner(
         list.length === 0
           ? { tone: "ok", text: "This flow will run." }
-          : { tone: "bad", text: `${list.length} problem${list.length === 1 ? "" : "s"}.` },
+          : {
+              tone: "bad",
+              text: `${list.length} problem${list.length === 1 ? "" : "s"}.`,
+            },
       );
     } catch (err) {
       // Publish and run *do* raise 422 carrying the same payload, so the
@@ -471,7 +517,8 @@ function BuilderInner() {
     } catch (err) {
       setBanner({
         tone: "bad",
-        text: err instanceof ApiError ? err.message : "Could not delete this flow.",
+        text:
+          err instanceof ApiError ? err.message : "Could not delete this flow.",
       });
     }
   }
@@ -512,7 +559,9 @@ function BuilderInner() {
       // sitting under whatever proxy timeout is shortest. Polling the run
       // detail also goes through the api client, so a token refresh mid-run
       // is handled — an EventSource could not do that.
-      const accepted = await api.post<RunAccepted>(`${base}/run?mode=async`, { input: parsed });
+      const accepted = await api.post<RunAccepted>(`${base}/run?mode=async`, {
+        input: parsed,
+      });
       const startedAt = Date.now();
       const tick = window.setInterval(
         () => setElapsed(Math.round((Date.now() - startedAt) / 1000)),
@@ -530,7 +579,7 @@ function BuilderInner() {
             setBanner({
               tone: "bad",
               text:
-                "This run is queued but nothing has picked it up — the run worker " +
+                "This run is queued but nothing has picked it up: the run worker " +
                 "does not look like it is running. Start it with `make worker`.",
             }),
         );
@@ -541,7 +590,10 @@ function BuilderInner() {
       paintNodes(result);
       setBanner(
         result.status === "succeeded"
-          ? { tone: "ok", text: `Run succeeded in ${duration(result.duration_ms)}.` }
+          ? {
+              tone: "ok",
+              text: `Run succeeded in ${duration(result.duration_ms)}.`,
+            }
           : { tone: "bad", text: result.error ?? `Run ${result.status}.` },
       );
     } catch (err) {
@@ -553,7 +605,7 @@ function BuilderInner() {
       setBanner({
         tone: "bad",
         text: list.length
-          ? "This flow cannot run yet — see the flagged nodes."
+          ? "This flow cannot run yet. See the flagged nodes."
           : err instanceof ApiError
             ? err.message
             : "Could not start the run.",
@@ -567,7 +619,9 @@ function BuilderInner() {
   if (!flow || !specs) return <PageLoader label="Opening flow" />;
 
   const selectedNode = nodes.find((node) => node.id === selected) ?? null;
-  const selectedSpec = selectedNode ? specMap.get(selectedNode.data.nodeType) : undefined;
+  const selectedSpec = selectedNode
+    ? specMap.get(selectedNode.data.nodeType)
+    : undefined;
   const selectedSuggestions = selectedNode
     ? buildSuggestions(selectedNode.id, nodes, edges, specMap)
     : [];
@@ -577,7 +631,10 @@ function BuilderInner() {
       <header className="flex flex-none flex-wrap items-center gap-3 border-b border-ink-800/70 px-4 py-2.5">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2.5">
-            <Link to="/app/flows" className="text-ink-500 transition-colors hover:text-ink-200">
+            <Link
+              to="/app/flows"
+              className="text-ink-500 transition-colors hover:text-ink-200"
+            >
               <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none">
                 <path
                   d="M14 7l-5 5 5 5"
@@ -588,7 +645,9 @@ function BuilderInner() {
                 />
               </svg>
             </Link>
-            <h1 className="truncate text-lg font-semibold text-ink-100">{flow.name}</h1>
+            <h1 className="truncate text-lg font-semibold text-ink-100">
+              {flow.name}
+            </h1>
             <span className="rounded-md border border-ink-700 px-1.5 py-0.5 text-[0.66rem] text-ink-400">
               v{flow.version}
             </span>
@@ -608,7 +667,11 @@ function BuilderInner() {
 
         <div className="flex flex-wrap items-center gap-2">
           <ThemeToggle compact />
-          <Button variant="ghost" onClick={() => void validate()} loading={busy === "validate"}>
+          <Button
+            variant="ghost"
+            onClick={() => void validate()}
+            loading={busy === "validate"}
+          >
             Validate
           </Button>
           <div className="relative">
@@ -633,11 +696,13 @@ function BuilderInner() {
             </Button>
             {testPanelOpen && (
               <div className="surface absolute top-full right-0 z-30 mt-2 w-96 rounded-2xl p-4 shadow-xl shadow-black/40">
-                <p className="text-sm font-medium text-ink-100">Run with this input</p>
+                <p className="text-sm font-medium text-ink-100">
+                  Run with this input
+                </p>
                 <p className="mt-1 text-xs leading-relaxed text-ink-500">
-                  Sent as the trigger payload — the first node reads it as{" "}
-                  <code className="text-ink-400">{"{{ input }}"}</code>. Runs the
-                  latest saved version.
+                  Sent as the trigger payload. The first node reads it as{" "}
+                  <code className="text-ink-400">{"{{ input }}"}</code>. Runs
+                  the latest saved version.
                 </p>
                 <textarea
                   value={testInput}
@@ -648,7 +713,10 @@ function BuilderInner() {
                   className="mt-3 w-full resize-y rounded-lg border border-ink-700 bg-ink-950/60 px-2.5 py-2 font-mono text-xs text-ink-100 outline-none focus:border-brand-400"
                 />
                 <div className="mt-3 flex justify-end gap-2">
-                  <Button variant="ghost" onClick={() => setTestPanelOpen(false)}>
+                  <Button
+                    variant="ghost"
+                    onClick={() => setTestPanelOpen(false)}
+                  >
                     Cancel
                   </Button>
                   <Button onClick={() => void testRun()}>Run now</Button>
@@ -656,7 +724,12 @@ function BuilderInner() {
               </div>
             )}
           </div>
-          <Button variant="secondary" onClick={() => void save()} loading={busy === "save"} disabled={!dirty}>
+          <Button
+            variant="secondary"
+            onClick={() => void save()}
+            loading={busy === "save"}
+            disabled={!dirty}
+          >
             Save
           </Button>
           <Button onClick={() => void publish()} loading={busy === "publish"}>
@@ -664,14 +737,19 @@ function BuilderInner() {
           </Button>
           {flow.published_version_id && (
             <div className="relative">
-              <Button variant="secondary" onClick={() => setEndpointsOpen((open) => !open)}>
+              <Button
+                variant="secondary"
+                onClick={() => setEndpointsOpen((open) => !open)}
+              >
                 Endpoints
               </Button>
               {endpointsOpen && (
                 <EndpointsPanel
                   base={publicBase}
                   flowId={flow.id}
-                  hasWebhookTrigger={nodes.some((node) => node.data.nodeType === "trigger.webhook")}
+                  hasWebhookTrigger={nodes.some(
+                    (node) => node.data.nodeType === "trigger.webhook",
+                  )}
                   onClose={() => setEndpointsOpen(false)}
                 />
               )}
@@ -683,7 +761,12 @@ function BuilderInner() {
             title="Delete this flow"
             className="rounded-lg border border-ink-700 p-2.5 text-ink-500 transition-colors hover:border-[var(--status-bad)] hover:text-[var(--status-bad)]"
           >
-            <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" aria-hidden="true">
+            <svg
+              viewBox="0 0 24 24"
+              className="h-4 w-4"
+              fill="none"
+              aria-hidden="true"
+            >
               <path
                 d="M4.5 6.5h15M9.5 6V4.8c0-.7.6-1.3 1.3-1.3h2.4c.7 0 1.3.6 1.3 1.3V6M7 6.5l.8 12a1.6 1.6 0 0 0 1.6 1.5h5.2a1.6 1.6 0 0 0 1.6-1.5l.8-12M10 10.5v6M14 10.5v6"
                 stroke="currentColor"
@@ -716,7 +799,11 @@ function BuilderInner() {
       )}
 
       <div className="flex min-h-0 flex-1 overflow-hidden">
-        <Palette specs={specs} hasTrigger={hasTrigger} onAdd={(spec) => addNode(spec, nextSlot())} />
+        <Palette
+          specs={specs}
+          hasTrigger={hasTrigger}
+          onAdd={(spec) => addNode(spec, nextSlot())}
+        />
 
         <div
           ref={canvasRef}
@@ -733,90 +820,108 @@ function BuilderInner() {
             // addNode itself refuses a second trigger, so a drag that gets
             // this far still cannot land one — this only stops the drop from
             // silently doing nothing when the palette already blocked the drag.
-            addNode(spec, screenToFlowPosition({ x: event.clientX, y: event.clientY }));
+            addNode(
+              spec,
+              screenToFlowPosition({ x: event.clientX, y: event.clientY }),
+            );
           }}
         >
           <div className="relative min-h-0 flex-1">
-          <ReactFlow
-            nodes={nodes}
-            edges={edges}
-            nodeTypes={NODE_TYPES}
-            onNodesChange={handleNodesChange}
-            onEdgesChange={(changes) => {
-              onEdgesChange(changes);
-              markDirty();
-            }}
-            onConnect={onConnect}
-            onNodeClick={(_, node) => setSelected(node.id)}
-            onPaneClick={() => setSelected(null)}
-            fitView
-            // Without a cap, opening a flow with one node zooms that node to
-            // fill the viewport — the graph looks broken and the text renders
-            // at poster size. `fitView` optimises for filling space; a builder
-            // wants a readable, familiar scale.
-            fitViewOptions={{ maxZoom: 1, padding: 0.35 }}
-            minZoom={0.25}
-            maxZoom={1.75}
-            defaultEdgeOptions={{
-              type: "smoothstep",
-              animated: true,
-              // The series colour rather than a neutral grey: this line *is*
-              // the thing carrying data from one node to the next, so it gets
-              // the hue reserved for identity rather than chrome.
-              // 2px at 55% opacity was a hairline nobody could see against
-              // the grid, let alone grab. An edge is the data path; it should
-              // be the second most visible thing on the canvas after a node.
-              style: { stroke: "var(--series)", strokeWidth: 2.5, opacity: 0.9 },
-              markerEnd: { type: MarkerType.ArrowClosed, color: "var(--series)", width: 18, height: 18 },
-            }}
-            // Not a `bg-*` utility: @xyflow/react's own stylesheet puts an
-            // explicit `background-color: var(--xy-background-color, ...)`
-            // directly on `.react-flow` — the exact same class a Tailwind
-            // utility here would target, so it was a specificity tie, and
-            // that library's CSS is injected (as part of this route's lazy
-            // chunk) after Tailwind's, winning ties by source order. Their
-            // own rule already reads `--xy-background-color` first, which is
-            // the supported override point, so setting that custom property
-            // wins without a specificity fight — confirmed by the fact that a
-            // competing class here rendered pure white in light mode with no
-            // visible error.
-            // Same lesson as the background, applied to the rest of the
-            // chrome: @xyflow/react styles its minimap and controls from its
-            // own injected stylesheet, which loads after Tailwind and wins
-            // ties by source order. Classes on those components lost silently
-            // and rendered white boxes on a white canvas. These custom
-            // properties are the library's supported override point.
-            style={
-              {
-                // The names end in `-default` — that is the whole reason the
-                // first attempt at this changed nothing and the minimap stayed
-                // a white box on a grey canvas. `base.css` declares
-                // `--xy-<thing>-default` and each rule reads
-                // `var(--xy-<thing>-props, var(--xy-<thing>, var(--xy-<thing>-default)))`.
-                "--xy-background-color-default": "var(--canvas-bg)",
-                // Not ink-850: that is near-white in light mode, so the map
-                // was a white box on a pale canvas. The canvas colour plus a
-                // border reads as a recessed inset in both themes.
-                "--xy-minimap-background-color-default": "var(--canvas-bg)",
-                "--xy-minimap-mask-background-color-default":
-                  "color-mix(in oklab, var(--canvas-bg) 62%, transparent)",
-                "--xy-minimap-node-background-color-default": "var(--color-ink-500)",
-                "--xy-edge-stroke-default": "var(--series)",
-                "--xy-edge-stroke-width-default": "2.5",
-                "--xy-handle-background-color-default": "var(--color-ink-400)",
-                "--xy-connectionline-stroke-default": "var(--color-brand-400)",
-                "--xy-controls-button-background-color-default": "var(--color-ink-850)",
-                "--xy-controls-button-background-color-hover-default": "var(--color-ink-800)",
-                "--xy-controls-button-color-default": "var(--color-ink-300)",
-                "--xy-controls-button-color-hover-default": "var(--color-brand-300)",
-                "--xy-controls-button-border-color-default": "var(--edge)",
-                // The grid, painted here rather than with <Background>.
-                // That component renders inside `.react-flow__viewport`, which
-                // is the element the pan/zoom transform is applied to — so its
-                // squares scaled with the zoom. Drawn on the outer element the
-                // grid is a fixed surface the graph moves over, which is what
-                // a drafting surface behaves like.
-                backgroundImage: `
+            <ReactFlow
+              nodes={nodes}
+              edges={edges}
+              nodeTypes={NODE_TYPES}
+              onNodesChange={handleNodesChange}
+              onEdgesChange={(changes) => {
+                onEdgesChange(changes);
+                markDirty();
+              }}
+              onConnect={onConnect}
+              onNodeClick={(_, node) => setSelected(node.id)}
+              onPaneClick={() => setSelected(null)}
+              fitView
+              // Without a cap, opening a flow with one node zooms that node to
+              // fill the viewport — the graph looks broken and the text renders
+              // at poster size. `fitView` optimises for filling space; a builder
+              // wants a readable, familiar scale.
+              fitViewOptions={{ maxZoom: 1, padding: 0.35 }}
+              minZoom={0.25}
+              maxZoom={1.75}
+              defaultEdgeOptions={{
+                type: "smoothstep",
+                animated: true,
+                // The series colour rather than a neutral grey: this line *is*
+                // the thing carrying data from one node to the next, so it gets
+                // the hue reserved for identity rather than chrome.
+                // 2px at 55% opacity was a hairline nobody could see against
+                // the grid, let alone grab. An edge is the data path; it should
+                // be the second most visible thing on the canvas after a node.
+                style: {
+                  stroke: "var(--series)",
+                  strokeWidth: 2.5,
+                  opacity: 0.9,
+                },
+                markerEnd: {
+                  type: MarkerType.ArrowClosed,
+                  color: "var(--series)",
+                  width: 18,
+                  height: 18,
+                },
+              }}
+              // Not a `bg-*` utility: @xyflow/react's own stylesheet puts an
+              // explicit `background-color: var(--xy-background-color, ...)`
+              // directly on `.react-flow` — the exact same class a Tailwind
+              // utility here would target, so it was a specificity tie, and
+              // that library's CSS is injected (as part of this route's lazy
+              // chunk) after Tailwind's, winning ties by source order. Their
+              // own rule already reads `--xy-background-color` first, which is
+              // the supported override point, so setting that custom property
+              // wins without a specificity fight — confirmed by the fact that a
+              // competing class here rendered pure white in light mode with no
+              // visible error.
+              // Same lesson as the background, applied to the rest of the
+              // chrome: @xyflow/react styles its minimap and controls from its
+              // own injected stylesheet, which loads after Tailwind and wins
+              // ties by source order. Classes on those components lost silently
+              // and rendered white boxes on a white canvas. These custom
+              // properties are the library's supported override point.
+              style={
+                {
+                  // The names end in `-default` — that is the whole reason the
+                  // first attempt at this changed nothing and the minimap stayed
+                  // a white box on a grey canvas. `base.css` declares
+                  // `--xy-<thing>-default` and each rule reads
+                  // `var(--xy-<thing>-props, var(--xy-<thing>, var(--xy-<thing>-default)))`.
+                  "--xy-background-color-default": "var(--canvas-bg)",
+                  // Not ink-850: that is near-white in light mode, so the map
+                  // was a white box on a pale canvas. The canvas colour plus a
+                  // border reads as a recessed inset in both themes.
+                  "--xy-minimap-background-color-default": "var(--canvas-bg)",
+                  "--xy-minimap-mask-background-color-default":
+                    "color-mix(in oklab, var(--canvas-bg) 62%, transparent)",
+                  "--xy-minimap-node-background-color-default":
+                    "var(--color-ink-500)",
+                  "--xy-edge-stroke-default": "var(--series)",
+                  "--xy-edge-stroke-width-default": "2.5",
+                  "--xy-handle-background-color-default":
+                    "var(--color-ink-400)",
+                  "--xy-connectionline-stroke-default":
+                    "var(--color-brand-400)",
+                  "--xy-controls-button-background-color-default":
+                    "var(--color-ink-850)",
+                  "--xy-controls-button-background-color-hover-default":
+                    "var(--color-ink-800)",
+                  "--xy-controls-button-color-default": "var(--color-ink-300)",
+                  "--xy-controls-button-color-hover-default":
+                    "var(--color-brand-300)",
+                  "--xy-controls-button-border-color-default": "var(--edge)",
+                  // The grid, painted here rather than with <Background>.
+                  // That component renders inside `.react-flow__viewport`, which
+                  // is the element the pan/zoom transform is applied to — so its
+                  // squares scaled with the zoom. Drawn on the outer element the
+                  // grid is a fixed surface the graph moves over, which is what
+                  // a drafting surface behaves like.
+                  backgroundImage: `
                   linear-gradient(to right,
                     color-mix(in oklab, var(--canvas-line) 55%, transparent) 1px,
                     transparent 1px),
@@ -824,50 +929,58 @@ function BuilderInner() {
                     color-mix(in oklab, var(--canvas-line) 55%, transparent) 1px,
                     transparent 1px)
                 `,
-                backgroundSize: "26px 26px",
-              } as React.CSSProperties
-            }
-            className="[&_.react-flow__attribution]:!bg-transparent [&_.react-flow__attribution]:!text-ink-600 [&_.react-flow__attribution_a]:!text-ink-600"
-          >
-            {/* Lines, not dots — a boxed grid reads as a drafting surface,
+                  backgroundSize: "26px 26px",
+                } as React.CSSProperties
+              }
+              className="[&_.react-flow__attribution]:!bg-transparent [&_.react-flow__attribution]:!text-ink-600 [&_.react-flow__attribution_a]:!text-ink-600"
+            >
+              {/* Lines, not dots — a boxed grid reads as a drafting surface,
                 and it is what every peer tool trains people to expect. */}
-            <Controls
-              showInteractive={false}
-              className="!overflow-hidden !rounded-xl !border !border-ink-700/70 !bg-ink-850/90 !shadow-lg !backdrop-blur [&_button]:!h-8 [&_button]:!w-8 [&_button]:!border-0 [&_button]:!border-b [&_button]:!border-ink-700/60 [&_button]:!bg-transparent [&_button]:!fill-ink-300 [&_button:hover]:!bg-ink-800 [&_button:hover]:!fill-brand-300 [&_button:last-child]:!border-b-0"
-            />
-            {/* Only once there is a graph worth navigating. On a three-node
+              <Controls
+                showInteractive={false}
+                className="!overflow-hidden !rounded-xl !border !border-ink-700/70 !bg-ink-850/90 !shadow-lg !backdrop-blur [&_button]:!h-8 [&_button]:!w-8 [&_button]:!border-0 [&_button]:!border-b [&_button]:!border-ink-700/60 [&_button]:!bg-transparent [&_button]:!fill-ink-300 [&_button:hover]:!bg-ink-800 [&_button:hover]:!fill-brand-300 [&_button:last-child]:!border-b-0"
+              />
+              {/* Only once there is a graph worth navigating. On a three-node
                 flow the map is an empty box with two dashes in it — chrome
                 that has not earned its corner of the canvas. */}
-            {nodes.length >= 6 && (
-            <MiniMap
-              pannable
-              zoomable
-              ariaLabel="Flow overview"
-              nodeStrokeWidth={0}
-              nodeBorderRadius={4}
-              nodeColor={(node) => nodeAccent(String(node.data?.nodeType ?? ""))}
-              maskColor="color-mix(in oklab, var(--canvas-bg) 72%, transparent)"
-              className="!bottom-4 !rounded-xl !border !border-ink-700/70 !bg-ink-850/85 !shadow-lg !backdrop-blur"
-              style={{ width: 168, height: 108 }}
-            />
-            )}
-          </ReactFlow>
+              {nodes.length >= 6 && (
+                <MiniMap
+                  pannable
+                  zoomable
+                  ariaLabel="Flow overview"
+                  nodeStrokeWidth={0}
+                  nodeBorderRadius={4}
+                  nodeColor={(node) =>
+                    nodeAccent(String(node.data?.nodeType ?? ""))
+                  }
+                  maskColor="color-mix(in oklab, var(--canvas-bg) 72%, transparent)"
+                  className="!bottom-4 !rounded-xl !border !border-ink-700/70 !bg-ink-850/85 !shadow-lg !backdrop-blur"
+                  style={{ width: 168, height: 108 }}
+                />
+              )}
+            </ReactFlow>
 
-          {nodes.length === 0 && (
-            <div className="pointer-events-none absolute inset-0 grid place-items-center">
-              <div className="text-center">
-                <p className="text-ink-300">Drag a trigger onto the canvas to begin.</p>
-                <p className="mx-auto mt-1.5 max-w-xs text-xs leading-relaxed text-ink-500">
-                  Every flow needs exactly one trigger — the thing that decides
-                  when it runs — and at least one node after it.
-                </p>
+            {nodes.length === 0 && (
+              <div className="pointer-events-none absolute inset-0 grid place-items-center">
+                <div className="text-center">
+                  <p className="text-ink-300">
+                    Drag a trigger onto the canvas to begin.
+                  </p>
+                  <p className="mx-auto mt-1.5 max-w-xs text-xs leading-relaxed text-ink-500">
+                    Every flow needs exactly one trigger (the thing that decides
+                    when it runs), and at least one node after it.
+                  </p>
+                </div>
               </div>
-            </div>
-          )}
+            )}
           </div>
 
           {run && (
-            <RunSummary run={run} elapsed={elapsed} onClose={() => setRun(null)} />
+            <RunSummary
+              run={run}
+              elapsed={elapsed}
+              onClose={() => setRun(null)}
+            />
           )}
         </div>
 
@@ -884,17 +997,22 @@ function BuilderInner() {
             nextRunAt={flow.next_run_at}
             suggestions={selectedSuggestions}
             onRename={(name) =>
-              updateSelected((node) => ({ ...node, data: { ...node.data, label: name } }))
+              updateSelected((node) => ({
+                ...node,
+                data: { ...node.data, label: name },
+              }))
             }
             onChange={(config) =>
-              updateSelected((node) => ({ ...node, data: { ...node.data, config } }))
+              updateSelected((node) => ({
+                ...node,
+                data: { ...node.data, config },
+              }))
             }
             onDelete={deleteSelected}
             onClose={() => setSelected(null)}
           />
         )}
       </div>
-
     </div>
   );
 }
@@ -954,7 +1072,11 @@ function EndpointsPanel({
           className="rounded-lg p-1.5 text-ink-500 transition-colors hover:bg-ink-800 hover:text-ink-200"
         >
           <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none">
-            <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="1.8" />
+            <path
+              d="M6 6l12 12M18 6L6 18"
+              stroke="currentColor"
+              strokeWidth="1.8"
+            />
           </svg>
         </button>
       </div>
@@ -966,7 +1088,7 @@ function EndpointsPanel({
           <div>
             <CopyRow label="Inbound hook (no API key)" value={hookUrl} />
             <p className="mt-1 text-[0.68rem] leading-relaxed text-ink-500">
-              For senders that can't add headers of their own — paste it into
+              For senders that can't add headers of their own. Paste it into
               GitHub or GitLab webhook settings with the trigger's secret. The
               secret authenticates each delivery, so it only answers when the
               trigger has <em>Require signature</em> on.
@@ -974,7 +1096,9 @@ function EndpointsPanel({
           </div>
         )}
         <div>
-          <p className="mb-1 text-[0.68rem] font-medium text-ink-400">Example</p>
+          <p className="mb-1 text-[0.68rem] font-medium text-ink-400">
+            Example
+          </p>
           <div className="relative">
             <pre className="overflow-x-auto rounded-lg border border-ink-700/70 bg-ink-950/60 p-3 font-mono text-[0.7rem] leading-relaxed text-ink-300">
               {curl}
@@ -1001,7 +1125,13 @@ function CopyRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-function CopyButton({ value, className = "" }: { value: string; className?: string }) {
+function CopyButton({
+  value,
+  className = "",
+}: {
+  value: string;
+  className?: string;
+}) {
   const [copied, setCopied] = useState(false);
   return (
     <button
@@ -1019,7 +1149,12 @@ function CopyButton({ value, className = "" }: { value: string; className?: stri
       )}
     >
       {copied ? (
-        <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" aria-hidden="true">
+        <svg
+          viewBox="0 0 24 24"
+          className="h-3.5 w-3.5"
+          fill="none"
+          aria-hidden="true"
+        >
           <path
             d="M5 12.5 10 17.5 19 7"
             stroke="var(--status-good)"
@@ -1029,8 +1164,21 @@ function CopyButton({ value, className = "" }: { value: string; className?: stri
           />
         </svg>
       ) : (
-        <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" aria-hidden="true">
-          <rect x="9" y="9" width="11" height="11" rx="2" stroke="currentColor" strokeWidth="1.6" />
+        <svg
+          viewBox="0 0 24 24"
+          className="h-3.5 w-3.5"
+          fill="none"
+          aria-hidden="true"
+        >
+          <rect
+            x="9"
+            y="9"
+            width="11"
+            height="11"
+            rx="2"
+            stroke="currentColor"
+            strokeWidth="1.6"
+          />
           <path
             d="M5 15V6a2 2 0 0 1 2-2h9"
             stroke="currentColor"
@@ -1080,8 +1228,19 @@ function Palette({
             fill="none"
             aria-hidden="true"
           >
-            <circle cx="10.5" cy="10.5" r="6" stroke="currentColor" strokeWidth="1.8" />
-            <path d="M15 15l4 4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+            <circle
+              cx="10.5"
+              cy="10.5"
+              r="6"
+              stroke="currentColor"
+              strokeWidth="1.8"
+            />
+            <path
+              d="M15 15l4 4"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+            />
           </svg>
           <input
             value={query}
@@ -1094,56 +1253,63 @@ function Palette({
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3">
-      {groups.length === 0 && (
-        <p className="px-1 py-6 text-center text-xs text-ink-500">
-          Nothing matches “{query}”.
-        </p>
-      )}
-      {groups.map((group) => (
-        <div key={group.heading} className="mb-4">
-          <p className="mb-1.5 px-1 text-[0.66rem] font-medium tracking-[0.12em] text-ink-500 uppercase">
-            {group.heading}
+        {groups.length === 0 && (
+          <p className="px-1 py-6 text-center text-xs text-ink-500">
+            Nothing matches “{query}”.
           </p>
-          <ul className="space-y-1">
-            {group.specs.map((spec) => {
-              // A flow needs exactly one trigger, so once one exists the rest
-              // of the palette's triggers are shown but not offered — visible
-              // for context (this is what started the flow), disabled so a
-              // click or drag cannot produce a rejected graph.
-              const blocked = spec.is_trigger && hasTrigger;
-              return (
-              <li key={spec.type}>
-                <button
-                  draggable={!blocked}
-                  onDragStart={(event) =>
-                    event.dataTransfer.setData("application/basivo-node", spec.type)
-                  }
-                  onClick={() => !blocked && onAdd(spec)}
-                  disabled={blocked}
-                  title={blocked ? "A flow can only have one trigger." : spec.description}
-                  className={cx(
-                    "flex w-full items-center gap-2.5 rounded-xl border border-ink-700/60 bg-ink-850/60 px-2.5 py-2 text-left transition-all",
-                    blocked
-                      ? "cursor-not-allowed opacity-40"
-                      : "cursor-grab hover:-translate-y-px hover:border-ink-500 hover:shadow-md active:cursor-grabbing",
-                  )}
-                >
-                  <NodeIconChip type={spec.type} size={7} />
-                  <span className="min-w-0">
-                    <span className="block truncate text-xs font-medium text-ink-200">
-                      {spec.label}
-                    </span>
-                    <span className="block truncate font-mono text-[0.62rem] text-ink-500">
-                      {spec.type}
-                    </span>
-                  </span>
-                </button>
-              </li>
-              );
-            })}
-          </ul>
-        </div>
-      ))}
+        )}
+        {groups.map((group) => (
+          <div key={group.heading} className="mb-4">
+            <p className="mb-1.5 px-1 text-[0.66rem] font-medium tracking-[0.12em] text-ink-500 uppercase">
+              {group.heading}
+            </p>
+            <ul className="space-y-1">
+              {group.specs.map((spec) => {
+                // A flow needs exactly one trigger, so once one exists the rest
+                // of the palette's triggers are shown but not offered — visible
+                // for context (this is what started the flow), disabled so a
+                // click or drag cannot produce a rejected graph.
+                const blocked = spec.is_trigger && hasTrigger;
+                return (
+                  <li key={spec.type}>
+                    <button
+                      draggable={!blocked}
+                      onDragStart={(event) =>
+                        event.dataTransfer.setData(
+                          "application/basivo-node",
+                          spec.type,
+                        )
+                      }
+                      onClick={() => !blocked && onAdd(spec)}
+                      disabled={blocked}
+                      title={
+                        blocked
+                          ? "A flow can only have one trigger."
+                          : spec.description
+                      }
+                      className={cx(
+                        "flex w-full items-center gap-2.5 rounded-xl border border-ink-700/60 bg-ink-850/60 px-2.5 py-2 text-left transition-all",
+                        blocked
+                          ? "cursor-not-allowed opacity-40"
+                          : "cursor-grab hover:-translate-y-px hover:border-ink-500 hover:shadow-md active:cursor-grabbing",
+                      )}
+                    >
+                      <NodeIconChip type={spec.type} size={7} />
+                      <span className="min-w-0">
+                        <span className="block truncate text-xs font-medium text-ink-200">
+                          {spec.label}
+                        </span>
+                        <span className="block truncate font-mono text-[0.62rem] text-ink-500">
+                          {spec.type}
+                        </span>
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        ))}
       </div>
 
       {/* Pinned below the scroll area rather than trailing the list: a hint
@@ -1189,7 +1355,9 @@ function RunSummary({
               aria-hidden="true"
             />
           )}
-          <span className="font-mono text-xs text-ink-500">{run.id.slice(0, 8)}</span>
+          <span className="font-mono text-xs text-ink-500">
+            {run.id.slice(0, 8)}
+          </span>
           <Link
             to={`/app/runs/${run.id}`}
             className="ml-1 text-xs text-brand-400 underline decoration-dotted underline-offset-2 hover:text-brand-300"
@@ -1205,7 +1373,11 @@ function RunSummary({
             className="rounded-lg p-1 text-ink-500 transition-colors hover:bg-ink-800 hover:text-ink-200"
           >
             <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none">
-              <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="1.8" />
+              <path
+                d="M6 6l12 12M18 6L6 18"
+                stroke="currentColor"
+                strokeWidth="1.8"
+              />
             </svg>
           </button>
         </div>
@@ -1220,18 +1392,28 @@ function RunSummary({
                 className="h-1.5 w-1.5 flex-none rounded-full"
                 style={{ backgroundColor: toneOf(execution.status) }}
               />
-              <span className="w-40 truncate font-mono text-ink-300">{execution.node_id}</span>
-              <span className="w-20 flex-none" style={{ color: toneOf(execution.status) }}>
+              <span className="w-40 truncate font-mono text-ink-300">
+                {execution.node_id}
+              </span>
+              <span
+                className="w-20 flex-none"
+                style={{ color: toneOf(execution.status) }}
+              >
                 {execution.status}
               </span>
               {execution.attempt > 1 && (
-                <span style={{ color: "var(--status-warn)" }}>attempt {execution.attempt}</span>
+                <span style={{ color: "var(--status-warn)" }}>
+                  attempt {execution.attempt}
+                </span>
               )}
               <span className="ml-auto flex-none font-mono text-ink-400">
                 {duration(execution.duration_ms)}
               </span>
               {execution.error && (
-                <span className="w-full truncate font-mono" style={{ color: "var(--status-bad)" }}>
+                <span
+                  className="w-full truncate font-mono"
+                  style={{ color: "var(--status-bad)" }}
+                >
                   {execution.error}
                 </span>
               )}

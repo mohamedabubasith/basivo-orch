@@ -30,8 +30,14 @@ const BAR_RADIUS = 4;
 export function RunsChart({ daily }: { daily: Day[] }) {
   const [hover, setHover] = useState<number | null>(null);
 
-  const peak = Math.max(1, ...daily.map((day) => day.succeeded + day.failed + day.other));
-  const busiest = daily.reduce((sum, day) => sum + day.succeeded + day.failed + day.other, 0);
+  const peak = Math.max(
+    1,
+    ...daily.map((day) => day.succeeded + day.failed + day.other),
+  );
+  const busiest = daily.reduce(
+    (sum, day) => sum + day.succeeded + day.failed + day.other,
+    0,
+  );
 
   if (!daily.length) return null;
 
@@ -95,41 +101,43 @@ export function RunsChart({ daily }: { daily: Day[] }) {
                   aria-hidden="true"
                 />
               ) : (
-              <div
-                className="flex w-full max-w-[54px] flex-col justify-end overflow-hidden transition-opacity"
-                style={{
-                  height,
-                  borderRadius: BAR_RADIUS,
-                  opacity: hover === null || active ? 1 : 0.45,
-                }}
-              >
-                {day.failed > 0 && (
-                  <span
-                    className="w-full flex-none"
-                    style={{
-                      height: `${failedShare * 100}%`,
-                      background: "var(--status-bad)",
-                      // The 2px surface gap between stacked segments, so the
-                      // boundary reads at any size.
-                      marginBottom: day.succeeded + day.other > 0 ? 2 : 0,
-                      borderRadius: `${BAR_RADIUS}px ${BAR_RADIUS}px 0 0`,
-                    }}
-                  />
-                )}
-                {day.succeeded + day.other > 0 && (
-                  <span
-                    className="w-full flex-1"
-                    style={{
-                      background:
-                        day.other > 0 && day.succeeded === 0
-                          ? "var(--series)"
-                          : "var(--status-good)",
-                      borderRadius:
-                        day.failed > 0 ? `0 0 ${BAR_RADIUS}px ${BAR_RADIUS}px` : BAR_RADIUS,
-                    }}
-                  />
-                )}
-              </div>
+                <div
+                  className="flex w-full max-w-[54px] flex-col justify-end overflow-hidden transition-opacity"
+                  style={{
+                    height,
+                    borderRadius: BAR_RADIUS,
+                    opacity: hover === null || active ? 1 : 0.45,
+                  }}
+                >
+                  {day.failed > 0 && (
+                    <span
+                      className="w-full flex-none"
+                      style={{
+                        height: `${failedShare * 100}%`,
+                        background: "var(--status-bad)",
+                        // The 2px surface gap between stacked segments, so the
+                        // boundary reads at any size.
+                        marginBottom: day.succeeded + day.other > 0 ? 2 : 0,
+                        borderRadius: `${BAR_RADIUS}px ${BAR_RADIUS}px 0 0`,
+                      }}
+                    />
+                  )}
+                  {day.succeeded + day.other > 0 && (
+                    <span
+                      className="w-full flex-1"
+                      style={{
+                        background:
+                          day.other > 0 && day.succeeded === 0
+                            ? "var(--series)"
+                            : "var(--status-good)",
+                        borderRadius:
+                          day.failed > 0
+                            ? `0 0 ${BAR_RADIUS}px ${BAR_RADIUS}px`
+                            : BAR_RADIUS,
+                      }}
+                    />
+                  )}
+                </div>
               )}
 
               {active && total > 0 && (
@@ -163,5 +171,8 @@ export function RunsChart({ daily }: { daily: Day[] }) {
 }
 
 function formatDay(iso: string): string {
-  return new Date(iso).toLocaleDateString(undefined, { day: "numeric", month: "short" });
+  return new Date(iso).toLocaleDateString(undefined, {
+    day: "numeric",
+    month: "short",
+  });
 }

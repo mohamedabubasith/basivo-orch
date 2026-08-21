@@ -36,13 +36,16 @@ interface ThemeState {
 const ThemeContext = createContext<ThemeState | null>(null);
 
 function systemTheme(): "light" | "dark" {
-  return window.matchMedia?.("(prefers-color-scheme: light)").matches ? "light" : "dark";
+  return window.matchMedia?.("(prefers-color-scheme: light)").matches
+    ? "light"
+    : "dark";
 }
 
 function readChoice(): ThemeChoice {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored === "light" || stored === "dark" || stored === "system") return stored;
+    if (stored === "light" || stored === "dark" || stored === "system")
+      return stored;
   } catch {
     // Private browsing can refuse reads; the default is fine.
   }
@@ -84,8 +87,13 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const value = useMemo(() => ({ choice, resolved, setChoice }), [choice, resolved, setChoice]);
-  return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
+  const value = useMemo(
+    () => ({ choice, resolved, setChoice }),
+    [choice, resolved, setChoice],
+  );
+  return (
+    <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>
+  );
 }
 
 export function useTheme(): ThemeState {

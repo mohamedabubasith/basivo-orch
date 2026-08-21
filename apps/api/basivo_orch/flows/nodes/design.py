@@ -62,7 +62,7 @@ class RenderConfig(BaseModel):
     html: str = Field(
         min_length=1,
         max_length=400_000,
-        description="The page to render. Supports {{ references }} — usually an agent's output.",
+        description="The page to render. Supports {{ references }}, usually an agent's output.",
     )
     size: Literal[
         "instagram_square",
@@ -103,7 +103,9 @@ class RenderNode(Node):
 
     type = "design.render"
     label = "Render Poster"
-    description = "Turn HTML into an image — real fonts, exact text, same result every time."
+    description = (
+        "Turn HTML into an image with real fonts, exact text and the same result every time."
+    )
     tier = 2
     category = "design"
     config_model = RenderConfig

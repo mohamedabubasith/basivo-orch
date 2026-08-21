@@ -30,7 +30,13 @@ export function TwoFactor() {
   // Reaching this screen without a step-up token means a reload or a direct
   // visit. The token only lives in router state, so the sign-in has to restart.
   if (!state.stepUpToken) {
-    return <Navigate to="/login" replace state={{ notice: "Please sign in again." }} />;
+    return (
+      <Navigate
+        to="/login"
+        replace
+        state={{ notice: "Please sign in again." }}
+      />
+    );
   }
 
   async function onSubmit(event: FormEvent) {
@@ -51,7 +57,9 @@ export function TwoFactor() {
         });
         return;
       }
-      setError(err instanceof ApiError ? err.message : "That code was not accepted.");
+      setError(
+        err instanceof ApiError ? err.message : "That code was not accepted.",
+      );
       setCode("");
       inputRef.current?.focus();
     } finally {
@@ -64,7 +72,10 @@ export function TwoFactor() {
       title="Two-factor authentication"
       subtitle="Enter the 6-digit code from your authenticator app."
       footer={
-        <Link to="/login" className="font-medium text-brand-300 hover:text-brand-400">
+        <Link
+          to="/login"
+          className="font-medium text-brand-300 hover:text-brand-400"
+        >
           Cancel and sign in again
         </Link>
       }
@@ -89,7 +100,13 @@ export function TwoFactor() {
           hint="Lost your device? Use one of your recovery codes instead."
         />
 
-        <Button type="submit" full size="lg" loading={busy} disabled={code.trim().length < 6}>
+        <Button
+          type="submit"
+          full
+          size="lg"
+          loading={busy}
+          disabled={code.trim().length < 6}
+        >
           Verify
         </Button>
       </form>

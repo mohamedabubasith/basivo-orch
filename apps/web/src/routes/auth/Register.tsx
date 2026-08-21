@@ -15,10 +15,18 @@ import { SsoButtons } from "./SsoButtons";
  * is the one that counts. Duplicating the whole ruleset here would create two
  * policies to keep in step, and a client-side check is not a security control.
  */
-function strengthOf(password: string): { score: number; label: string; tone: string } {
+function strengthOf(password: string): {
+  score: number;
+  label: string;
+  tone: string;
+} {
   if (!password) return { score: 0, label: "", tone: "" };
   if (password.length < 12) {
-    return { score: 1, label: "Too short — 12 characters minimum", tone: "bg-err-500" };
+    return {
+      score: 1,
+      label: "Too short. 12 characters minimum",
+      tone: "bg-err-500",
+    };
   }
 
   let score = 1;
@@ -56,7 +64,9 @@ export function Register() {
       setDone(true);
     } catch (err) {
       setError(
-        err instanceof ApiError ? err.message : "Could not create the account. Please try again.",
+        err instanceof ApiError
+          ? err.message
+          : "Could not create the account. Please try again.",
       );
     } finally {
       setBusy(false);
@@ -69,12 +79,15 @@ export function Register() {
         title="Account created"
         subtitle={
           <>
-            We sent a confirmation link to <span className="text-ink-200">{email}</span>.
+            We sent a confirmation link to{" "}
+            <span className="text-ink-200">{email}</span>.
           </>
         }
       >
         <div className="space-y-5">
-          <Alert tone="success">Your account is ready — you can sign in now.</Alert>
+          <Alert tone="success">
+            Your account is ready. You can sign in now.
+          </Alert>
 
           <p className="text-[0.95rem] leading-relaxed text-ink-400">
             Confirming your address unlocks email notifications and password
@@ -92,7 +105,10 @@ export function Register() {
 
           <p className="text-center text-sm text-ink-500">
             Nothing arrived? Check spam, or{" "}
-            <Link to="/forgot-password" className="text-brand-300 hover:text-brand-400">
+            <Link
+              to="/forgot-password"
+              className="text-brand-300 hover:text-brand-400"
+            >
               request a new link
             </Link>
             .
@@ -109,7 +125,10 @@ export function Register() {
       footer={
         <>
           Already have one?{" "}
-          <Link to="/login" className="font-medium text-brand-300 hover:text-brand-400">
+          <Link
+            to="/login"
+            className="font-medium text-brand-300 hover:text-brand-400"
+          >
             Sign in
           </Link>
         </>

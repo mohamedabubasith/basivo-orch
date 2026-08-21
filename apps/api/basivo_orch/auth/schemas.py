@@ -146,7 +146,7 @@ class TOTPConfirmPayload(BaseModel):
 
 class TOTPEnrolComplete(BaseModel):
     recovery_codes: list[str] = Field(
-        description="Single-use codes. Displayed once and never retrievable again — "
+        description="Single-use codes. Displayed once and never retrievable again: "
         "only their hashes are stored."
     )
 

@@ -39,7 +39,11 @@ export function Login() {
         });
         return;
       }
-      setError(err instanceof ApiError ? err.message : "Could not sign in. Please try again.");
+      setError(
+        err instanceof ApiError
+          ? err.message
+          : "Could not sign in. Please try again.",
+      );
       setBusy(false);
       return;
     }
@@ -55,7 +59,10 @@ export function Login() {
       footer={
         <>
           New here?{" "}
-          <Link to="/register" className="font-medium text-brand-300 hover:text-brand-400">
+          <Link
+            to="/register"
+            className="font-medium text-brand-300 hover:text-brand-400"
+          >
             Create an account
           </Link>
         </>

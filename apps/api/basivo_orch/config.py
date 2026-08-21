@@ -44,7 +44,7 @@ class Settings(BaseSettings):
         default=True,
         description=(
             "Refuse workspace access until the account's email is confirmed. "
-            "This is the real gate — the UI only mirrors it. Turning it off is "
+            "This is the real gate. The UI only mirrors it. Turning it off is "
             "an escape hatch for a deployment whose mail is not yet delivering: "
             "with it on and mail broken, nobody who signs up can ever get in."
         ),

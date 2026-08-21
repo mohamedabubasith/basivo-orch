@@ -140,7 +140,13 @@ export function nodeAccent(type: string): string {
   return NODE_ACCENT[type] ?? DEFAULT_ACCENT;
 }
 
-export function NodeIcon({ type, className = "h-[18px] w-[18px]" }: { type: string; className?: string }) {
+export function NodeIcon({
+  type,
+  className = "h-[18px] w-[18px]",
+}: {
+  type: string;
+  className?: string;
+}) {
   return (
     <svg
       viewBox="0 0 24 24"
@@ -158,9 +164,20 @@ export function NodeIcon({ type, className = "h-[18px] w-[18px]" }: { type: stri
 }
 
 /** The tinted square the icon sits in — the same chip on card and palette. */
-export function NodeIconChip({ type, size = 9 }: { type: string; size?: 7 | 8 | 9 }) {
+export function NodeIconChip({
+  type,
+  size = 9,
+}: {
+  type: string;
+  size?: 7 | 8 | 9;
+}) {
   const accent = nodeAccent(type);
-  const box = size === 7 ? "h-7 w-7 rounded-lg" : size === 8 ? "h-8 w-8 rounded-lg" : "h-9 w-9 rounded-xl";
+  const box =
+    size === 7
+      ? "h-7 w-7 rounded-lg"
+      : size === 8
+        ? "h-8 w-8 rounded-lg"
+        : "h-9 w-9 rounded-xl";
   const glyph = size === 7 ? "h-3.5 w-3.5" : "h-[18px] w-[18px]";
   return (
     <span

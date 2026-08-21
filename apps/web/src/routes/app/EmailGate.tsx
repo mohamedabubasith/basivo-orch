@@ -24,7 +24,9 @@ import { Alert, Button, Logo, Spinner } from "../../components/ui";
 export function EmailGate() {
   const { user, reload, signOut } = useAuth();
   const navigate = useNavigate();
-  const [state, setState] = useState<"idle" | "sending" | "sent" | "failed">("idle");
+  const [state, setState] = useState<"idle" | "sending" | "sent" | "failed">(
+    "idle",
+  );
   const [detail, setDetail] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
 
@@ -74,9 +76,18 @@ export function EmailGate() {
         <motion.div
           initial={{ scale: 0.9, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
-          transition={{ delay: 0.1, type: "spring", stiffness: 260, damping: 20 }}
+          transition={{
+            delay: 0.1,
+            type: "spring",
+            stiffness: 260,
+            damping: 20,
+          }}
           className="mt-8 grid h-12 w-12 place-items-center rounded-2xl"
-          style={{ backgroundColor: "color-mix(in oklab, var(--status-warn) 15%, transparent)", color: "var(--status-warn)" }}
+          style={{
+            backgroundColor:
+              "color-mix(in oklab, var(--status-warn) 15%, transparent)",
+            color: "var(--status-warn)",
+          }}
           aria-hidden="true"
         >
           <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none">
@@ -98,15 +109,15 @@ export function EmailGate() {
           Opening it unlocks your workspace.
         </p>
         <p className="mt-3 text-sm leading-relaxed text-ink-500">
-          A workspace is addressed by email — invitations, ownership and
-          password recovery all resolve to it. Until someone has proved they
-          can read that mailbox, there is no safe way to hand them one.
+          A workspace is addressed by email: invitations, ownership and password
+          recovery all resolve to it. Until someone has proved they can read
+          that mailbox, there is no safe way to hand them one.
         </p>
 
         {state === "sent" && (
           <div className="mt-5">
             <Alert tone="info">
-              Requested. The link works once and expires in an hour — check spam
+              Requested. The link works once and expires in an hour. Check spam
               too. If nothing arrives within a few minutes, email delivery is
               not configured on this deployment; that is a server problem, not
               something you did wrong.
@@ -121,9 +132,13 @@ export function EmailGate() {
 
         <div className="mt-7 flex flex-wrap gap-2.5">
           <Button onClick={() => void checkAgain()} loading={checking}>
-            I&rsquo;ve confirmed — check again
+            I&rsquo;ve confirmed, check again
           </Button>
-          <Button variant="secondary" onClick={() => void resend()} disabled={state === "sending"}>
+          <Button
+            variant="secondary"
+            onClick={() => void resend()}
+            disabled={state === "sending"}
+          >
             {state === "sending" ? (
               <>
                 <Spinner /> Sending

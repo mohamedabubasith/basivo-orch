@@ -37,7 +37,10 @@ export function formatMs(ms: number | null | undefined): string {
   return `${Math.floor(ms / 60_000)}m ${Math.round((ms % 60_000) / 1000)}s`;
 }
 
-export function formatPercent(value: number | null | undefined, digits = 0): string {
+export function formatPercent(
+  value: number | null | undefined,
+  digits = 0,
+): string {
   if (value === null || value === undefined) return "\u2014";
   return `${(value * 100).toFixed(digits)}%`;
 }

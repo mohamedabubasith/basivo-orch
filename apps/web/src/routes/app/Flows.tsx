@@ -79,7 +79,9 @@ export function Flows() {
       await api.del(`/api/v1/orgs/${orgId}/flows/${flow.id}`);
       await load();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Could not delete that flow.");
+      setError(
+        err instanceof ApiError ? err.message : "Could not delete that flow.",
+      );
     }
   }
 
@@ -101,7 +103,10 @@ export function Flows() {
       {error && <Alert>{error}</Alert>}
 
       {creating && (
-        <NewFlow orgId={orgId!} onCreated={(id) => navigate(`/app/flows/${id}`)} />
+        <NewFlow
+          orgId={orgId!}
+          onCreated={(id) => navigate(`/app/flows/${id}`)}
+        />
       )}
 
       {flows.length === 0 && !creating ? (
@@ -113,20 +118,27 @@ export function Flows() {
             caller in production is already running.
           </p>
           <div className="mt-5">
-            <Button onClick={() => setCreating(true)}>Create your first flow</Button>
+            <Button onClick={() => setCreating(true)}>
+              Create your first flow
+            </Button>
           </div>
         </Card>
       ) : (
         <ul className="overflow-hidden rounded-2xl border border-ink-800/70">
           {flows.map((flow, index) => {
             const published = Boolean(flow.published_version_id);
-            const tone = flow.last_run_status ? RUN_TONE[flow.last_run_status] : null;
+            const tone = flow.last_run_status
+              ? RUN_TONE[flow.last_run_status]
+              : null;
             return (
               <motion.li
                 key={flow.id}
                 initial={{ opacity: 0, y: 6 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: Math.min(index * 0.02, 0.2), duration: 0.2 }}
+                transition={{
+                  delay: Math.min(index * 0.02, 0.2),
+                  duration: 0.2,
+                }}
                 // One list with hairline dividers, not a stack of floating
                 // cards: eleven cards at 130px each is two screens of scroll
                 // for information that fits in one.
@@ -138,7 +150,9 @@ export function Flows() {
                   aria-hidden="true"
                   className="absolute inset-y-0 left-0 w-[3px]"
                   style={{
-                    background: published ? "var(--status-good)" : "var(--status-warn)",
+                    background: published
+                      ? "var(--status-good)"
+                      : "var(--status-warn)",
                     opacity: published ? 0.9 : 0.55,
                   }}
                 />
@@ -168,7 +182,9 @@ export function Flows() {
                   {/* The three facts the page is opened to find. */}
                   <div className="hidden flex-1 items-center gap-5 text-xs text-ink-400 sm:flex">
                     <span className="w-20 flex-none">
-                      {flow.trigger_type ? TRIGGER_LABEL[flow.trigger_type] ?? "Trigger" : "—"}
+                      {flow.trigger_type
+                        ? (TRIGGER_LABEL[flow.trigger_type] ?? "Trigger")
+                        : "-"}
                     </span>
                     <span className="w-16 flex-none [font-variant-numeric:tabular-nums]">
                       {flow.node_count === 0
@@ -214,7 +230,12 @@ export function Flows() {
                   title="Delete this flow"
                   className="absolute top-1/2 right-4 -translate-y-1/2 rounded-lg p-2 text-ink-500 opacity-0 transition-all group-hover:opacity-100 hover:bg-ink-800 hover:text-[var(--status-bad)] focus-visible:opacity-100"
                 >
-                  <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" aria-hidden="true">
+                  <svg
+                    viewBox="0 0 24 24"
+                    className="h-4 w-4"
+                    fill="none"
+                    aria-hidden="true"
+                  >
                     <path
                       d="M4.5 6.5h15M9.5 6V4.8c0-.7.6-1.3 1.3-1.3h2.4c.7 0 1.3.6 1.3 1.3V6M7 6.5l.8 12a1.6 1.6 0 0 0 1.6 1.5h5.2a1.6 1.6 0 0 0 1.6-1.5l.8-12M10 10.5v6M14 10.5v6"
                       stroke="currentColor"
@@ -233,7 +254,13 @@ export function Flows() {
   );
 }
 
-function NewFlow({ orgId, onCreated }: { orgId: string; onCreated: (id: string) => void }) {
+function NewFlow({
+  orgId,
+  onCreated,
+}: {
+  orgId: string;
+  onCreated: (id: string) => void;
+}) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [busy, setBusy] = useState(false);
@@ -244,21 +271,29 @@ function NewFlow({ orgId, onCreated }: { orgId: string; onCreated: (id: string) 
     setBusy(true);
     setError(null);
     try {
-      const created = await api.post<{ id: string }>(`/api/v1/orgs/${orgId}/flows`, {
-        name: name.trim(),
-        description: description.trim() || null,
-      });
+      const created = await api.post<{ id: string }>(
+        `/api/v1/orgs/${orgId}/flows`,
+        {
+          name: name.trim(),
+          description: description.trim() || null,
+        },
+      );
       // Straight into the canvas. The list has nothing more to say about a
       // flow that was created one second ago.
       onCreated(created.id);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Could not create the flow.");
+      setError(
+        err instanceof ApiError ? err.message : "Could not create the flow.",
+      );
       setBusy(false);
     }
   }
 
   return (
-    <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }}>
+    <motion.div
+      initial={{ opacity: 0, height: 0 }}
+      animate={{ opacity: 1, height: "auto" }}
+    >
       <Card className="p-6">
         <form onSubmit={submit} className="max-w-md space-y-4" noValidate>
           {error && <Alert>{error}</Alert>}
@@ -274,7 +309,7 @@ function NewFlow({ orgId, onCreated }: { orgId: string; onCreated: (id: string) 
           <Field
             label="Description"
             name="description"
-            placeholder="Optional — what it does and who depends on it"
+            placeholder="Optional, what it does and who depends on it"
             value={description}
             onChange={(event) => setDescription(event.target.value)}
           />

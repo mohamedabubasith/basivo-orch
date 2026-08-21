@@ -64,7 +64,9 @@ export function ThemeToggle({ compact = false }: { compact?: boolean }) {
           onClick={() => setChoice(option.value)}
           className={cx(
             "relative flex flex-1 items-center justify-center rounded-lg py-1.5 transition-colors",
-            choice === option.value ? "text-ink-100" : "text-ink-500 hover:text-ink-300",
+            choice === option.value
+              ? "text-ink-100"
+              : "text-ink-500 hover:text-ink-300",
           )}
         >
           {choice === option.value && (

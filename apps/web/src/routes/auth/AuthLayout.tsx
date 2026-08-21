@@ -52,13 +52,21 @@ export function AuthLayout({
               <h1 className="text-[1.45rem] leading-tight font-semibold tracking-tight text-ink-100">
                 {title}
               </h1>
-              {subtitle && <p className="mt-1.5 text-sm leading-relaxed text-ink-400">{subtitle}</p>}
+              {subtitle && (
+                <p className="mt-1.5 text-sm leading-relaxed text-ink-400">
+                  {subtitle}
+                </p>
+              )}
             </div>
 
             {children}
           </div>
 
-          {footer && <div className="mt-6 text-center text-sm text-ink-400">{footer}</div>}
+          {footer && (
+            <div className="mt-6 text-center text-sm text-ink-400">
+              {footer}
+            </div>
+          )}
         </motion.div>
       </main>
     </div>

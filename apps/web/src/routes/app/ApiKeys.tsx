@@ -49,7 +49,12 @@ export function ApiKeys() {
   }, [load]);
 
   async function revoke(key: ApiKey) {
-    if (!confirm(`Revoke "${key.name}"? Anything using it stops working immediately.`)) return;
+    if (
+      !confirm(
+        `Revoke "${key.name}"? Anything using it stops working immediately.`,
+      )
+    )
+      return;
     try {
       await api.del(`/api/v1/orgs/${orgId}/api-keys/${key.id}`);
       await load();
@@ -84,13 +89,16 @@ export function ApiKeys() {
 
       <AnimatePresence>
         {issued && (
-          <motion.div initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }}>
+          <motion.div
+            initial={{ opacity: 0, y: -6 }}
+            animate={{ opacity: 1, y: 0 }}
+          >
             <Card className="p-6">
               <h2 className="font-semibold text-ink-100">Copy your key now</h2>
               <p className="mt-1.5 text-sm leading-relaxed text-ink-400">
-                This is the only time it is shown — the server kept a hash, so
-                no screen can ever display it again. Losing it means issuing a
-                new one.
+                This is the only time it is shown: the server kept a hash, so no
+                screen can ever display it again. Losing it means issuing a new
+                one.
               </p>
               <code className="mt-4 block rounded-xl border border-ink-700/70 bg-ink-950/60 p-3.5 font-mono text-sm break-all text-ink-200">
                 {issued}
@@ -131,10 +139,15 @@ export function ApiKeys() {
       ) : (
         <ul className="space-y-2.5">
           {keys.map((key) => (
-            <li key={key.id} className="surface flex flex-wrap items-center gap-4 rounded-2xl p-5">
+            <li
+              key={key.id}
+              className="surface flex flex-wrap items-center gap-4 rounded-2xl p-5"
+            >
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-3">
-                  <p className="truncate font-medium text-ink-100">{key.name}</p>
+                  <p className="truncate font-medium text-ink-100">
+                    {key.name}
+                  </p>
                   {key.revoked_at ? (
                     <StatusPip tone="bad">Revoked</StatusPip>
                   ) : isExpired(key) ? (
@@ -143,7 +156,9 @@ export function ApiKeys() {
                     <StatusPip tone="good">Active</StatusPip>
                   )}
                 </div>
-                <p className="mt-1 font-mono text-xs text-ink-500">{key.prefix}…</p>
+                <p className="mt-1 font-mono text-xs text-ink-500">
+                  {key.prefix}…
+                </p>
               </div>
               <div className="text-right text-xs text-ink-500">
                 <p>
@@ -167,7 +182,9 @@ export function ApiKeys() {
 }
 
 function isExpired(key: ApiKey): boolean {
-  return key.expires_at !== null && new Date(key.expires_at).getTime() < Date.now();
+  return (
+    key.expires_at !== null && new Date(key.expires_at).getTime() < Date.now()
+  );
 }
 
 function NewKey({
@@ -187,13 +204,18 @@ function NewKey({
     setBusy(true);
     setError(null);
     try {
-      const created = await api.post<{ key: string }>(`/api/v1/orgs/${orgId}/api-keys`, {
-        name: name.trim(),
-        expires_in_days: days ? Number(days) : null,
-      });
+      const created = await api.post<{ key: string }>(
+        `/api/v1/orgs/${orgId}/api-keys`,
+        {
+          name: name.trim(),
+          expires_in_days: days ? Number(days) : null,
+        },
+      );
       onCreated(created.key);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Could not create the key.");
+      setError(
+        err instanceof ApiError ? err.message : "Could not create the key.",
+      );
       setBusy(false);
     }
   }

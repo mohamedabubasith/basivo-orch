@@ -119,7 +119,7 @@ class SocialPostNode(Node):
             credential = await ctx.resolve_credential(config.credential_id)
         if credential is None:
             raise NodeError(
-                f"Pick a saved {config.platform} credential on this node — posting needs one."
+                f"Pick a saved {config.platform} credential on this node. Posting needs one."
             )
         if credential.provider != config.platform:
             raise NodeError(
@@ -133,7 +133,7 @@ class SocialPostNode(Node):
             image = await ctx.load_artifact(artifact_id)
             if image is None:
                 raise NodeError(
-                    f"No file with id {artifact_id!r} in this workspace. Check the reference — "
+                    f"No file with id {artifact_id!r} in this workspace. Check the reference: "
                     "it usually comes from a render node's artifact_id."
                 )
 

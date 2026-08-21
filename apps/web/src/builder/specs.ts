@@ -37,13 +37,16 @@ export function initialConfig(spec: NodeSpec): Record<string, unknown> {
   >;
   const config: Record<string, unknown> = {};
   for (const [key, schema] of Object.entries(properties)) {
-    if (schema.default !== undefined && schema.default !== null) config[key] = schema.default;
+    if (schema.default !== undefined && schema.default !== null)
+      config[key] = schema.default;
   }
   return config;
 }
 
 /** Palette grouping. Triggers first — a flow cannot run without exactly one. */
-export function groupSpecs(specs: NodeSpec[]): { heading: string; specs: NodeSpec[] }[] {
+export function groupSpecs(
+  specs: NodeSpec[],
+): { heading: string; specs: NodeSpec[] }[] {
   const triggers = specs.filter((spec) => spec.is_trigger);
   const rest = specs.filter((spec) => !spec.is_trigger);
   const byCategory = new Map<string, NodeSpec[]>();

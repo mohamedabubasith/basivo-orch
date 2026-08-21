@@ -69,7 +69,8 @@ export function buildSuggestions(
     const parentNode = byId.get(parent);
     const label = parentNode?.data.label ?? parent;
     suggestions.push({ token: "input", hint: `output of ${label}` });
-    for (const path of specs.get(parentNode?.data.nodeType ?? "")?.output_paths ?? []) {
+    for (const path of specs.get(parentNode?.data.nodeType ?? "")
+      ?.output_paths ?? []) {
       suggestions.push({ token: `input.${path}`, hint: label });
     }
   }
@@ -79,7 +80,10 @@ export function buildSuggestions(
     if (!node) continue;
     suggestions.push({ token: `nodes.${id}.output`, hint: node.data.label });
     for (const path of specs.get(node.data.nodeType)?.output_paths ?? []) {
-      suggestions.push({ token: `nodes.${id}.output.${path}`, hint: node.data.label });
+      suggestions.push({
+        token: `nodes.${id}.output.${path}`,
+        hint: node.data.label,
+      });
     }
 
     // Set-node assignments become `vars.<name>` at run time; the names are
@@ -90,7 +94,10 @@ export function buildSuggestions(
         for (const assignment of assignments) {
           const name = (assignment as { name?: unknown })?.name;
           if (typeof name === "string" && name.trim()) {
-            suggestions.push({ token: `vars.${name.trim()}`, hint: node.data.label });
+            suggestions.push({
+              token: `vars.${name.trim()}`,
+              hint: node.data.label,
+            });
           }
         }
       }

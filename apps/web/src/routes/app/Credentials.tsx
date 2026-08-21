@@ -36,7 +36,9 @@ export function Credentials() {
   const load = useCallback(async () => {
     if (!orgId) return;
     try {
-      setCredentials(await api.get<Credential[]>(`/api/v1/orgs/${orgId}/credentials`));
+      setCredentials(
+        await api.get<Credential[]>(`/api/v1/orgs/${orgId}/credentials`),
+      );
       setError(null);
     } catch {
       setError("Could not load credentials.");
@@ -70,7 +72,7 @@ export function Credentials() {
       <PageHeader
         eyebrow="Account"
         title="Credentials"
-        subtitle="Provider API keys for the AI Agent node. Stored encrypted, referenced by name — never embedded in a flow."
+        subtitle="Provider API keys for the AI Agent node. Stored encrypted, referenced by name, never embedded in a flow."
         action={
           <Button onClick={() => setCreating((value) => !value)}>
             {creating ? "Cancel" : "New credential"}
@@ -94,9 +96,9 @@ export function Credentials() {
         <Card className="p-10 text-center">
           <p className="text-ink-200">No credentials yet.</p>
           <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-ink-500">
-            Add one for any provider — Anthropic, OpenAI, Google, Groq, Mistral
-            and a dozen more — and every Agent node in this workspace can use it
-            by name.
+            Add one for any provider: Anthropic, OpenAI, Google, Groq, Mistral
+            and a dozen more. Every Agent node in this workspace can use it by
+            name.
           </p>
         </Card>
       ) : (
@@ -106,14 +108,20 @@ export function Credentials() {
               key={credential.id}
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: Math.min(index * 0.03, 0.25), duration: 0.25 }}
+              transition={{
+                delay: Math.min(index * 0.03, 0.25),
+                duration: 0.25,
+              }}
             >
               <div className="surface flex flex-wrap items-center gap-4 rounded-2xl p-5">
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-3">
-                    <p className="truncate font-medium text-ink-100">{credential.name}</p>
+                    <p className="truncate font-medium text-ink-100">
+                      {credential.name}
+                    </p>
                     <span className="rounded-md border border-ink-700 px-1.5 py-0.5 text-[0.68rem] text-ink-400">
-                      {PROVIDER_LABEL[credential.provider] ?? credential.provider}
+                      {PROVIDER_LABEL[credential.provider] ??
+                        credential.provider}
                     </span>
                   </div>
                   <p className="mt-1 font-mono text-xs text-ink-500">
@@ -146,7 +154,13 @@ interface TestResult {
   error: string | null;
 }
 
-function NewCredential({ orgId, onCreated }: { orgId: string; onCreated: () => void }) {
+function NewCredential({
+  orgId,
+  onCreated,
+}: {
+  orgId: string;
+  onCreated: () => void;
+}) {
   const [name, setName] = useState("");
   const [provider, setProvider] = useState(PROVIDERS[0].value);
   const [apiKey, setApiKey] = useState("");
@@ -178,7 +192,10 @@ function NewCredential({ orgId, onCreated }: { orgId: string; onCreated: () => v
       setTested({
         supported: true,
         models: [],
-        error: err instanceof ApiError ? err.message : "The test request did not go through.",
+        error:
+          err instanceof ApiError
+            ? err.message
+            : "The test request did not go through.",
       });
     } finally {
       setTesting(false);
@@ -198,7 +215,11 @@ function NewCredential({ orgId, onCreated }: { orgId: string; onCreated: () => v
       });
       onCreated();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Could not save this credential.");
+      setError(
+        err instanceof ApiError
+          ? err.message
+          : "Could not save this credential.",
+      );
       setBusy(false);
     }
   }
@@ -217,7 +238,9 @@ function NewCredential({ orgId, onCreated }: { orgId: string; onCreated: () => v
           onChange={(event) => setName(event.target.value)}
         />
         <div>
-          <label className="mb-1.5 block text-sm font-medium text-ink-300">Provider</label>
+          <label className="mb-1.5 block text-sm font-medium text-ink-300">
+            Provider
+          </label>
           <select
             value={provider}
             onChange={(event) => {
@@ -239,7 +262,7 @@ function NewCredential({ orgId, onCreated }: { orgId: string; onCreated: () => v
           type="password"
           required
           autoComplete="off"
-          placeholder="Pasted once — never shown again"
+          placeholder="Pasted once, never shown again"
           value={apiKey}
           onChange={(event) => {
             setApiKey(event.target.value);
@@ -249,7 +272,7 @@ function NewCredential({ orgId, onCreated }: { orgId: string; onCreated: () => v
         <Field
           label="Base URL"
           name="base_url"
-          placeholder="Optional — for a proxy, gateway or self-hosted endpoint"
+          placeholder="Optional, for a proxy, gateway or self-hosted endpoint"
           value={baseUrl}
           onChange={(event) => {
             setBaseUrl(event.target.value);
@@ -258,23 +281,24 @@ function NewCredential({ orgId, onCreated }: { orgId: string; onCreated: () => v
         />
         {tested && !tested.supported && (
           <Alert tone="info">
-            This provider has no model-list endpoint to test against — the key
+            This provider has no model-list endpoint to test against. The key
             will be verified on the Agent node&rsquo;s first real call instead.
           </Alert>
         )}
         {tested?.supported && tested.error && (
           <Alert>
-            The key was rejected: <span className="font-mono text-xs">{tested.error}</span>
+            The key was rejected:{" "}
+            <span className="font-mono text-xs">{tested.error}</span>
           </Alert>
         )}
         {tested?.supported && !tested.error && (
           <Alert tone="success">
-            Connected. {tested.models.length} model{tested.models.length === 1 ? "" : "s"}{" "}
-            available
+            Connected. {tested.models.length} model
+            {tested.models.length === 1 ? "" : "s"} available
             {tested.models.length > 0 && (
               <span className="text-xs">
                 {" "}
-                — e.g. {tested.models.slice(0, 3).join(", ")}
+                e.g. {tested.models.slice(0, 3).join(", ")}
                 {tested.models.length > 3 ? ", …" : ""}
               </span>
             )}
@@ -291,7 +315,11 @@ function NewCredential({ orgId, onCreated }: { orgId: string; onCreated: () => v
           >
             Test connection
           </Button>
-          <Button type="submit" loading={busy} disabled={!name.trim() || !apiKey.trim()}>
+          <Button
+            type="submit"
+            loading={busy}
+            disabled={!name.trim() || !apiKey.trim()}
+          >
             Save credential
           </Button>
         </div>

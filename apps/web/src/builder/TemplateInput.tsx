@@ -18,7 +18,10 @@ const INPUT =
   "w-full rounded-lg border border-ink-700 bg-ink-950/60 px-2.5 py-2 text-sm text-ink-100 outline-none focus:border-brand-400";
 
 /** The unclosed `{{` nearest before the caret, if any, and the partial after it. */
-function openReference(value: string, caret: number): { start: number; partial: string } | null {
+function openReference(
+  value: string,
+  caret: number,
+): { start: number; partial: string } | null {
   const before = value.slice(0, caret);
   const open = before.lastIndexOf("{{");
   if (open === -1) return null;
@@ -84,7 +87,8 @@ export function TemplateInput({
     onChange(next);
     setOpen(false);
 
-    const position = reference.start + 1 + suggestion.token.length + closing.length;
+    const position =
+      reference.start + 1 + suggestion.token.length + closing.length;
     requestAnimationFrame(() => {
       field.focus();
       field.selectionStart = field.selectionEnd = position;
@@ -95,14 +99,21 @@ export function TemplateInput({
     value,
     placeholder,
     spellCheck: false as const,
-    className: cx(INPUT, mono && "font-mono text-[0.8rem]", multiline && "resize-y"),
-    onChange: (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    className: cx(
+      INPUT,
+      mono && "font-mono text-[0.8rem]",
+      multiline && "resize-y",
+    ),
+    onChange: (
+      event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
+    ) => {
       onChange(event.target.value);
       requestAnimationFrame(refreshDropdown);
     },
     onKeyUp: (event: React.KeyboardEvent) => {
       // Caret moves (arrows, clicks) can enter or leave a {{ … }} region.
-      if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) refreshDropdown();
+      if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key))
+        refreshDropdown();
     },
     onKeyDown: (event: React.KeyboardEvent) => {
       if (!open || matches.length === 0) return;

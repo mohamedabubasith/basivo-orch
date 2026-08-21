@@ -407,7 +407,7 @@ class TicketConfig(BaseModel):
 class TicketNode(Node):
     type = "git.ticket"
     label = "Raise Ticket"
-    description = "Open a GitHub/GitLab issue from run data — the paper trail before the fix."
+    description = "Open a GitHub/GitLab issue from run data. The paper trail before the fix."
     tier = 2
     category = "devops"
     config_model = TicketConfig
@@ -492,7 +492,7 @@ class CommentNode(Node):
         except ValueError as exc:
             raise NodeError(
                 f"Issue number must resolve to a number; got {raw_number!r}. "
-                "Check the template path — GitHub sends it as issue.number."
+                "Check the template path. GitHub sends it as issue.number."
             ) from exc
 
         client = await make_client(
@@ -530,7 +530,7 @@ class AutofixConfig(BaseModel):
     problem: str = Field(
         min_length=1,
         max_length=20000,
-        description="What to fix. Supports {{ references }} — e.g. {{ input.error }}.",
+        description="What to fix. Supports {{ references }}, e.g. {{ input.error }}.",
     )
     instructions: str = Field(
         default="",
@@ -570,7 +570,7 @@ class AutofixConfig(BaseModel):
         max_length=160,
         description=(
             "Optional. Leave EMPTY when your model reads images itself (GPT-5, Claude, "
-            "Gemini) — the picture goes straight to it. Set one only if your model calls "
+            "Gemini). The picture goes straight to it. Set one only if your model calls "
             "tools but cannot see, and it will describe the image first."
         ),
     )

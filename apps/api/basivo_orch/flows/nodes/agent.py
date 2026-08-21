@@ -211,7 +211,7 @@ class AgentConfig(BaseModel):
         default="{{ input }}",
         max_length=20000,
         description=(
-            "The user message. Supports {{ references }} — chain agents by "
+            "The user message. Supports {{ references }}. Chain agents by "
             "using {{ input.text }}, the upstream agent's reply."
         ),
     )
@@ -358,7 +358,7 @@ def _memory_subject(config: AgentConfig, template: dict[str, Any]) -> str:
         raise NodeError(
             f"The memory key {config.memory_key!r} rendered empty. It decides whose "
             "conversation this is, so an empty value would mix separate threads "
-            "together — check the reference against the trigger's payload."
+            "together. Check the reference against the trigger's payload."
         )
     return rendered[:300]
 
@@ -454,7 +454,7 @@ class AgentNode(Node):
         if not isinstance(prompt, str):
             prompt = json.dumps(prompt, default=str)
         if not prompt.strip():
-            raise NodeError("The prompt rendered empty — there is nothing to send.")
+            raise NodeError("The prompt rendered empty. There is nothing to send.")
 
         if config.response_format == "json":
             # PromptedOutput/NativeOutput want a concrete schema to validate

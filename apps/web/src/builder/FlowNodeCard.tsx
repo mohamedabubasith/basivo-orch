@@ -32,7 +32,11 @@ const STATUS = {
 } as const;
 
 /** Handle labels. The default port needs none — there is nothing to disambiguate. */
-const PORT_LABEL: Record<string, string> = { out: "", true: "true", false: "false" };
+const PORT_LABEL: Record<string, string> = {
+  out: "",
+  true: "true",
+  false: "false",
+};
 
 export function FlowNodeCard({ data, selected }: NodeProps<FlowNode>) {
   const status = data.runStatus ? STATUS[data.runStatus] : null;
@@ -121,7 +125,10 @@ export function FlowNodeCard({ data, selected }: NodeProps<FlowNode>) {
           {/* What this node will actually do — which model, which repository,
               which channel. Without it a canvas of four agents is four
               identical cards and every question means opening one. */}
-          <p className="mt-1 truncate text-[0.68rem] leading-tight text-ink-400" title={summary}>
+          <p
+            className="mt-1 truncate text-[0.68rem] leading-tight text-ink-400"
+            title={summary}
+          >
             {summary || data.nodeType}
           </p>
         </div>
@@ -130,7 +137,10 @@ export function FlowNodeCard({ data, selected }: NodeProps<FlowNode>) {
       {(status || data.problem) && (
         <div className="relative border-t border-ink-700/60 px-3.5 py-2">
           {status && (
-            <p className="flex items-center gap-1.5 text-[0.68rem]" style={{ color: status.color }}>
+            <p
+              className="flex items-center gap-1.5 text-[0.68rem]"
+              style={{ color: status.color }}
+            >
               {data.runStatus === "running" ? (
                 <span className="relative flex h-2 w-2">
                   <span
@@ -147,7 +157,9 @@ export function FlowNodeCard({ data, selected }: NodeProps<FlowNode>) {
               )}
               <span className="font-medium">{status.label}</span>
               {data.runDetail && (
-                <span className="ml-auto truncate font-mono text-ink-400">{data.runDetail}</span>
+                <span className="ml-auto truncate font-mono text-ink-400">
+                  {data.runDetail}
+                </span>
               )}
             </p>
           )}
@@ -172,7 +184,12 @@ export function FlowNodeCard({ data, selected }: NodeProps<FlowNode>) {
             {ports.length > 1 && (
               <span
                 className="absolute right-4 text-[0.62rem] whitespace-nowrap"
-                style={{ color: port === "false" ? "var(--status-warn)" : "var(--status-good)" }}
+                style={{
+                  color:
+                    port === "false"
+                      ? "var(--status-warn)"
+                      : "var(--status-good)",
+                }}
               >
                 {PORT_LABEL[port] ?? port}
               </span>
@@ -181,7 +198,12 @@ export function FlowNodeCard({ data, selected }: NodeProps<FlowNode>) {
               id={port}
               type="source"
               position={Position.Right}
-              style={{ position: "relative", right: 0, top: 0, transform: "none" }}
+              style={{
+                position: "relative",
+                right: 0,
+                top: 0,
+                transform: "none",
+              }}
               className={cx(
                 "!h-3.5 !w-3.5 !border-2 !border-[var(--color-ink-900)] transition-transform hover:!scale-125",
                 port === "false"
@@ -218,7 +240,12 @@ function StatusGlyph({ state }: { state: keyof typeof STATUS }) {
           strokeLinecap="round"
         />
       ) : (
-        <path d="M2.5 6h7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+        <path
+          d="M2.5 6h7"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+        />
       )}
     </svg>
   );

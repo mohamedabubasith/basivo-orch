@@ -95,7 +95,9 @@ export function nodeSummary(
         `${config.duration_seconds ?? 6}s`,
         str(config.size) || "landscape",
         // Whether it speaks is the first thing anyone asks of a video node.
-        config.narration ? `voiced${config.captions === false ? "" : " + captions"}` : "silent",
+        config.narration
+          ? `voiced${config.captions === false ? "" : " + captions"}`
+          : "silent",
         shortModel(str(config.model)) || "no model",
       ].join(" · ");
     case "audio.speak":

@@ -527,3 +527,80 @@ def test_the_verification_page_is_matched_before_the_api_proxy():
     block = caddyfile.split("(spa_auth_pages)")[1].split("(spa_files)")[0]
     assert "method GET" in block
     assert "/auth/verify" in block and "/auth/reset-password" in block
+
+
+def test_no_ai_dash_in_user_facing_text():
+    """No em-dash, en-dash or `--` in anything a customer reads.
+
+    The dash-aside ("confirmed — check again", "Off — every run starts fresh")
+    is the clearest tell that a machine wrote the interface, and an interface
+    that reads as machine-written is not trusted with a credential. See the
+    "Text a user reads" section of CLAUDE.md for the replacements.
+
+    Comments and engineering docs are exempt: they are notes to ourselves, and
+    this repository's comments use em-dashes throughout. So the frontend is
+    scanned with comments stripped, and the API only in the positions a
+    customer actually sees.
+    """
+    import ast
+    import re
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[4]
+    dash = re.compile(r"—|–|(?<![-\w])--(?![-\w])")
+    offenders: list[str] = []
+
+    # --- the frontend, with comments removed -------------------------------
+    for path in sorted((root / "apps/web/src").rglob("*")):
+        if path.suffix not in {".ts", ".tsx"}:
+            continue
+        in_block = False
+        for number, line in enumerate(path.read_text().splitlines(), 1):
+            code, stripped = line, line.strip()
+            if in_block:
+                if "*/" not in line:
+                    continue
+                code, in_block = line.split("*/", 1)[1], False
+            while "/*" in code:
+                before, _, after = code.partition("/*")
+                if "*/" in after:
+                    code = before + after.split("*/", 1)[1]
+                else:
+                    code, in_block = before, True
+                    break
+            code = "" if stripped.startswith("*") else re.sub(r"//.*$", "", code)
+            if dash.search(code):
+                offenders.append(f"{path.relative_to(root)}:{number}: {stripped[:80]}")
+
+    # --- the API, only where a user reads the string -----------------------
+    user_facing = {"NodeError", "HTTPException", "progress", "Field"}
+    for path in sorted((root / "apps/api/basivo_orch").rglob("*.py")):
+        source = path.read_text()
+        if not dash.search(source):
+            continue
+        for node in ast.walk(ast.parse(source)):
+            texts: list[str] = []
+            if isinstance(node, ast.Call):
+                name = getattr(node.func, "id", None) or getattr(node.func, "attr", None)
+                if name in user_facing:
+                    for arg in list(node.args) + [k.value for k in node.keywords]:
+                        texts += [
+                            v.value
+                            for v in ast.walk(arg)
+                            if isinstance(v, ast.Constant) and isinstance(v.value, str)
+                        ]
+            elif isinstance(node, ast.Assign) and isinstance(node.value, ast.Constant):
+                if {getattr(t, "id", "") for t in node.targets} & {"label", "description"}:
+                    if isinstance(node.value.value, str):
+                        texts.append(node.value.value)
+            for text in texts:
+                if dash.search(text):
+                    offenders.append(f"{path.relative_to(root)}:{node.lineno}: {text.strip()[:80]}")
+
+    # --- emails ------------------------------------------------------------
+    for path in sorted((root / "apps/api/basivo_orch/auth/email/templates").rglob("*.j2")):
+        for number, line in enumerate(path.read_text().splitlines(), 1):
+            if dash.search(line):
+                offenders.append(f"{path.relative_to(root)}:{number}: {line.strip()[:80]}")
+
+    assert not offenders, "AI-style dashes in user-facing text:\n  " + "\n  ".join(offenders)

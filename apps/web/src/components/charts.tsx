@@ -54,7 +54,10 @@ export function StatTile({
       <span
         aria-hidden="true"
         className="absolute inset-y-0 left-0 w-[3px]"
-        style={{ background: tone ? STATUS[tone] : "var(--series)", opacity: 0.85 }}
+        style={{
+          background: tone ? STATUS[tone] : "var(--series)",
+          opacity: 0.85,
+        }}
       />
       <div className="flex items-start justify-between gap-3">
         <p className="text-sm text-ink-400">{label}</p>
@@ -71,7 +74,9 @@ export function StatTile({
       >
         {value}
       </p>
-      {hint && <p className="mt-2 text-xs leading-relaxed text-ink-500">{hint}</p>}
+      {hint && (
+        <p className="mt-2 text-xs leading-relaxed text-ink-500">{hint}</p>
+      )}
     </div>
   );
 }
@@ -106,7 +111,9 @@ export function BarList({
   const anyEmphasis = data.some((d) => d.emphasis);
 
   if (data.length === 0) {
-    return <p className="py-8 text-center text-sm text-ink-500">{emptyLabel}</p>;
+    return (
+      <p className="py-8 text-center text-sm text-ink-500">{emptyLabel}</p>
+    );
   }
 
   return (
@@ -127,8 +134,12 @@ export function BarList({
               className="group"
             >
               <div className="mb-1.5 flex items-baseline justify-between gap-3">
-                <span className="truncate text-sm text-ink-200">{datum.label}</span>
-                <span className="flex-none font-mono text-xs text-ink-300">{datum.display}</span>
+                <span className="truncate text-sm text-ink-200">
+                  {datum.label}
+                </span>
+                <span className="flex-none font-mono text-xs text-ink-300">
+                  {datum.display}
+                </span>
               </div>
 
               {/* Track is one step off the surface, hairline-quiet. The bar is
@@ -139,8 +150,14 @@ export function BarList({
                   className="absolute inset-y-0 left-0 rounded-l-[2px] rounded-r-[4px]"
                   style={{ backgroundColor: colour }}
                   initial={reduceMotion ? false : { width: 0 }}
-                  animate={{ width: `${Math.max(1.5, (datum.value / max) * 100)}%` }}
-                  transition={{ duration: 0.6, delay: index * 0.04, ease: [0.21, 0.5, 0.35, 1] }}
+                  animate={{
+                    width: `${Math.max(1.5, (datum.value / max) * 100)}%`,
+                  }}
+                  transition={{
+                    duration: 0.6,
+                    delay: index * 0.04,
+                    ease: [0.21, 0.5, 0.35, 1],
+                  }}
                 />
               </div>
 
@@ -151,7 +168,9 @@ export function BarList({
           );
         })}
       </ul>
-      {caption && <p className="mt-4 text-xs leading-relaxed text-ink-600">{caption}</p>}
+      {caption && (
+        <p className="mt-4 text-xs leading-relaxed text-ink-600">{caption}</p>
+      )}
     </div>
   );
 }
@@ -177,7 +196,9 @@ export function Panel({
         <div>
           <h2 className="text-base font-semibold text-ink-100">{title}</h2>
           {description && (
-            <p className="mt-1 text-sm leading-relaxed text-ink-400">{description}</p>
+            <p className="mt-1 text-sm leading-relaxed text-ink-400">
+              {description}
+            </p>
           )}
         </div>
         {action}
@@ -190,9 +211,18 @@ export function Panel({
 /* ----------------------------------------------------------- status pip --- */
 
 /** Status never travels as colour alone — it always carries a label. */
-export function StatusPip({ tone, children }: { tone: StatusTone; children: ReactNode }) {
+export function StatusPip({
+  tone,
+  children,
+}: {
+  tone: StatusTone;
+  children: ReactNode;
+}) {
   return (
-    <span className="inline-flex items-center gap-1.5 text-xs" style={{ color: STATUS[tone] }}>
+    <span
+      className="inline-flex items-center gap-1.5 text-xs"
+      style={{ color: STATUS[tone] }}
+    >
       <svg viewBox="0 0 12 12" className="h-3 w-3 flex-none" aria-hidden="true">
         {tone === "good" ? (
           <path

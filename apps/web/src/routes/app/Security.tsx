@@ -30,8 +30,12 @@ export function Security() {
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight text-ink-100">Security</h1>
-        <p className="mt-1.5 text-ink-400">Protect the account that can run your pipelines.</p>
+        <h1 className="text-2xl font-semibold tracking-tight text-ink-100">
+          Security
+        </h1>
+        <p className="mt-1.5 text-ink-400">
+          Protect the account that can run your pipelines.
+        </p>
       </div>
       <EmailSection />
       <TwoFactorSection />
@@ -44,7 +48,9 @@ export function Security() {
 
 function EmailSection() {
   const { user, reload } = useAuth();
-  const [state, setState] = useState<"idle" | "sending" | "sent" | "failed">("idle");
+  const [state, setState] = useState<"idle" | "sending" | "sent" | "failed">(
+    "idle",
+  );
   const [detail, setDetail] = useState<string | null>(null);
 
   async function resend() {
@@ -57,7 +63,9 @@ function EmailSection() {
     } catch (err) {
       setState("failed");
       setDetail(
-        err instanceof ApiError ? err.message : "The request did not go through.",
+        err instanceof ApiError
+          ? err.message
+          : "The request did not go through.",
       );
     }
   }
@@ -70,8 +78,15 @@ function EmailSection() {
           <p className="mt-1.5 truncate text-sm text-ink-300">{user?.email}</p>
 
           {user?.is_verified ? (
-            <p className="mt-2 flex items-center gap-1.5 text-sm" style={{ color: "var(--status-good)" }}>
-              <svg viewBox="0 0 12 12" className="h-3.5 w-3.5" aria-hidden="true">
+            <p
+              className="mt-2 flex items-center gap-1.5 text-sm"
+              style={{ color: "var(--status-good)" }}
+            >
+              <svg
+                viewBox="0 0 12 12"
+                className="h-3.5 w-3.5"
+                aria-hidden="true"
+              >
                 <path
                   d="M2.5 6.4 4.8 8.7 9.5 3.9"
                   fill="none"
@@ -85,8 +100,10 @@ function EmailSection() {
             </p>
           ) : (
             <p className="mt-2 max-w-md text-sm leading-relaxed text-ink-400">
-              <span style={{ color: "var(--status-warn)" }}>Not confirmed.</span> Your
-              account works either way — confirming is what makes password
+              <span style={{ color: "var(--status-warn)" }}>
+                Not confirmed.
+              </span>{" "}
+              Your account works either way. Confirming is what makes password
               recovery possible. Without it, a forgotten password cannot be
               reset, because the reset link has nowhere verified to go.
             </p>
@@ -94,7 +111,12 @@ function EmailSection() {
         </div>
 
         {!user?.is_verified && (
-          <Button variant="secondary" onClick={resend} disabled={state === "sending"} loading={state === "sending"}>
+          <Button
+            variant="secondary"
+            onClick={resend}
+            disabled={state === "sending"}
+            loading={state === "sending"}
+          >
             {state === "sent" ? "Send again" : "Send confirmation link"}
           </Button>
         )}
@@ -105,7 +127,7 @@ function EmailSection() {
           <Alert tone="info">
             Requested for {user?.email}. The link works once and expires in an
             hour. If nothing arrives within a few minutes, email delivery is not
-            configured on this deployment — an administrator can confirm the
+            configured on this deployment. An administrator can confirm the
             address directly.
           </Alert>
         </div>
@@ -135,7 +157,9 @@ function TwoFactorSection() {
     try {
       setEnrol(await api.post<EnrolStart>("/auth/2fa/enrol"));
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Could not start enrolment.");
+      setError(
+        err instanceof ApiError ? err.message : "Could not start enrolment.",
+      );
     } finally {
       setBusy(false);
     }
@@ -146,15 +170,20 @@ function TwoFactorSection() {
     setError(null);
     setBusy(true);
     try {
-      const result = await api.post<{ recovery_codes: string[] }>("/auth/2fa/enrol/confirm", {
-        code: code.trim(),
-      });
+      const result = await api.post<{ recovery_codes: string[] }>(
+        "/auth/2fa/enrol/confirm",
+        {
+          code: code.trim(),
+        },
+      );
       setRecoveryCodes(result.recovery_codes);
       setEnrol(null);
       setCode("");
       await reload();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "That code was not accepted.");
+      setError(
+        err instanceof ApiError ? err.message : "That code was not accepted.",
+      );
     } finally {
       setBusy(false);
     }
@@ -167,7 +196,9 @@ function TwoFactorSection() {
       await api.post("/auth/2fa/disable");
       await reload();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Could not turn off 2FA.");
+      setError(
+        err instanceof ApiError ? err.message : "Could not turn off 2FA.",
+      );
     } finally {
       setBusy(false);
     }
@@ -178,10 +209,13 @@ function TwoFactorSection() {
   if (recoveryCodes) {
     return (
       <Card className="p-6">
-        <h2 className="text-lg font-semibold text-ink-100">Save your recovery codes</h2>
+        <h2 className="text-lg font-semibold text-ink-100">
+          Save your recovery codes
+        </h2>
         <p className="mt-1.5 text-sm text-ink-400">
-          Each works once, and this is the only time they are shown — only their hashes are
-          stored. Keep them somewhere other than the device with your authenticator.
+          Each works once, and this is the only time they are shown, only their
+          hashes are stored. Keep them somewhere other than the device with your
+          authenticator.
         </p>
         <ul className="mt-4 grid grid-cols-2 gap-2 rounded-xl border border-ink-700/70 bg-ink-950/60 p-4 font-mono text-sm text-ink-200 sm:grid-cols-3">
           {recoveryCodes.map((rc) => (
@@ -191,11 +225,15 @@ function TwoFactorSection() {
         <div className="mt-4 flex gap-2">
           <Button
             variant="secondary"
-            onClick={() => void navigator.clipboard?.writeText(recoveryCodes.join("\n"))}
+            onClick={() =>
+              void navigator.clipboard?.writeText(recoveryCodes.join("\n"))
+            }
           >
             Copy all
           </Button>
-          <Button onClick={() => setRecoveryCodes(null)}>I have saved them</Button>
+          <Button onClick={() => setRecoveryCodes(null)}>
+            I have saved them
+          </Button>
         </div>
       </Card>
     );
@@ -205,7 +243,9 @@ function TwoFactorSection() {
     <Card className="p-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h2 className="text-lg font-semibold text-ink-100">Two-factor authentication</h2>
+          <h2 className="text-lg font-semibold text-ink-100">
+            Two-factor authentication
+          </h2>
           <p className="mt-1.5 text-sm text-ink-400">
             {user?.totp_enabled
               ? "On. You are asked for a code from your authenticator app after your password."
@@ -214,7 +254,11 @@ function TwoFactorSection() {
         </div>
         {!enrol &&
           (user?.totp_enabled ? (
-            <Button variant="secondary" loading={busy} onClick={() => void disable()}>
+            <Button
+              variant="secondary"
+              loading={busy}
+              onClick={() => void disable()}
+            >
               Turn off
             </Button>
           ) : (
@@ -241,9 +285,11 @@ function TwoFactorSection() {
 
             <div className="space-y-4">
               <div>
-                <p className="text-sm font-medium text-ink-200">1. Scan with your app</p>
+                <p className="text-sm font-medium text-ink-200">
+                  1. Scan with your app
+                </p>
                 <p className="mt-1 text-sm text-ink-400">
-                  1Password, Authy, Google Authenticator — any TOTP app works.
+                  1Password, Authy, Google Authenticator, any TOTP app works.
                 </p>
                 <details className="mt-2">
                   <summary className="cursor-pointer text-sm text-ink-400 hover:text-ink-200">
@@ -270,7 +316,11 @@ function TwoFactorSection() {
                   onChange={(e) => setCode(e.target.value)}
                 />
                 <div className="flex gap-2">
-                  <Button type="submit" loading={busy} disabled={code.trim().length < 6}>
+                  <Button
+                    type="submit"
+                    loading={busy}
+                    disabled={code.trim().length < 6}
+                  >
                     Confirm and enable
                   </Button>
                   <Button
@@ -317,7 +367,11 @@ function ChangePasswordSection() {
       setCurrent("");
       setNext("");
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Could not change the password.");
+      setError(
+        err instanceof ApiError
+          ? err.message
+          : "Could not change the password.",
+      );
     } finally {
       setBusy(false);
     }

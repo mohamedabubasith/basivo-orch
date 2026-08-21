@@ -100,7 +100,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     [workspaces, current, loading, error, select, refresh],
   );
 
-  return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
+  return (
+    <WorkspaceContext.Provider value={value}>
+      {children}
+    </WorkspaceContext.Provider>
+  );
 }
 
 function readStored(): string | null {
@@ -113,6 +117,7 @@ function readStored(): string | null {
 
 export function useWorkspace(): WorkspaceState {
   const context = useContext(WorkspaceContext);
-  if (!context) throw new Error("useWorkspace must be used inside <WorkspaceProvider>");
+  if (!context)
+    throw new Error("useWorkspace must be used inside <WorkspaceProvider>");
   return context;
 }

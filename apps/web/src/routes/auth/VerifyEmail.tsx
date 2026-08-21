@@ -57,12 +57,17 @@ export function VerifyEmail() {
         title="Email confirmed"
         subtitle="Your account is active."
         footer={
-          <Link to="/login" className="font-medium text-brand-300 hover:text-brand-400">
+          <Link
+            to="/login"
+            className="font-medium text-brand-300 hover:text-brand-400"
+          >
             Continue to sign in
           </Link>
         }
       >
-        <Alert tone="success">You can now sign in and build your first pipeline.</Alert>
+        <Alert tone="success">
+          You can now sign in and build your first pipeline.
+        </Alert>
       </AuthLayout>
     );
   }
@@ -71,7 +76,10 @@ export function VerifyEmail() {
     <AuthLayout
       title="That link did not work"
       footer={
-        <Link to="/login" className="font-medium text-brand-300 hover:text-brand-400">
+        <Link
+          to="/login"
+          className="font-medium text-brand-300 hover:text-brand-400"
+        >
           Back to sign in
         </Link>
       }
@@ -79,8 +87,8 @@ export function VerifyEmail() {
       <div className="space-y-4">
         <Alert>{message}</Alert>
         <p className="text-[0.95rem] text-ink-400">
-          Confirmation links expire and can only be used once. Register again with the same
-          address to get a fresh one.
+          Confirmation links expire and can only be used once. Register again
+          with the same address to get a fresh one.
         </p>
       </div>
     </AuthLayout>

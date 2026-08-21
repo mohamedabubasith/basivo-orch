@@ -45,11 +45,20 @@ export function Button({
     ghost: "text-ink-300 hover:text-ink-100 hover:bg-ink-800/60",
   } as const;
 
-  const sizes = { md: "h-10 px-4 text-sm", lg: "h-12 px-6 text-[0.95rem]" } as const;
+  const sizes = {
+    md: "h-10 px-4 text-sm",
+    lg: "h-12 px-6 text-[0.95rem]",
+  } as const;
 
   return (
     <button
-      className={cx(base, variants[variant], sizes[size], full && "w-full", className)}
+      className={cx(
+        base,
+        variants[variant],
+        sizes[size],
+        full && "w-full",
+        className,
+      )}
       disabled={disabled || loading}
       // Tell assistive tech the control is busy rather than silently inert.
       aria-busy={loading || undefined}
@@ -58,7 +67,9 @@ export function Button({
       {/* One spinner, laid over the hidden label so the button does not change
           width mid-submit. An earlier version rendered a second inline spinner
           as well, which showed two at once. */}
-      <span className={cx("inline-flex items-center gap-2", loading && "invisible")}>
+      <span
+        className={cx("inline-flex items-center gap-2", loading && "invisible")}
+      >
         {children}
       </span>
       {loading && (
@@ -66,7 +77,6 @@ export function Button({
           <Spinner />
         </span>
       )}
-
     </button>
   );
 }
@@ -79,8 +89,19 @@ export function Spinner({ className }: { className?: string }) {
       fill="none"
       aria-hidden="true"
     >
-      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
-      <path className="opacity-90" fill="currentColor" d="M4 12a8 8 0 0 1 8-8v3a5 5 0 0 0-5 5H4z" />
+      <circle
+        className="opacity-25"
+        cx="12"
+        cy="12"
+        r="10"
+        stroke="currentColor"
+        strokeWidth="3"
+      />
+      <path
+        className="opacity-90"
+        fill="currentColor"
+        d="M4 12a8 8 0 0 1 8-8v3a5 5 0 0 0-5 5H4z"
+      />
     </svg>
   );
 }
@@ -88,7 +109,11 @@ export function Spinner({ className }: { className?: string }) {
 /** Full-page loading state, for when there is nothing yet to show. */
 export function PageLoader({ label = "Loading" }: { label?: string }) {
   return (
-    <div className="grid min-h-dvh place-items-center" role="status" aria-live="polite">
+    <div
+      className="grid min-h-dvh place-items-center"
+      role="status"
+      aria-live="polite"
+    >
       <div className="flex flex-col items-center gap-4">
         <span className="relative flex h-10 w-10">
           <span className="absolute inset-0 animate-ping rounded-full bg-brand-500/30" />
@@ -118,14 +143,21 @@ export const Field = forwardRef<HTMLInputElement, FieldProps>(function Field(
 ) {
   const generated = useId();
   const inputId = id ?? generated;
-  const describedBy = error ? `${inputId}-error` : hint ? `${inputId}-hint` : undefined;
+  const describedBy = error
+    ? `${inputId}-error`
+    : hint
+      ? `${inputId}-hint`
+      : undefined;
   const [revealed, setRevealed] = useState(false);
 
   const actualType = revealable && revealed ? "text" : type;
 
   return (
     <div className="space-y-1.5">
-      <label htmlFor={inputId} className="block text-sm font-medium text-ink-200">
+      <label
+        htmlFor={inputId}
+        className="block text-sm font-medium text-ink-200"
+      >
         {label}
       </label>
 
@@ -143,7 +175,9 @@ export const Field = forwardRef<HTMLInputElement, FieldProps>(function Field(
             "focus:border-brand-400 focus:bg-ink-900 focus:ring-[3px] focus:ring-brand-500/15 focus:outline-none",
             "disabled:cursor-not-allowed disabled:opacity-60",
             revealable && "pr-11",
-            error ? "border-err-500/70" : "border-ink-600/70 hover:border-ink-500",
+            error
+              ? "border-err-500/70"
+              : "border-ink-600/70 hover:border-ink-500",
             className,
           )}
           {...rest}
@@ -159,7 +193,12 @@ export const Field = forwardRef<HTMLInputElement, FieldProps>(function Field(
             aria-label={revealed ? "Hide password" : "Show password"}
             className="absolute top-1/2 right-3 -translate-y-1/2 text-ink-500 transition-colors hover:text-ink-200"
           >
-            <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" aria-hidden="true">
+            <svg
+              viewBox="0 0 24 24"
+              className="h-4 w-4"
+              fill="none"
+              aria-hidden="true"
+            >
               {revealed ? (
                 <path
                   d="M3 3l18 18M10.6 10.6a2 2 0 002.8 2.8M9.4 5.4A9.8 9.8 0 0112 5c5 0 9 4.5 9 7a12 12 0 01-2.4 3.3M6.2 6.2A12.6 12.6 0 003 12c0 2.5 4 7 9 7 1.2 0 2.3-.2 3.3-.6"
@@ -174,7 +213,13 @@ export const Field = forwardRef<HTMLInputElement, FieldProps>(function Field(
                     stroke="currentColor"
                     strokeWidth="1.6"
                   />
-                  <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="1.6" />
+                  <circle
+                    cx="12"
+                    cy="12"
+                    r="3"
+                    stroke="currentColor"
+                    strokeWidth="1.6"
+                  />
                 </>
               )}
             </svg>
@@ -228,9 +273,17 @@ export function Alert({
       transition={{ duration: 0.2 }}
       // Errors that appear after an action must be announced, not just drawn.
       role={tone === "error" ? "alert" : "status"}
-      className={cx("flex items-start gap-2.5 rounded-xl border px-3.5 py-2.5 text-sm", tones[tone])}
+      className={cx(
+        "flex items-start gap-2.5 rounded-xl border px-3.5 py-2.5 text-sm",
+        tones[tone],
+      )}
     >
-      <svg viewBox="0 0 24 24" className="mt-0.5 h-4 w-4 flex-none" fill="none" aria-hidden="true">
+      <svg
+        viewBox="0 0 24 24"
+        className="mt-0.5 h-4 w-4 flex-none"
+        fill="none"
+        aria-hidden="true"
+      >
         <path
           d={icons[tone]}
           stroke="currentColor"
@@ -246,11 +299,23 @@ export function Alert({
 
 /* -------------------------------------------------------------- layout --- */
 
-export function Card({ children, className }: { children: ReactNode; className?: string }) {
+export function Card({
+  children,
+  className,
+}: {
+  children: ReactNode;
+  className?: string;
+}) {
   return <div className={cx("surface rounded-xl", className)}>{children}</div>;
 }
 
-export function Badge({ children, className }: { children: ReactNode; className?: string }) {
+export function Badge({
+  children,
+  className,
+}: {
+  children: ReactNode;
+  className?: string;
+}) {
   return (
     <span
       className={cx(
@@ -280,7 +345,15 @@ export function Logo({ className }: { className?: string }) {
             <stop offset="100%" stopColor="var(--color-accent-500)" />
           </linearGradient>
         </defs>
-        <rect x="2" y="2" width="28" height="28" rx="9" fill={`url(#${gradient})`} opacity="0.16" />
+        <rect
+          x="2"
+          y="2"
+          width="28"
+          height="28"
+          rx="9"
+          fill={`url(#${gradient})`}
+          opacity="0.16"
+        />
         <circle cx="10" cy="10" r="3" fill={`url(#${gradient})`} />
         <circle cx="22" cy="10" r="3" fill={`url(#${gradient})`} />
         <circle cx="16" cy="22" r="3" fill={`url(#${gradient})`} />
@@ -292,7 +365,9 @@ export function Logo({ className }: { className?: string }) {
           strokeLinecap="round"
         />
       </svg>
-      <span className="text-[1.05rem] font-semibold tracking-tight text-ink-100">Basivo</span>
+      <span className="text-[1.05rem] font-semibold tracking-tight text-ink-100">
+        Basivo
+      </span>
     </span>
   );
 }

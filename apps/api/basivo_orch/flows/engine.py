@@ -618,7 +618,7 @@ class Engine:
                 waited = time.perf_counter()
                 async with gate:
                     if implementation.heavy and time.perf_counter() - waited > 1.0:
-                        await progress("Waiting for the renderer — another heavy step is using it")
+                        await progress("Waiting for the renderer. Another heavy step is using it")
                     async with asyncio.timeout(implementation.timeout_seconds):
                         result = await implementation.run(config, ctx)
 

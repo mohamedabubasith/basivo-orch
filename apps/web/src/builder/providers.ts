@@ -48,9 +48,9 @@ export const VCS_PROVIDERS: { value: string; label: string }[] = [
   { value: "gitlab", label: "GitLab" },
 ];
 
-export const PROVIDERS: { value: string; label: string }[] = Object.entries(PROVIDER_LABEL).map(
-  ([value, label]) => ({ value, label }),
-);
+export const PROVIDERS: { value: string; label: string }[] = Object.entries(
+  PROVIDER_LABEL,
+).map(([value, label]) => ({ value, label }));
 
 /**
  * The voices offered for narration.
@@ -61,21 +61,21 @@ export const PROVIDERS: { value: string; label: string }[] = Object.entries(PROV
  * which is the list the API actually validates against.
  */
 export const VOICES: { value: string; label: string }[] = [
-  { value: "af_heart", label: "Heart — warm US female" },
-  { value: "af_bella", label: "Bella — bright US female" },
-  { value: "af_nicole", label: "Nicole — soft US female, close-mic" },
-  { value: "af_nova", label: "Nova — clear US female" },
-  { value: "am_michael", label: "Michael — steady US male" },
-  { value: "am_puck", label: "Puck — lively US male" },
-  { value: "am_onyx", label: "Onyx — deep US male" },
-  { value: "bf_emma", label: "Emma — UK female" },
-  { value: "bf_isabella", label: "Isabella — UK female, measured" },
-  { value: "bm_george", label: "George — UK male" },
-  { value: "bm_lewis", label: "Lewis — UK male, low" },
-  { value: "ef_dora", label: "Dora — Spanish female" },
-  { value: "ff_siwis", label: "Siwis — French female" },
-  { value: "hf_alpha", label: "Alpha — Hindi female" },
-  { value: "if_sara", label: "Sara — Italian female" },
-  { value: "jf_alpha", label: "Alpha — Japanese female" },
-  { value: "zf_xiaoxiao", label: "Xiaoxiao — Mandarin female" },
+  { value: "af_heart", label: "Heart (warm US female)" },
+  { value: "af_bella", label: "Bella (bright US female)" },
+  { value: "af_nicole", label: "Nicole (soft US female, close-mic)" },
+  { value: "af_nova", label: "Nova (clear US female)" },
+  { value: "am_michael", label: "Michael (steady US male)" },
+  { value: "am_puck", label: "Puck (lively US male)" },
+  { value: "am_onyx", label: "Onyx (deep US male)" },
+  { value: "bf_emma", label: "Emma (UK female)" },
+  { value: "bf_isabella", label: "Isabella (UK female, measured)" },
+  { value: "bm_george", label: "George (UK male)" },
+  { value: "bm_lewis", label: "Lewis (UK male, low)" },
+  { value: "ef_dora", label: "Dora (Spanish female)" },
+  { value: "ff_siwis", label: "Siwis (French female)" },
+  { value: "hf_alpha", label: "Alpha (Hindi female)" },
+  { value: "if_sara", label: "Sara (Italian female)" },
+  { value: "jf_alpha", label: "Alpha (Japanese female)" },
+  { value: "zf_xiaoxiao", label: "Xiaoxiao (Mandarin female)" },
 ];

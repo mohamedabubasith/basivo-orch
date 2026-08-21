@@ -214,7 +214,7 @@ export function Inspector({
                   Next run {new Date(nextRunAt).toLocaleString()}
                 </p>
                 <p className="mt-1.5 text-[0.68rem] leading-relaxed text-ink-500">
-                  Armed. The run worker fires it — nothing needs to call this
+                  Armed. The run worker fires it. Nothing needs to call this
                   flow. Cron is read in the timezone below, so 6am stays 6am
                   across daylight saving.
                 </p>
@@ -222,7 +222,7 @@ export function Inspector({
             ) : (
               <p className="mt-1 text-[0.68rem] leading-relaxed text-ink-500">
                 {isPublished
-                  ? "Not armed yet — publish again after setting the schedule, and the next run time appears here."
+                  ? "Not armed yet. Publish again after setting the schedule, and the next run time appears here."
                   : "A schedule only runs once the flow is published. Publish, and the next run time appears here."}
               </p>
             )}
@@ -240,12 +240,12 @@ export function Inspector({
               </code>
             ) : (
               <p className="mt-1 text-[0.68rem] leading-relaxed text-ink-500">
-                Appears after you publish — an unpublished flow has no stable
-                URL for callers to depend on.
+                Appears after you publish. An unpublished flow has no stable URL
+                for callers to depend on.
               </p>
             )}
             <p className="mt-1.5 text-[0.68rem] leading-relaxed text-ink-500">
-              No API key — paste it straight into GitHub or GitLab webhook
+              No API key: paste it straight into GitHub or GitLab webhook
               settings. The secret below authenticates every delivery (GitHub's{" "}
               <code className="text-ink-400">X-Hub-Signature-256</code>,
               GitLab's <code className="text-ink-400">X-Gitlab-Token</code>, or
@@ -356,7 +356,7 @@ export function Inspector({
                   />
                   <p className="mt-1.5 text-[0.68rem] leading-relaxed text-ink-500">
                     JSON, filled into the template. An upstream agent usually
-                    writes these — that is the division of labour: it writes
+                    writes these. That is the division of labour: it writes
                     words, the template does layout.
                   </p>
                 </div>
@@ -395,18 +395,18 @@ export function Inspector({
                   onChange={(v) => set("code", v)}
                 />
               ) : field.key === "voice" ? (
-              <select
-                value={String(config.voice ?? "af_heart")}
-                onChange={(event) => set("voice", event.target.value)}
-                className={INPUT}
-              >
-                {VOICES.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            ) : isAgent && field.key === "skills" ? (
+                <select
+                  value={String(config.voice ?? "af_heart")}
+                  onChange={(event) => set("voice", event.target.value)}
+                  className={INPUT}
+                >
+                  {VOICES.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              ) : isAgent && field.key === "skills" ? (
                 <SkillPicker
                   orgId={orgId}
                   value={
@@ -423,7 +423,7 @@ export function Inspector({
                     onChange={(event) => set("memory", event.target.value)}
                     className={INPUT}
                   >
-                    <option value="off">Off — every run starts fresh</option>
+                    <option value="off">Off (every run starts fresh)</option>
                     <option value="conversation">
                       Remember the conversation
                     </option>
@@ -431,7 +431,7 @@ export function Inspector({
                   <p className="mt-1.5 text-[0.68rem] leading-relaxed text-ink-500">
                     {config.memory === "conversation"
                       ? "Past requests and replies are sent again before the new one, so you can say “that didn’t work” and be understood. Tool calls are never stored."
-                      : "Right for one-shot work — classifying or summarising whatever arrives. Remembering would only bias it."}
+                      : "Right for one-shot work: classifying or summarising whatever arrives. Remembering would only bias it."}
                   </p>
                 </div>
               ) : isAgent && field.key === "memory_key" ? (
@@ -443,7 +443,7 @@ export function Inspector({
                     placeholder="{{ input.body.issue.number }}"
                   />
                   <p className="mt-1.5 text-[0.68rem] leading-relaxed text-ink-500">
-                    One separate thread per value — usually an issue number or a
+                    One separate thread per value, usually an issue number or a
                     chat id.{" "}
                     {config.memory_key
                       ? ""
@@ -458,16 +458,16 @@ export function Inspector({
                     className={INPUT}
                   >
                     <option value="delegate">
-                      Delegate — it asks, then answers itself
+                      Delegate: it asks, then answers itself
                     </option>
                     <option value="handover">
-                      Handover — it transfers, they answer you
+                      Handover: it transfers, they answer you
                     </option>
                   </select>
                   <p className="mt-1.5 text-[0.68rem] leading-relaxed text-ink-500">
                     {config.team_mode === "handover"
-                      ? "Control moves. The agent it transfers to replies directly and can transfer on again — right for triage."
-                      : "This agent stays in charge: it asks, gets an answer back, and writes the reply itself — right for combining several answers."}
+                      ? "Control moves. The agent it transfers to replies directly and can transfer on again. Right for triage."
+                      : "This agent stays in charge: it asks, gets an answer back, and writes the reply itself. Right for combining several answers."}
                   </p>
                 </div>
               ) : isAgent && field.key === "sub_agents" ? (
@@ -639,7 +639,7 @@ const TOOLS_EXAMPLE = JSON.stringify(
     {
       name: "stub_example",
       description:
-        "Always returns the same value — useful while testing a flow.",
+        "Always returns the same value, useful while testing a flow.",
       input_schema: { type: "object", properties: {} },
       kind: "constant",
       value: "ok",
@@ -816,7 +816,7 @@ function JsonInput({
           className="mt-1 text-[0.68rem]"
           style={{ color: "var(--status-bad)" }}
         >
-          Not valid JSON — the last valid value is still saved.
+          Not valid JSON. The last valid value is still saved.
         </p>
       )}
     </>

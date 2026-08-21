@@ -74,7 +74,7 @@ export function Skills() {
   async function remove(skill: SkillSummary) {
     if (
       !confirm(
-        `Delete "${skill.name}"? Agents that list it keep running — they just stop being offered it, ` +
+        `Delete "${skill.name}"? Agents that list it keep running, they just stop being offered it, ` +
           `and the run log says so.`,
       )
     )
@@ -147,7 +147,7 @@ export function Skills() {
           <p className="text-ink-200">No skills yet.</p>
           <p className="mx-auto mt-2 max-w-lg text-sm leading-relaxed text-ink-500">
             A skill is what you would otherwise paste into every agent's prompt
-            — a refund policy, a code review checklist, the way your team writes
+            : a refund policy, a code review checklist, the way your team writes
             release notes. Write it once here, list it on an Agent node, and the
             agent opens it when the request calls for it.
           </p>
@@ -297,7 +297,7 @@ function WriteSkill({
             required
             autoFocus
             placeholder="refund-policy"
-            hint="Lowercase and hyphens — the agent passes this to a tool."
+            hint="Lowercase and hyphens. The agent passes this to a tool."
             value={name}
             onChange={(event) => setName(event.target.value)}
           />
@@ -314,7 +314,7 @@ function WriteSkill({
             />
             <p className="mt-1.5 text-[0.68rem] leading-relaxed text-ink-500">
               The only part the agent reads before choosing. Describe the
-              situation, not the document — “refund policy” tells it far less
+              situation, not the document, “refund policy” tells it far less
               than “use when a customer asks for money back”.
             </p>
           </div>
@@ -336,7 +336,7 @@ function WriteSkill({
           />
           <p className="mt-1.5 text-[0.68rem] leading-relaxed text-ink-500">
             Markdown. This is loaded whole when the agent opens the skill, so
-            keep it a procedure — a long reference belongs in a bundled file.
+            keep it a procedure. A long reference belongs in a bundled file.
           </p>
         </div>
 
@@ -393,7 +393,7 @@ function ImportSkill({ orgId, onDone }: { orgId: string; onDone: () => void }) {
             className={`${INPUT} resize-y font-mono text-[0.78rem] leading-relaxed`}
           />
           <p className="mt-1.5 text-[0.68rem] leading-relaxed text-ink-500">
-            Paste a skill file — the same format Claude uses, frontmatter and
+            Paste a skill file, the same format Claude uses, frontmatter and
             all. Name and description come from the frontmatter; everything
             after it becomes the instructions.
           </p>

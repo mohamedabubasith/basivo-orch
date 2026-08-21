@@ -104,7 +104,10 @@ export function toGraph(nodes: FlowNode[], edges: Edge[]): Graph {
       // Rounded because the canvas produces sub-pixel values on every drag,
       // and a graph that differs only in the ninth decimal place would mark
       // the flow dirty forever.
-      position: { x: Math.round(node.position.x), y: Math.round(node.position.y) },
+      position: {
+        x: Math.round(node.position.x),
+        y: Math.round(node.position.y),
+      },
     })),
     edges: edges.map((edge) => ({
       source: edge.source,
@@ -114,7 +117,11 @@ export function toGraph(nodes: FlowNode[], edges: Edge[]): Graph {
   };
 }
 
-export function edgeId(source: string, target: string, handle?: string | null): string {
+export function edgeId(
+  source: string,
+  target: string,
+  handle?: string | null,
+): string {
   return `${source}:${handle ?? "out"}->${target}`;
 }
 
@@ -126,7 +133,8 @@ export function edgeId(source: string, target: string, handle?: string | null): 
  * existing set is passed in rather than trusting a counter.
  */
 export function makeNodeId(nodeType: string, existing: Set<string>): string {
-  const base = nodeType.replace(/[^a-zA-Z0-9]+/g, "_").replace(/^_|_$/g, "") || "node";
+  const base =
+    nodeType.replace(/[^a-zA-Z0-9]+/g, "_").replace(/^_|_$/g, "") || "node";
   let candidate = base;
   let n = 1;
   while (existing.has(candidate)) candidate = `${base}_${++n}`;
@@ -141,10 +149,14 @@ export function makeNodeId(nodeType: string, existing: Set<string>): string {
  * directly. Pulling the quoted id out means the editor can underline the node
  * instead of showing a list the author has to match up by eye.
  */
-export function attachProblems(nodes: FlowNode[], problems: string[]): FlowNode[] {
+export function attachProblems(
+  nodes: FlowNode[],
+  problems: string[],
+): FlowNode[] {
   const byNode = new Map<string, string>();
   for (const problem of problems) {
-    const match = /Node '([^']+)'/.exec(problem) ?? /node '([^']+)'/.exec(problem);
+    const match =
+      /Node '([^']+)'/.exec(problem) ?? /node '([^']+)'/.exec(problem);
     if (match) byNode.set(match[1], problem);
   }
   return nodes.map((node) =>

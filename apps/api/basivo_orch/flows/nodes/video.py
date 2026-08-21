@@ -201,7 +201,9 @@ class VideoRenderNode(Node):
 
     type = "video.render"
     label = "Render Video"
-    description = "Turn an animated HTML composition into an MP4 — templates or your own."
+    description = (
+        "Turn an animated HTML composition into an MP4, from a template or your own composition."
+    )
     tier = 2
     category = "design"
     config_model = VideoRenderConfig
@@ -222,7 +224,7 @@ class VideoRenderNode(Node):
 
         if problems := composition_problems(html):
             raise NodeError(
-                "This composition will not render as video — "
+                "This composition will not render as video: "
                 + "; ".join(problems)
                 + ". It needs a root #stage with data-duration and a paused GSAP timeline on "
                 "window.__timelines. If an agent wrote it, put the composition instructions "
@@ -247,7 +249,7 @@ class VideoRenderNode(Node):
                 "variables": list(variables),
             },
         )
-        await ctx.progress(f"Rendering {duration:g}s of {config.format} — this takes a while")
+        await ctx.progress(f"Rendering {duration:g}s of {config.format}. This takes a while")
 
         data, logs = await _render(html, variables=variables, config=config)
 
@@ -277,7 +279,7 @@ def _resolve_variables(raw: str, template_context: dict[str, Any]) -> dict[str, 
     except ValueError as exc:
         raise NodeError(
             f"The variables did not come out as JSON after filling in references: {exc}. "
-            "A value containing quotes or newlines needs escaping — ask the agent for plain text."
+            "A value containing quotes or newlines needs escaping. Ask the agent for plain text."
         ) from exc
     if not isinstance(parsed, dict):
         raise NodeError("Variables must be a JSON object.")
@@ -309,7 +311,7 @@ def ensure_disk_space(minimum_gb: float = MIN_FREE_DISK_GB) -> None:
     if free < minimum_gb:
         raise NodeError(
             f"Only {free:.1f}GB of disk is free and a render needs at least "
-            f"{minimum_gb:g}GB of scratch space. Nothing was rendered — the "
+            f"{minimum_gb:g}GB of scratch space. Nothing was rendered. The "
             "alternative is filling the disk the database is on. Free some space "
             "or lower BASIVO_MIN_FREE_DISK_GB if you know better.",
             retryable=False,
@@ -705,7 +707,7 @@ class VideoGeneratorNode(Node):
                 accepted = True
                 break
 
-            await ctx.progress(f"Attempt {attempt} had {len(problems)} problem(s) — revising")
+            await ctx.progress(f"Attempt {attempt} had {len(problems)} problem(s). Revising")
             conversation.append(AIMessage(content=html))
             conversation.append(
                 HumanMessage(
@@ -721,7 +723,7 @@ class VideoGeneratorNode(Node):
         if not accepted:
             raise NodeError(
                 f"The agent could not produce a working composition in {config.max_attempts} "
-                "attempts. The last problems were logged on this run — raising the attempt "
+                "attempts. The last problems were logged on this run. Raising the attempt "
                 "limit or simplifying the brief usually helps."
             )
 

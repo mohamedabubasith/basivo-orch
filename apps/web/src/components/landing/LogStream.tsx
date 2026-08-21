@@ -50,35 +50,125 @@ interface Step {
 
 const SCRIPT: Step[] = [
   { wait: 300, node: "trigger", status: "running" },
-  { wait: 260, log: { level: "info", node: "hook", message: "issues.opened · signature verified" } },
-  { wait: 220, node: "trigger", status: "ok",
-    log: { level: "success", node: "hook", message: "#31 Tax missing from order total", duration: "11ms" } },
+  {
+    wait: 260,
+    log: {
+      level: "info",
+      node: "hook",
+      message: "issues.opened · signature verified",
+    },
+  },
+  {
+    wait: 220,
+    node: "trigger",
+    status: "ok",
+    log: {
+      level: "success",
+      node: "hook",
+      message: "#31 Tax missing from order total",
+      duration: "11ms",
+    },
+  },
 
   { wait: 220, node: "gate", status: "running" },
-  { wait: 260, node: "gate", status: "ok",
-    log: { level: "info", node: "gate", message: "author OWNER · branch → true", duration: "7ms" } },
+  {
+    wait: 260,
+    node: "gate",
+    status: "ok",
+    log: {
+      level: "info",
+      node: "gate",
+      message: "author OWNER · branch → true",
+      duration: "7ms",
+    },
+  },
 
   { wait: 240, node: "fix", status: "running" },
-  { wait: 300, log: { level: "debug", node: "fix", message: "fix.image · checkout.png 42KB" } },
-  { wait: 380, log: { level: "info", node: "fix", message: "read shop/pricing.py · 711 bytes" } },
-  { wait: 420, log: { level: "warn", node: "fix", message: "refused .github/workflows/ci.yml — protected" } },
-  { wait: 360, log: { level: "info", node: "fix", message: "staged shop/pricing.py · 1 file" } },
-  { wait: 220, node: "fix", status: "ok",
-    log: { level: "success", node: "fix", message: "6,711 in / 616 out tokens", duration: "665s" } },
+  {
+    wait: 300,
+    log: {
+      level: "debug",
+      node: "fix",
+      message: "fix.image · checkout.png 42KB",
+    },
+  },
+  {
+    wait: 380,
+    log: {
+      level: "info",
+      node: "fix",
+      message: "read shop/pricing.py · 711 bytes",
+    },
+  },
+  {
+    wait: 420,
+    log: {
+      level: "warn",
+      node: "fix",
+      message: "refused .github/workflows/ci.yml: protected",
+    },
+  },
+  {
+    wait: 360,
+    log: {
+      level: "info",
+      node: "fix",
+      message: "staged shop/pricing.py · 1 file",
+    },
+  },
+  {
+    wait: 220,
+    node: "fix",
+    status: "ok",
+    log: {
+      level: "success",
+      node: "fix",
+      message: "6,711 in / 616 out tokens",
+      duration: "665s",
+    },
+  },
 
   { wait: 240, node: "pr", status: "running" },
-  { wait: 420, node: "pr", status: "ok",
-    log: { level: "success", node: "pr", message: "pr.opened · #5 basivo/autofix-b62c7195", duration: "1.1s" } },
+  {
+    wait: 420,
+    node: "pr",
+    status: "ok",
+    log: {
+      level: "success",
+      node: "pr",
+      message: "pr.opened · #5 basivo/autofix-b62c7195",
+      duration: "1.1s",
+    },
+  },
 
   { wait: 220, node: "reply", status: "running" },
-  { wait: 380, node: "reply", status: "ok",
-    log: { level: "success", node: "reply", message: "commented on #31 with the link", duration: "640ms" } },
+  {
+    wait: 380,
+    node: "reply",
+    status: "ok",
+    log: {
+      level: "success",
+      node: "reply",
+      message: "commented on #31 with the link",
+      duration: "640ms",
+    },
+  },
 
-  { wait: 400, log: { level: "success", node: "run", message: "run finished · issue → pull request" } },
+  {
+    wait: 400,
+    log: {
+      level: "success",
+      node: "run",
+      message: "run finished · issue → pull request",
+    },
+  },
   { wait: 2800 },
 ];
 
-const LEVEL_STYLES: Record<Level, { dot: string; text: string; label: string }> = {
+const LEVEL_STYLES: Record<
+  Level,
+  { dot: string; text: string; label: string }
+> = {
   info: { dot: "bg-brand-400", text: "text-ink-300", label: "INFO" },
   debug: { dot: "bg-ink-500", text: "text-ink-400", label: "DBUG" },
   warn: { dot: "bg-warn-500", text: "text-warn-500", label: "WARN" },
@@ -136,7 +226,11 @@ export function LogStream() {
           setStatuses((prev) => ({ ...prev, [node]: status }));
         }
         if (step.log) {
-          const entry: LogLine = { ...step.log, key: key++, at: clockAt(clock) };
+          const entry: LogLine = {
+            ...step.log,
+            key: key++,
+            at: clockAt(clock),
+          };
           setLines((prev) => [...prev, entry].slice(-MAX_LINES));
         }
         setElapsed(clock);
@@ -198,23 +292,33 @@ export function LogStream() {
           {NODES.map((node, i) => {
             const status = statuses[node.id] ?? "pending";
             return (
-              <div key={node.id} className="flex flex-none items-center gap-1.5">
+              <div
+                key={node.id}
+                className="flex flex-none items-center gap-1.5"
+              >
                 <motion.div
                   animate={
                     status === "running" && !reduceMotion
                       ? { scale: [1, 1.03, 1] }
                       : { scale: 1 }
                   }
-                  transition={{ duration: 1.1, repeat: status === "running" ? Infinity : 0 }}
+                  transition={{
+                    duration: 1.1,
+                    repeat: status === "running" ? Infinity : 0,
+                  }}
                   className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 transition-colors duration-300 ${STATUS_STYLES[status]}`}
                 >
                   <StatusGlyph status={status} />
-                  <span className="text-[0.7rem] font-medium whitespace-nowrap">{node.label}</span>
+                  <span className="text-[0.7rem] font-medium whitespace-nowrap">
+                    {node.label}
+                  </span>
                 </motion.div>
                 {i < NODES.length - 1 && (
                   <span
                     className={`h-px w-3 transition-colors duration-500 ${
-                      statuses[node.id] === "ok" ? "bg-ok-500/50" : "bg-ink-600/60"
+                      statuses[node.id] === "ok"
+                        ? "bg-ok-500/50"
+                        : "bg-ink-600/60"
                     }`}
                     aria-hidden="true"
                   />
@@ -242,11 +346,17 @@ export function LogStream() {
                 className="flex items-baseline gap-2.5 py-[3px]"
               >
                 <span className="flex-none text-ink-600">{line.at}</span>
-                <span className={`flex-none font-semibold ${style.text}`}>{style.label}</span>
+                <span className={`flex-none font-semibold ${style.text}`}>
+                  {style.label}
+                </span>
                 <span className="flex-none text-ink-500">{line.node}</span>
-                <span className={`min-w-0 flex-1 truncate ${style.text}`}>{line.message}</span>
+                <span className={`min-w-0 flex-1 truncate ${style.text}`}>
+                  {line.message}
+                </span>
                 {line.duration && (
-                  <span className="flex-none text-ink-600">{line.duration}</span>
+                  <span className="flex-none text-ink-600">
+                    {line.duration}
+                  </span>
                 )}
               </motion.div>
             );
@@ -275,23 +385,50 @@ function StatusGlyph({ status }: { status: NodeStatus }) {
   if (status === "ok") {
     return (
       <svg viewBox="0 0 12 12" className="h-3 w-3 flex-none" aria-hidden="true">
-        <path d="M2.5 6.4 4.8 8.7 9.5 3.9" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+        <path
+          d="M2.5 6.4 4.8 8.7 9.5 3.9"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.7"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
       </svg>
     );
   }
   if (status === "running" || status === "retrying") {
     return (
-      <svg viewBox="0 0 12 12" className="h-3 w-3 flex-none animate-spin" aria-hidden="true">
-        <circle cx="6" cy="6" r="4.2" fill="none" stroke="currentColor" strokeWidth="1.6" strokeDasharray="16 10" strokeLinecap="round" />
+      <svg
+        viewBox="0 0 12 12"
+        className="h-3 w-3 flex-none animate-spin"
+        aria-hidden="true"
+      >
+        <circle
+          cx="6"
+          cy="6"
+          r="4.2"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeDasharray="16 10"
+          strokeLinecap="round"
+        />
       </svg>
     );
   }
   if (status === "failed") {
     return (
       <svg viewBox="0 0 12 12" className="h-3 w-3 flex-none" aria-hidden="true">
-        <path d="M3.6 3.6l4.8 4.8M8.4 3.6l-4.8 4.8" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+        <path
+          d="M3.6 3.6l4.8 4.8M8.4 3.6l-4.8 4.8"
+          stroke="currentColor"
+          strokeWidth="1.7"
+          strokeLinecap="round"
+        />
       </svg>
     );
   }
-  return <span className="h-1.5 w-1.5 flex-none rounded-full bg-current opacity-60" />;
+  return (
+    <span className="h-1.5 w-1.5 flex-none rounded-full bg-current opacity-60" />
+  );
 }

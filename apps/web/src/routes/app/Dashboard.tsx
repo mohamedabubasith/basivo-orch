@@ -4,7 +4,13 @@ import { useCallback, useEffect, useState } from "react";
 import { api } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
 import { useWorkspace } from "../../lib/workspace";
-import { BarList, Panel, StatTile, StatusPip, type BarDatum } from "../../components/charts";
+import {
+  BarList,
+  Panel,
+  StatTile,
+  StatusPip,
+  type BarDatum,
+} from "../../components/charts";
 import { formatMs, formatPercent } from "../../lib/viz";
 import { Badge, Card, Spinner } from "../../components/ui";
 import { RunsChart } from "./RunsChart";
@@ -47,7 +53,12 @@ interface Analytics {
     count: number;
     last_seen: string | null;
   }[];
-  dead_branches: { node_id: string; node_name: string; node_type: string; skipped: number }[];
+  dead_branches: {
+    node_id: string;
+    node_name: string;
+    node_type: string;
+    skipped: number;
+  }[];
 }
 
 const WINDOWS = [1, 7, 30] as const;
@@ -62,20 +73,21 @@ export function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(
-    async (organization: string, window: number) => {
-      setLoading(true);
-      try {
-        setData(await api.get<Analytics>(`/api/v1/orgs/${organization}/analytics?days=${window}`));
-        setError(null);
-      } catch {
-        setError("Could not load your analytics.");
-      } finally {
-        setLoading(false);
-      }
-    },
-    [],
-  );
+  const load = useCallback(async (organization: string, window: number) => {
+    setLoading(true);
+    try {
+      setData(
+        await api.get<Analytics>(
+          `/api/v1/orgs/${organization}/analytics?days=${window}`,
+        ),
+      );
+      setError(null);
+    } catch {
+      setError("Could not load your analytics.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     if (orgId) void load(orgId, days);
@@ -98,7 +110,8 @@ export function Dashboard() {
             Welcome{user?.email ? `, ${user.email.split("@")[0]}` : ""}
           </h1>
           <p className="mt-1.5 text-ink-400">
-            What your pipelines actually did in the last {data?.window_days ?? days} days.
+            What your pipelines actually did in the last{" "}
+            {data?.window_days ?? days} days.
           </p>
         </div>
 
@@ -112,7 +125,9 @@ export function Dashboard() {
                 if (orgId) void load(orgId, window);
               }}
               className={`relative rounded-lg px-3 py-1.5 text-sm transition-colors ${
-                days === window ? "text-ink-100" : "text-ink-400 hover:text-ink-200"
+                days === window
+                  ? "text-ink-100"
+                  : "text-ink-400 hover:text-ink-200"
               }`}
             >
               {days === window && (
@@ -151,7 +166,12 @@ export function Dashboard() {
               instrument strip reads as one panel, and it is the composition
               every modern dashboard uses for its headline row. */}
           <div className="surface grid overflow-hidden rounded-xl sm:grid-cols-2 lg:grid-cols-4 [&>*+*]:border-t [&>*+*]:border-[var(--edge)] sm:[&>*]:border-t-0 sm:[&>*:nth-child(even)]:border-l sm:[&>*:nth-child(n+3)]:border-t lg:[&>*]:!border-t-0 lg:[&>*+*]:!border-l lg:[&>*+*]:border-[var(--edge)]">
-            <StatTile flat label="Runs" value={runs.total.toLocaleString()} hint={`${runs.running} in flight`} />
+            <StatTile
+              flat
+              label="Runs"
+              value={runs.total.toLocaleString()}
+              hint={`${runs.running} in flight`}
+            />
             <StatTile
               flat
               label="Success rate"
@@ -171,7 +191,7 @@ export function Dashboard() {
               flat
               label="Typical duration"
               value={formatMs(runs.p50_ms)}
-              hint={`p95 ${formatMs(runs.p95_ms)} — the slow tail your users feel`}
+              hint={`p95 ${formatMs(runs.p95_ms)}, the slow tail your users feel`}
             />
             {/* The differentiator. Every dashboard that counts final states
                 reports these runs as clean successes. */}
@@ -239,7 +259,7 @@ export function Dashboard() {
                           ? "warn"
                           : "good",
                   }))}
-                caption="A rate is withheld below five executions — three failures out of four is not a 75% failure rate worth chasing."
+                caption="A rate is withheld below five executions. Three failures out of four is not a 75% failure rate worth chasing."
               />
             </Panel>
           </div>
@@ -260,7 +280,9 @@ export function Dashboard() {
                     <tr className="border-b border-ink-700/60 text-xs text-ink-500">
                       <th className="px-2 pb-2 font-medium">Error</th>
                       <th className="px-2 pb-2 font-medium">Node</th>
-                      <th className="px-2 pb-2 text-right font-medium">Occurrences</th>
+                      <th className="px-2 pb-2 text-right font-medium">
+                        Occurrences
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
@@ -274,7 +296,9 @@ export function Dashboard() {
                             {cluster.example}
                           </p>
                         </td>
-                        <td className="px-2 py-3 text-ink-400">{cluster.node_name ?? "—"}</td>
+                        <td className="px-2 py-3 text-ink-400">
+                          {cluster.node_name ?? "-"}
+                        </td>
                         <td className="px-2 py-3 text-right">
                           <StatusPip tone={cluster.count > 5 ? "bad" : "warn"}>
                             {cluster.count}
@@ -291,14 +315,16 @@ export function Dashboard() {
           {data.dead_branches.length > 0 && (
             <Panel
               title="Branches that never fire"
-              description="Skipped on every run in this window — dead logic, or a path nothing has exercised. Neither shows up in a success rate."
+              description="Skipped on every run in this window. Dead logic, or a path nothing has exercised. Neither shows up in a success rate."
             >
               <ul className="flex flex-wrap gap-2">
                 {data.dead_branches.map((branch) => (
                   <li key={branch.node_id}>
                     <Badge>
                       {branch.node_name}
-                      <span className="text-ink-500">· skipped {branch.skipped}×</span>
+                      <span className="text-ink-500">
+                        · skipped {branch.skipped}×
+                      </span>
                     </Badge>
                   </li>
                 ))}
@@ -316,7 +342,12 @@ function EmptyState() {
     <div className="space-y-6">
       <Card className="p-10 text-center">
         <div className="mx-auto mb-4 grid h-12 w-12 place-items-center rounded-2xl border border-ink-700/70 bg-ink-850">
-          <svg viewBox="0 0 24 24" className="h-5 w-5 text-brand-300" fill="none" aria-hidden="true">
+          <svg
+            viewBox="0 0 24 24"
+            className="h-5 w-5 text-brand-300"
+            fill="none"
+            aria-hidden="true"
+          >
             <path
               d="M4 7h6M14 7h6M4 17h6M14 17h6M10 7a2 2 0 002 2h0a2 2 0 012 2v2a2 2 0 002 2"
               stroke="currentColor"
@@ -328,7 +359,7 @@ function EmptyState() {
         <h2 className="text-lg font-semibold text-ink-100">No runs yet</h2>
         <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-ink-400">
           Analytics appear as soon as a flow runs. Every node execution is
-          recorded — timing, retries and errors — so this page has something to
+          recorded (timing, retries and errors), so this page has something to
           say from the very first run.
         </p>
         <p className="mx-auto mt-4 max-w-md text-xs leading-relaxed text-ink-600">
@@ -336,7 +367,6 @@ function EmptyState() {
           not built yet.
         </p>
       </Card>
-
     </div>
   );
 }

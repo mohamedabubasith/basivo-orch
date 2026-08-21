@@ -37,9 +37,9 @@ export function SsoButtons() {
   async function start(provider: Provider) {
     setPending(provider.name);
     try {
-      const { authorization_url } = await api.get<{ authorization_url: string }>(
-        provider.authorize_path,
-      );
+      const { authorization_url } = await api.get<{
+        authorization_url: string;
+      }>(provider.authorize_path);
       window.location.assign(authorization_url);
     } catch {
       setPending(null);

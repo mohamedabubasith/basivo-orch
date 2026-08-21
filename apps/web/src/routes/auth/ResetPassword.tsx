@@ -34,7 +34,9 @@ export function ResetPassword() {
       });
     } catch (err) {
       setError(
-        err instanceof ApiError ? err.message : "Could not reset the password. Please try again.",
+        err instanceof ApiError
+          ? err.message
+          : "Could not reset the password. Please try again.",
       );
     } finally {
       setBusy(false);
@@ -46,12 +48,17 @@ export function ResetPassword() {
       <AuthLayout
         title="That link is incomplete"
         footer={
-          <Link to="/forgot-password" className="font-medium text-brand-300 hover:text-brand-400">
+          <Link
+            to="/forgot-password"
+            className="font-medium text-brand-300 hover:text-brand-400"
+          >
             Request a new link
           </Link>
         }
       >
-        <Alert>This reset link is missing its token. Please request a new one.</Alert>
+        <Alert>
+          This reset link is missing its token. Please request a new one.
+        </Alert>
       </AuthLayout>
     );
   }
@@ -61,7 +68,10 @@ export function ResetPassword() {
       title="Choose a new password"
       subtitle="This also signs out every other device."
       footer={
-        <Link to="/login" className="font-medium text-brand-300 hover:text-brand-400">
+        <Link
+          to="/login"
+          className="font-medium text-brand-300 hover:text-brand-400"
+        >
           Back to sign in
         </Link>
       }
@@ -93,7 +103,13 @@ export function ResetPassword() {
           error={mismatch ? "Those passwords do not match." : null}
         />
 
-        <Button type="submit" full size="lg" loading={busy} disabled={mismatch || !password}>
+        <Button
+          type="submit"
+          full
+          size="lg"
+          loading={busy}
+          disabled={mismatch || !password}
+        >
           Update password
         </Button>
       </form>
