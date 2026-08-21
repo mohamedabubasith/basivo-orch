@@ -271,6 +271,33 @@ cmd_email() {
     local to="${1:-}"
     [ -n "$to" ] || die "usage: ./deploy/server.sh email you@example.com"
 
+    say "Checking the webhook host resolves"
+    # `[Errno -2] Name or service not known` is the most common failure here and
+    # the least self-explanatory: it is DNS, from inside the container, and it
+    # means the URL is fine as text but names a host nothing can find. Worth
+    # separating from a signature or workflow problem before anything is sent.
+    "${COMPOSE[@]}" exec -T api python -c "
+import os, socket
+from urllib.parse import urlparse
+
+url = os.environ.get('EMAIL_WEBHOOK_URL', '')
+if not url:
+    raise SystemExit('EMAIL_WEBHOOK_URL is empty in deploy/.env')
+host = urlparse(url).hostname
+print('  host:', host)
+try:
+    print('  resolves to:', socket.gethostbyname(host))
+except OSError as exc:
+    raise SystemExit(
+        f'  cannot resolve {host!r} from inside the container: {exc}\n'
+        '  This is DNS, not the workflow. Either the hostname is wrong, or it is\n'
+        '  a name only your laptop knows, or it is a subdomain with no record yet.\n'
+        '  A service on this same box is not reachable as \'localhost\' from in\n'
+        '  here either — give it a public https hostname (Caddy can serve it) or\n'
+        '  put it on this compose network.'
+    ) from None
+" || return 1
+
     say "Sending a test message to $to"
     # Through the API's own `send()`, deliberately. A hand-rolled curl would
     # sign the request with its own idea of the canonical body, and the failure
