@@ -7,6 +7,7 @@
 #   ./deploy/server.sh status       what is running, and how much it is using
 #   ./deploy/server.sh logs [svc]   follow logs
 #   ./deploy/server.sh backup       dump the database now
+#   ./deploy/server.sh email <to>   send one test email and say what happened
 #   ./deploy/server.sh clean        reclaim disk: build cache, dead images, old logs
 #   ./deploy/server.sh rollback     go back to the previous commit and redeploy
 #
@@ -265,6 +266,44 @@ cmd_clean() {
     note "do not need clearing. Database dumps live in $BACKUP_DIR (14 days)."
 }
 
+cmd_email() {
+    need_env
+    local to="${1:-}"
+    [ -n "$to" ] || die "usage: ./deploy/server.sh email you@example.com"
+
+    say "Sending a test message to $to"
+    # Through the API's own `send()`, deliberately. A hand-rolled curl would
+    # sign the request with its own idea of the canonical body, and the failure
+    # this is meant to diagnose — a signature the receiver rejects — is exactly
+    # the one a second implementation would hide.
+    "${COMPOSE[@]}" exec -T api python -c "
+import asyncio
+from basivo_orch.auth.email.sender import Email, send
+from basivo_orch.auth.settings import get_settings
+
+settings = get_settings()
+print('  webhook:', settings.email_webhook_url or '(not set)')
+print('  signed: ', bool(settings.email_webhook_secret.get_secret_value()))
+email = Email(
+    to='$to',
+    subject='Basivo test message',
+    html='<p>If you are reading this, the webhook works.</p>',
+    text='If you are reading this, the webhook works.',
+)
+delivered = asyncio.run(send(email))
+print('  delivered:', delivered)
+raise SystemExit(0 if delivered else 1)
+" && ok "the webhook accepted it — check the inbox, including spam" || {
+        warn "delivery failed. The reason is in the api log:"
+        "${COMPOSE[@]}" logs --tail 40 api 2>&1 | grep -i "email" | tail -5 | sed 's/^/    /'
+        note "Common causes: the n8n workflow is not Active (a production webhook"
+        note "URL 404s while inactive), the test URL was used instead of the"
+        note "production one, or EMAIL_WEBHOOK_SECRET does not match the value the"
+        note "workflow checks."
+        return 1
+    }
+}
+
 cmd_backup() {
     need_env
     mkdir -p "$BACKUP_DIR"
@@ -290,6 +329,7 @@ case "${1:-deploy}" in
     status)    cmd_status ;;
     logs)      shift; cmd_logs "${1:-}" ;;
     clean)     cmd_clean ;;
+    email)     shift; cmd_email "${1:-}" ;;
     backup)    cmd_backup ;;
-    *)         die "unknown command '$1'. Try: bootstrap, deploy, status, logs, clean, backup, rollback" ;;
+    *)         die "unknown command '$1'. Try: bootstrap, deploy, status, logs, clean, email, backup, rollback" ;;
 esac
