@@ -264,6 +264,7 @@ deploys reuse the layers and take about a minute.
 ./deploy/server.sh              # deploy is the default command
 ./deploy/server.sh status       # containers, memory, CPU, disk
 ./deploy/server.sh logs worker  # follow one service
+./deploy/server.sh clean        # reclaim disk (never touches volumes)
 ./deploy/server.sh backup       # dump now (also runs nightly via cron)
 ./deploy/server.sh rollback     # previous commit, rebuilt
 ```
@@ -287,3 +288,31 @@ file in `apps/web/Caddyfile`. If you would rather run nginx, the routing rules
 to port through are in that file: the `@api` path list, the GET-only handling of
 `/auth/verify` and `/auth/reset-password`, and `flush_interval -1` for the
 Server-Sent Events endpoint.
+
+
+### Reclaiming disk
+
+`deploy` already prunes dangling images and build cache older than a fortnight.
+When you want more back:
+
+```bash
+./deploy/server.sh clean
+```
+
+It prunes stopped containers, dangling images, build cache older than a day and
+unused networks — then lists the named volumes so you can see the data is still
+there.
+
+**Never run `docker system prune -a --volumes`.** It is the first suggestion in
+every search result and it deletes `postgres_data`: every flow, run, credential
+and artifact, reported as space reclaimed. `clean` exists so that command never
+has to be typed from memory.
+
+What grows on its own, and what bounds it:
+
+| | Bound |
+|---|---|
+| Container logs | 10MB × 3 per service, set in the compose file. Unbounded by default — the classic way a small disk fills |
+| Artifacts in Postgres | 30-day expiry, swept by the worker. `status` prints the table size |
+| Database dumps | 14 days in `/var/backups/basivo` |
+| Build cache | Pruned past 14 days on deploy; past 24 hours by `clean` |

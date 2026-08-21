@@ -7,6 +7,7 @@
 #   ./deploy/server.sh status       what is running, and how much it is using
 #   ./deploy/server.sh logs [svc]   follow logs
 #   ./deploy/server.sh backup       dump the database now
+#   ./deploy/server.sh clean        reclaim disk: build cache, dead images, old logs
 #   ./deploy/server.sh rollback     go back to the previous commit and redeploy
 #
 # Deliberately not the same script as ./deploy.sh at the root: that one drives
@@ -168,7 +169,10 @@ cmd_deploy() {
     # optional. `-a` is deliberately avoided: it would delete the base layers
     # every rebuild has to pull again, on a connection that meters inbound.
     docker image prune -f >/dev/null
-    ok "dangling images removed ($(df -h "$ROOT" | awk 'NR==2 {print $4}') free)"
+    # Build cache older than a fortnight. Recent cache is what makes the next
+    # deploy take a minute instead of fifteen, so it is kept.
+    docker builder prune -f --filter 'until=336h' >/dev/null 2>&1 || true
+    ok "pruned — $(df -h "$ROOT" | awk 'NR==2 {print $4}') free"
 
     cmd_status
 }
@@ -199,9 +203,45 @@ cmd_status() {
     docker stats --no-stream --format 'table {{.Name}}\t{{.MemUsage}}\t{{.MemPerc}}\t{{.CPUPerc}}'
     say "Disk"
     df -h "$ROOT" | awk 'NR==1 || NR==2'
+    docker system df
+    # The two that grow on their own: artifacts in the database, and dumps.
+    local artifacts
+    artifacts="$("${COMPOSE[@]}" exec -T postgres psql -qtAX -U basivo -d basivo_orch \
+        -c "select pg_size_pretty(pg_total_relation_size('artifact'))" 2>/dev/null || echo "?")"
+    note "artifacts table: ${artifacts}    backups: $(du -sh "$BACKUP_DIR" 2>/dev/null | cut -f1 || echo '-')"
 }
 
 cmd_logs() { need_env; "${COMPOSE[@]}" logs -f --tail 100 "${1:-}"; }
+
+cmd_clean() {
+    say "Before"
+    df -h "$ROOT" | awk 'NR==1 || NR==2'
+    docker system df
+
+    # NOTHING here touches volumes, and that is the whole point of having this
+    # as a command rather than a remembered incantation. `docker system prune
+    # -a --volumes` — the one every search result suggests — deletes
+    # postgres_data. That is the database: every flow, run, credential and
+    # artifact, gone, with a cheerful summary of the space reclaimed.
+    say "Stopped containers"
+    docker container prune -f
+    say "Dangling images"
+    docker image prune -f
+    say "Build cache older than 24h"
+    docker builder prune -f --filter 'until=24h'
+    say "Unused networks"
+    docker network prune -f
+
+    # Proof the data is still there, because "it reclaimed 8GB" and "it deleted
+    # your database" look identical in the output above.
+    say "Volumes (must still be listed)"
+    docker volume ls --filter name=basivo --format '  {{.Name}}'
+
+    say "After"
+    df -h "$ROOT" | awk 'NR==1 || NR==2'
+    note "Logs are capped at 10MB x 3 per service by the compose file, so they"
+    note "do not need clearing. Database dumps live in $BACKUP_DIR (14 days)."
+}
 
 cmd_backup() {
     need_env
@@ -227,6 +267,7 @@ case "${1:-deploy}" in
     rollback)  cmd_rollback ;;
     status)    cmd_status ;;
     logs)      shift; cmd_logs "${1:-}" ;;
+    clean)     cmd_clean ;;
     backup)    cmd_backup ;;
-    *)         die "unknown command '$1'. Try: bootstrap, deploy, status, logs, backup, rollback" ;;
+    *)         die "unknown command '$1'. Try: bootstrap, deploy, status, logs, clean, backup, rollback" ;;
 esac

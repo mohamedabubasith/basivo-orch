@@ -32,10 +32,22 @@
 
 name: basivo
 
+# Container logs are the quiet way a small disk fills. The json-file driver
+# defaults to UNBOUNDED: a chatty worker writes to
+# /var/lib/docker/containers/<id>/<id>-json.log until the volume is full, and a
+# full volume under Postgres is not a logging problem any more. 30MB per
+# service is days of history on this traffic.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   postgres:
     image: postgres:17-alpine
     restart: unless-stopped
+    logging: *logging
     environment:
       POSTGRES_USER: basivo
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env}
@@ -84,6 +96,7 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    logging: *logging
     command:
       - redis-server
       - --save
@@ -116,6 +129,7 @@ services:
       dockerfile: Dockerfile
     image: basivo-api:latest
     restart: unless-stopped
+    logging: *logging
     env_file: [.env]
     environment:
       DATABASE_URL: postgresql+asyncpg://basivo:${POSTGRES_PASSWORD}@postgres:5432/basivo_orch
@@ -147,6 +161,7 @@ services:
       target: worker
     image: basivo-worker:latest
     restart: unless-stopped
+    logging: *logging
     env_file: [.env]
     # Two of them, each running two runs at once, so four runs can be in
     # flight — but only ONE heavy step (render or speech) per container, gated
@@ -199,6 +214,7 @@ services:
       dockerfile: Dockerfile
     image: basivo-web:latest
     restart: unless-stopped
+    logging: *logging
     environment:
       CONSOLE_ADDRESS: ${CONSOLE_ADDRESS:?set in .env}
       # A separate marketing hostname. Defaults to an internal address that
