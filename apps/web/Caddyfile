@@ -1,14 +1,43 @@
-# Caddy fetches and renews the TLS certificate itself over ACME. Nothing to
-# configure beyond the hostname, and nothing to remember to renew.
+# Two hostnames, one image.
+#
+#   {$LANDING_ADDRESS}  orch.basivo.in      the marketing page
+#   {$CONSOLE_ADDRESS}  console.basivo.in   login, dashboard, builder, API
+#
+# Caddy fetches and renews both TLS certificates itself over ACME. Nothing to
+# configure beyond the hostnames, and nothing to remember to renew — which is
+# the whole reason this is Caddy and not nginx plus certbot plus a cron job.
 {
 	email {$ACME_EMAIL}
 }
 
-{$SITE_ADDRESS} {
-	encode zstd gzip
+# --- shared pieces ---------------------------------------------------------
 
-	# --- routing -----------------------------------------------------------
-	#
+# The API is proxied on BOTH hosts, deliberately. The app is built with an
+# empty VITE_API_URL so it calls relative URLs, which means the browser only
+# ever sees one origin: the session cookie is first-party and CORS never enters
+# the deployment. That property only holds if whichever host served the page
+# can also answer its API calls.
+(api_proxy) {
+	@api {
+		# Both forms of every prefix. Caddy's `/orgs/*` matches `/orgs/x` but
+		# *not* `/orgs` itself, so listing and creating — the collection
+		# endpoints — would fall through to the static file server and answer
+		# 405 to a POST. Nothing in development catches this: the Vite dev
+		# server routes by origin, not by path.
+		path /auth /auth/* /users /users/* /orgs /orgs/* /api /api/* /flows /flows/* /hooks /hooks/* /health /config
+	}
+	handle @api {
+		reverse_proxy api:8000 {
+			# Streaming, not buffering. Run events are Server-Sent Events; with
+			# the default buffering a client would receive the whole run at once
+			# when it finished, which is exactly what the streaming endpoint
+			# exists to avoid.
+			flush_interval -1
+		}
+	}
+}
+
+(spa) {
 	# `/auth/*` is contested. The API serves POST /auth/verify and
 	# POST /auth/reset-password, and the API *also* mails users a link to
 	# `{FRONTEND_BASE_URL}/auth/verify?token=…` — a page, not an endpoint, at
@@ -28,24 +57,6 @@
 		file_server
 	}
 
-	@api {
-		# Both forms of every prefix. Caddy's `/orgs/*` matches `/orgs/x` but
-		# *not* `/orgs` itself, so listing and creating — the collection
-		# endpoints — would fall through to the static file server and answer
-		# 405 to a POST. Nothing in development catches this: the Vite dev
-		# server routes by origin, not by path.
-		path /auth /auth/* /users /users/* /orgs /orgs/* /api /api/* /flows /flows/* /hooks /hooks/* /health /config
-	}
-	handle @api {
-		reverse_proxy api:8000 {
-			# Streaming, not buffering. Run events are Server-Sent Events; with
-			# the default buffering a client would receive the whole run at once
-			# when it finished, which is exactly what the streaming endpoint
-			# exists to avoid.
-			flush_interval -1
-		}
-	}
-
 	# Everything else is the single-page app. try_files sends unknown paths to
 	# index.html so a deep link like /app/security survives a hard refresh
 	# instead of 404ing.
@@ -54,8 +65,9 @@
 		try_files {path} /index.html
 		file_server
 	}
+}
 
-	# --- headers -----------------------------------------------------------
+(security_headers) {
 	header {
 		# The API sets its own headers on API responses; these cover the static
 		# app, which Caddy serves without the API ever being involved.
@@ -65,9 +77,34 @@
 		Referrer-Policy "strict-origin-when-cross-origin"
 		-Server
 	}
-
 	log {
 		output stdout
 		format console
 	}
+}
+
+# --- console.basivo.in: the product ---------------------------------------
+
+{$CONSOLE_ADDRESS} {
+	encode zstd gzip
+	import api_proxy
+	import spa
+	import security_headers
+}
+
+# --- orch.basivo.in: the landing page -------------------------------------
+
+{$LANDING_ADDRESS} {
+	encode zstd gzip
+
+	# The same bundle is served here, so the marketing page's "Log in" link
+	# would otherwise open the app on this hostname — a second origin holding
+	# its own session cookie, and a user who bookmarks the wrong one. One
+	# redirect keeps exactly one home for the product.
+	@console_routes path /login /register /two-factor /forgot-password /confirm-email /app /app/* /auth /auth/*
+	redir @console_routes {$CONSOLE_SCHEME}://{$CONSOLE_ADDRESS}{uri} permanent
+
+	import api_proxy
+	import spa
+	import security_headers
 }

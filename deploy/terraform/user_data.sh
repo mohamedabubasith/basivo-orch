@@ -99,8 +99,11 @@ EMAIL_WEBHOOK_SECRET=${email_webhook_secret}
 EMAIL_WEBHOOK_AUTH_HEADER=
 EMAIL_WEBHOOK_TIMEOUT_SECONDS=10
 
-# Caddy
-SITE_ADDRESS=${site_host}
+# Caddy. This path deploys a single hostname, so the landing block falls back
+# to an internal address that never requests a certificate — see the compose
+# default for LANDING_ADDRESS. Two identical site addresses are an error in
+# Caddy ("ambiguous site definition"), not a no-op.
+CONSOLE_ADDRESS=${site_host}
 ACME_EMAIL=${acme_email}
 EOF
     chmod 600 "$ENV_FILE"

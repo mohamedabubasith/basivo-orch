@@ -214,3 +214,76 @@ On a 4 vCPU / 16 GB box the limits in `docker-compose.prod.yml` add up to
 Raise the worker `cpus` and `BASIVO_RENDER_WORKERS` together if you would
 rather have faster renders than headroom. Everything else should stay put until
 there is a measurement saying otherwise.
+
+
+## Deploying on a plain VPS (the current production path)
+
+No Terraform, no SSH orchestration from a laptop: clone the repo on the box and
+run one script. Everything runs there — Postgres and Redis included.
+
+### 1. DNS first
+
+Both records must resolve **before** the first deploy. Caddy asks Let's Encrypt
+for certificates on startup, and a failed challenge counts against a limit of
+five per hostname per week — get this wrong and you wait days.
+
+At the registrar, two A records:
+
+| Type | Name | Value | TTL |
+|---|---|---|---|
+| A | `orch` | `160.191.14.83` | 600 |
+| A | `console` | `160.191.14.83` | 600 |
+
+Check them before continuing — `dig +short console.basivo.in` should print the
+IP, and DNS propagation is minutes, not instant.
+
+### 2. On the server
+
+```bash
+ssh root@160.191.14.83
+apt-get update && apt-get install -y git
+git clone <your-repo-url> /opt/basivo
+cd /opt/basivo
+./deploy/server.sh bootstrap      # Docker, 4G swap, firewall, .env, nightly backup
+nano deploy/.env                  # ACME_EMAIL, the two hostnames, email webhook
+./deploy/server.sh deploy         # pull, build, migrate, start
+```
+
+`bootstrap` is idempotent and generates `SECRET_KEY` and `POSTGRES_PASSWORD`
+for you. **Copy `SECRET_KEY` somewhere off the server**: it also derives the key
+that encrypts every stored provider credential, so losing it means every saved
+API key becomes undecryptable.
+
+The first `deploy` builds two images from scratch — the worker one carries
+FFmpeg, Node 22, Chromium and the voice model, so expect 10–15 minutes. Later
+deploys reuse the layers and take about a minute.
+
+### 3. Afterwards
+
+```bash
+./deploy/server.sh              # deploy is the default command
+./deploy/server.sh status       # containers, memory, CPU, disk
+./deploy/server.sh logs worker  # follow one service
+./deploy/server.sh backup       # dump now (also runs nightly via cron)
+./deploy/server.sh rollback     # previous commit, rebuilt
+```
+
+### What ends up where
+
+| Host | Serves |
+|---|---|
+| `orch.basivo.in` | The landing page. App routes (`/login`, `/app/*`, …) redirect to the console, so there is exactly one home for a session |
+| `console.basivo.in` | Login, dashboard, builder — and the API, on the same origin. That is what keeps the session cookie first-party and CORS out of the deployment entirely |
+
+Webhook URLs for GitHub and friends are on the console host:
+`https://console.basivo.in/hooks/<flow-id>`.
+
+### Why Caddy rather than nginx
+
+nginx would need certbot, a renewal timer, and a reload hook — three moving
+parts that fail quietly at 3am, ninety days after anyone last thought about
+them. Caddy fetches and renews both certificates itself, and the config is the
+file in `apps/web/Caddyfile`. If you would rather run nginx, the routing rules
+to port through are in that file: the `@api` path list, the GET-only handling of
+`/auth/verify` and `/auth/reset-password`, and `flush_interval -1` for the
+Server-Sent Events endpoint.

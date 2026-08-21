@@ -62,3 +62,98 @@ CMD ["uvicorn", "basivo_orch.main:app", \
      "--host", "0.0.0.0", "--port", "8000", \
      "--workers", "1", "--no-server-header", \
      "--proxy-headers", "--forwarded-allow-ips", "*"]
+
+
+# ---------------------------------------------------------------------------
+# The worker image
+# ---------------------------------------------------------------------------
+#
+# Everything the render path needs, and nothing the API does: FFmpeg, Node for
+# HyperFrames, Chromium for the frame capture and the poster screenshots, and
+# the voice model.
+#
+# A separate target rather than one fat image, because the API is redeployed
+# constantly and this adds roughly 700MB. On a VPS that meters inbound traffic,
+# pulling that on every API deploy is a bill for nothing.
+#
+# The model is baked in at build time and never fetched at run time. A render
+# that downloads 109MB the first time it speaks is a render that fails the day
+# Hugging Face is slow, and it would do it again in every new container.
+
+FROM runtime AS worker
+
+USER root
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ffmpeg \
+        ca-certificates \
+        gnupg \
+        curl \
+    # Node 22 for the HyperFrames CLI. From nodesource rather than Debian,
+    # which ships 18 — HyperFrames requires 22.
+    && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && npm install -g hyperframes@0.8.3 \
+    && npm cache clean --force \
+    && apt-get purge -y gnupg \
+    && apt-get autoremove -y \
+    && rm -rf /var/lib/apt/lists/*
+
+# Chromium and the shared libraries it needs. `playwright install --with-deps`
+# installs both, and into a path every user can read — the default is the
+# invoking user's home, which the `basivo` user cannot see.
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright
+RUN /app/.venv/bin/playwright install --with-deps chromium \
+    && chmod -R a+rX /opt/playwright
+
+# HyperFrames renders with puppeteer-core, which bundles NO browser: left to
+# itself it downloads Chrome 152 from Google on the first render, into every
+# fresh container, and fails outright if that download is blocked. So it is
+# pointed at the browser we just installed.
+#
+# Not the download it would prefer, for a reason: its own table of
+# chrome-headless-shell builds has no linux/arm64 entry, because Chrome for
+# Testing does not publish one. Pointing at Playwright's Chromium is the only
+# choice that works the same on x86_64 and ARM.
+#
+# The headless shell is preferred when Playwright ships one, because it
+# supports HeadlessExperimental.beginFrame — HyperFrames' fast capture path.
+# Plain Chromium works too and falls back to screenshots, which is slower but
+# correct.
+# The `test -x` is what makes an unresolved symlink fail the BUILD instead of
+# the first render — the difference between a broken image and a container that
+# looks healthy until someone asks for a video.
+RUN shell="$(find /opt/playwright -type f -name headless_shell -perm -u+x | head -1)"; \
+    chrome="$(find /opt/playwright -type f -name chrome -perm -u+x | head -1)"; \
+    mkdir -p /opt/basivo; \
+    ln -sf "${shell:-$chrome}" /opt/basivo/chrome; \
+    test -x /opt/basivo/chrome || { echo "no chromium under /opt/playwright" >&2; exit 1; }; \
+    echo "hyperframes browser: $(readlink -f /opt/basivo/chrome)"
+ENV HYPERFRAMES_BROWSER_PATH=/opt/basivo/chrome
+
+# The voice model: two files, ~109MB, in a layer of their own so editing source
+# does not re-download them.
+ENV BASIVO_SPEECH_MODEL_DIR=/opt/basivo/speech
+RUN mkdir -p /opt/basivo/speech \
+    && /app/.venv/bin/python -c "from basivo_orch.flows.nodes.speech import fetch_model; fetch_model()" \
+    && chmod -R a+rX /opt/basivo
+
+# Everything the render path shells out to, checked once here. Each of these
+# failing at run time costs a queued run and an error message nobody expects.
+RUN set -e; \
+    ffmpeg -version  | head -1; \
+    ffprobe -version | head -1; \
+    node --version; \
+    hyperframes --help >/dev/null && echo "hyperframes ok"; \
+    /app/.venv/bin/python -c "from basivo_orch.flows.nodes.speech import model_paths; \
+m, v = model_paths(); assert m.exists() and v.exists(), (m, v); print('voice model ok')"
+
+USER basivo
+
+# No HTTP server, so the API's healthcheck would fail forever and mark this
+# container unhealthy. Liveness for a worker is "the process is up and the
+# claim query works", which the run log already tells you.
+HEALTHCHECK NONE
+
+CMD ["python", "-m", "basivo_orch.worker"]

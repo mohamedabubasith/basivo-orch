@@ -140,12 +140,13 @@ services:
     build:
       context: ../apps/api
       dockerfile: Dockerfile
-    image: basivo-api:latest
+      # Rendering needs a browser (posters and video), Node 22 and FFmpeg for
+      # HyperFrames, and the voice model — about 700MB the API has no use for.
+      # Its own build target keeps the API image small, which matters on a
+      # connection that meters inbound traffic.
+      target: worker
+    image: basivo-worker:latest
     restart: unless-stopped
-    command: ["python", "-m", "basivo_orch.worker"]
-    # Rendering needs a browser (posters and video) plus Node 22+ and FFmpeg
-    # for HyperFrames — which is why the worker image is heavier than the API
-    # and gets more memory below.
     env_file: [.env]
     # Two of them, each running two runs at once, so four runs can be in
     # flight — but only ONE heavy step (render or speech) per container, gated
@@ -199,7 +200,15 @@ services:
     image: basivo-web:latest
     restart: unless-stopped
     environment:
-      SITE_ADDRESS: ${SITE_ADDRESS:?set in .env}
+      CONSOLE_ADDRESS: ${CONSOLE_ADDRESS:?set in .env}
+      # A separate marketing hostname. Defaults to an internal address that
+      # Caddy serves without TLS and nobody can reach: giving it the same value
+      # as CONSOLE_ADDRESS is an error ("ambiguous site definition"), and
+      # pointing it at a hostname with no DNS would fail ACME repeatedly and
+      # burn the five-per-week certificate limit.
+      LANDING_ADDRESS: ${LANDING_ADDRESS:-http://landing.localhost}
+      # https in production; http only for a local run without certificates.
+      CONSOLE_SCHEME: ${CONSOLE_SCHEME:-https}
       ACME_EMAIL: ${ACME_EMAIL:?set in .env}
     ports:
       - "80:80"
