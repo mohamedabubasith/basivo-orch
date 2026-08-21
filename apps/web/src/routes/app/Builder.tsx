@@ -25,6 +25,7 @@ import {
   Link as RouterLink,
   useNavigate,
   useParams,
+  useSearchParams,
 } from "react-router-dom";
 import {
   Controls,
@@ -243,6 +244,25 @@ function BuilderInner() {
     }
   }, [flowId]);
 
+  const [params] = useSearchParams();
+  // Straight from "New flow": a flow called "Untitled flow" wants naming, and
+  // the cursor should already be there rather than waiting to be found.
+  const isNew = params.get("new") === "1";
+
+  // ⌘S and Ctrl+S. Everyone tries it, and the browser's own "save page" dialog
+  // is a poor answer in an editor with unsaved work on screen.
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
+        event.preventDefault();
+        void save();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nodes, edges]);
+
   const canvasRef = useRef<HTMLDivElement>(null);
   const { screenToFlowPosition } = useReactFlow();
 
@@ -409,6 +429,21 @@ function BuilderInner() {
     );
     setSelected(null);
     markDirty();
+  }
+
+  /** Rename the flow. Its own request: a name is not a graph edit, and it
+   *  should not need a Save, nor create a new version. */
+  async function rename(next: string) {
+    try {
+      const saved = await api.patch<FlowDetail>(base, { name: next });
+      setFlow(saved);
+    } catch (err) {
+      setBanner({
+        tone: "bad",
+        text:
+          err instanceof ApiError ? err.message : "Could not rename this flow.",
+      });
+    }
   }
 
   async function save(): Promise<boolean> {
@@ -646,9 +681,11 @@ function BuilderInner() {
                 />
               </svg>
             </Link>
-            <h1 className="truncate text-lg font-semibold text-ink-100">
-              {flow.name}
-            </h1>
+            <FlowTitle
+              name={flow.name}
+              autoFocus={isNew}
+              onRename={(next) => void rename(next)}
+            />
             <span className="rounded-md border border-ink-700 px-1.5 py-0.5 text-[0.66rem] text-ink-400">
               v{flow.version}
             </span>
@@ -1441,4 +1478,83 @@ function extractProblems(error: unknown): string[] {
   const body = error.body as { detail?: { problems?: unknown } } | undefined;
   const problems = body?.detail?.problems;
   return Array.isArray(problems) ? problems.map(String) : [];
+}
+
+/**
+ * The flow's name, edited in place.
+ *
+ * A flow arrives called "Untitled flow" because naming a thing before it exists
+ * is the wrong order, so renaming has to be somewhere obvious: the title in the
+ * header, which is where anyone would click first. Every tool of this kind does
+ * it here rather than in a settings page two clicks away.
+ *
+ * Enter commits, Escape abandons, blur commits — a name half-typed and clicked
+ * away from is meant to be kept, not discarded.
+ */
+function FlowTitle({
+  name,
+  onRename,
+  autoFocus,
+}: {
+  name: string;
+  onRename: (next: string) => void;
+  autoFocus?: boolean;
+}) {
+  const [editing, setEditing] = useState(Boolean(autoFocus));
+  const [draft, setDraft] = useState(name);
+
+  useEffect(() => setDraft(name), [name]);
+
+  function commit() {
+    const next = draft.trim();
+    setEditing(false);
+    if (next && next !== name) onRename(next);
+    else setDraft(name);
+  }
+
+  if (!editing) {
+    return (
+      <button
+        onClick={() => setEditing(true)}
+        title="Rename"
+        className="group flex min-w-0 items-center gap-1.5 rounded-lg px-1.5 py-0.5 -mx-1.5 transition-colors hover:bg-ink-800/70"
+      >
+        <span className="truncate text-lg font-semibold text-ink-100">
+          {name}
+        </span>
+        <svg
+          viewBox="0 0 24 24"
+          className="h-3.5 w-3.5 flex-none text-ink-600 opacity-0 transition-opacity group-hover:opacity-100"
+          fill="none"
+        >
+          <path
+            d="M4 20h4l10-10-4-4L4 16v4ZM14 6l4 4"
+            stroke="currentColor"
+            strokeWidth="1.7"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      </button>
+    );
+  }
+
+  return (
+    <input
+      value={draft}
+      autoFocus
+      onFocus={(event) => event.currentTarget.select()}
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={commit}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") commit();
+        if (event.key === "Escape") {
+          setDraft(name);
+          setEditing(false);
+        }
+      }}
+      aria-label="Flow name"
+      className="min-w-0 max-w-xs rounded-lg border border-brand-400 bg-ink-950/70 px-2 py-0.5 text-lg font-semibold text-ink-100 outline-none"
+    />
+  );
 }

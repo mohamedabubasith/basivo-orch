@@ -8,12 +8,12 @@
  */
 
 import { motion } from "motion/react";
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
 import { ApiError, api } from "../../lib/api";
 import { useWorkspace } from "../../lib/workspace";
-import { Alert, Button, Card, Field, PageLoader } from "../../components/ui";
+import { Alert, Button, Card, PageLoader } from "../../components/ui";
 import { PageHeader, RelativeTime } from "./bits";
 
 interface Flow {
@@ -87,6 +87,35 @@ export function Flows() {
 
   if (flows === null) return <PageLoader label="Loading flows" />;
 
+  /**
+   * One click, straight into the canvas.
+   *
+   * It used to open a form asking for a name and a description before anything
+   * existed — two fields standing between an idea and a canvas, filled in
+   * before there is anything to describe. Every tool of this kind does it the
+   * other way round: make the thing, then name it once you know what it is. The
+   * title in the builder header is editable, and `?new=1` puts the cursor in
+   * it.
+   */
+  async function create() {
+    setCreating(true);
+    setError(null);
+    try {
+      const made = await api.post<{ id: string }>(
+        `/api/v1/orgs/${orgId}/flows`,
+        {
+          name: "Untitled flow",
+        },
+      );
+      navigate(`/app/flows/${made.id}?new=1`);
+    } catch (err) {
+      setError(
+        err instanceof ApiError ? err.message : "Could not create the flow.",
+      );
+      setCreating(false);
+    }
+  }
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -94,20 +123,13 @@ export function Flows() {
         title="Flows"
         subtitle="A flow is a graph of nodes. Publish one to give it a stable version other systems can call."
         action={
-          <Button onClick={() => setCreating((value) => !value)}>
-            {creating ? "Cancel" : "New flow"}
+          <Button onClick={() => void create()} loading={creating}>
+            New flow
           </Button>
         }
       />
 
       {error && <Alert>{error}</Alert>}
-
-      {creating && (
-        <NewFlow
-          orgId={orgId!}
-          onCreated={(id) => navigate(`/app/flows/${id}`)}
-        />
-      )}
 
       {flows.length === 0 && !creating ? (
         <Card className="p-10 text-center">
@@ -118,7 +140,7 @@ export function Flows() {
             caller in production is already running.
           </p>
           <div className="mt-5">
-            <Button onClick={() => setCreating(true)}>
+            <Button onClick={() => void create()} loading={creating}>
               Create your first flow
             </Button>
           </div>
@@ -251,73 +273,5 @@ export function Flows() {
         </ul>
       )}
     </div>
-  );
-}
-
-function NewFlow({
-  orgId,
-  onCreated,
-}: {
-  orgId: string;
-  onCreated: (id: string) => void;
-}) {
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  async function submit(event: FormEvent) {
-    event.preventDefault();
-    setBusy(true);
-    setError(null);
-    try {
-      const created = await api.post<{ id: string }>(
-        `/api/v1/orgs/${orgId}/flows`,
-        {
-          name: name.trim(),
-          description: description.trim() || null,
-        },
-      );
-      // Straight into the canvas. The list has nothing more to say about a
-      // flow that was created one second ago.
-      onCreated(created.id);
-    } catch (err) {
-      setError(
-        err instanceof ApiError ? err.message : "Could not create the flow.",
-      );
-      setBusy(false);
-    }
-  }
-
-  return (
-    <motion.div
-      initial={{ opacity: 0, height: 0 }}
-      animate={{ opacity: 1, height: "auto" }}
-    >
-      <Card className="p-6">
-        <form onSubmit={submit} className="max-w-md space-y-4" noValidate>
-          {error && <Alert>{error}</Alert>}
-          <Field
-            label="Name"
-            name="name"
-            required
-            autoFocus
-            placeholder="Nightly digest"
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-          />
-          <Field
-            label="Description"
-            name="description"
-            placeholder="Optional, what it does and who depends on it"
-            value={description}
-            onChange={(event) => setDescription(event.target.value)}
-          />
-          <Button type="submit" loading={busy} disabled={!name.trim()}>
-            Create flow
-          </Button>
-        </form>
-      </Card>
-    </motion.div>
   );
 }

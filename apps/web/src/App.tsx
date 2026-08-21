@@ -8,7 +8,7 @@ import {
 } from "react-router-dom";
 
 import { AuthProvider } from "./lib/auth";
-import { consoleOrigin, isAppRoute } from "./lib/consoleOrigin";
+import { consoleOrigin, isAppRoute, isConsoleHost } from "./lib/consoleOrigin";
 import { ThemeProvider } from "./lib/theme";
 import { Landing } from "./routes/Landing";
 import { ApiKeys } from "./routes/app/ApiKeys";
@@ -69,7 +69,14 @@ function AppRoutes() {
   useConsoleGuard();
   return (
     <Routes>
-      <Route path="/" element={<Landing />} />
+      {/* On the console hostname the root is the product, not the pitch:
+          someone typing console.basivo.in wants their dashboard, and RequireAuth
+          sends them to /login if they are not signed in. The landing page
+          belongs to the marketing host. */}
+      <Route
+        path="/"
+        element={isConsoleHost() ? <Navigate to="/app" replace /> : <Landing />}
+      />
 
       {/* Wrapped, so a signed-in visitor opening any of these in a second tab
           lands in the app instead of being shown a sign-in form. /two-factor is

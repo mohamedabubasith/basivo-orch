@@ -32,7 +32,7 @@ export interface SubAgentValue {
 }
 
 const INPUT =
-  "w-full rounded-lg border border-ink-700 bg-ink-950/60 px-2.5 py-2 text-sm text-ink-100 outline-none focus:border-brand-400";
+  "w-full rounded-xl border border-ink-700 bg-ink-950/60 px-3 py-2.5 text-sm text-ink-100 outline-none focus:border-brand-400";
 const LABEL = "mb-1 block text-[0.68rem] font-medium text-ink-400";
 
 export function SubAgentEditor({

@@ -31,6 +31,19 @@ export function consoleUrl(path: string): string {
   return origin ? origin + path : path;
 }
 
+/**
+ * Whether this page is being served from the console hostname.
+ *
+ * `consoleOrigin()` returns "" here on purpose (nothing to redirect to), which
+ * makes it useless for the opposite question: "is this the app's own host, so
+ * that / should open the app rather than the marketing page". Hence a second,
+ * explicit one.
+ */
+export function isConsoleHost(): boolean {
+  if (!CONFIGURED || typeof window === "undefined") return false;
+  return window.location.origin === CONFIGURED;
+}
+
 /** Whether this path is part of the application rather than the landing page. */
 export function isAppRoute(path: string): boolean {
   return /^\/(app|login|register|two-factor|forgot-password|confirm-email)(\/|$)/.test(

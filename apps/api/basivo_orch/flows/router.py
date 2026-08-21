@@ -211,6 +211,15 @@ async def update_flow(
         )
     else:
         await session.commit()
+        # Refreshed, and not for tidiness. `Flow.updated_at` is
+        # `onupdate=func.now()`, so after an UPDATE its value lives in the
+        # database and the ORM marks it expired — `expire_on_commit=False` does
+        # not help, because the attribute was never loaded with the new value.
+        # Serialising it then triggers a lazy SELECT from pydantic's sync
+        # attribute access, which is a MissingGreenlet and a 500. The
+        # graph-saving path above escapes it only by setting `updated_at` in
+        # Python, which is easy to mistake for this path being fine too.
+        await session.refresh(flow)
         version = await service.latest_version(session, flow.id)
 
     return FlowDetail(

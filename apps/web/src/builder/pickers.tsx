@@ -15,7 +15,7 @@ import { cx } from "../lib/cx";
 const ADD_CREDENTIAL = "__add_credential__";
 
 const INPUT =
-  "w-full rounded-lg border border-ink-700 bg-ink-950/60 px-2.5 py-2 text-sm text-ink-100 outline-none focus:border-brand-400";
+  "w-full rounded-xl border border-ink-700 bg-ink-950/60 px-3 py-2.5 text-sm text-ink-100 outline-none focus:border-brand-400";
 
 interface CredentialOption {
   id: string;

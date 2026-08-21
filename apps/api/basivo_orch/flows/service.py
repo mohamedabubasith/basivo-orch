@@ -49,7 +49,35 @@ async def create_flow(
     description: str | None,
     graph: Graph,
 ) -> tuple[Flow, FlowVersion]:
-    candidate = slug or slugify(name)
+    # A slug the caller *asked* for is theirs: a collision is a real conflict and
+    # they need to hear about it. One derived from the name is our own detail, so
+    # a second flow called "Untitled flow" becomes `untitled-flow-2` rather than
+    # an error. Not hypothetical: with creation reduced to one click, every
+    # user's second flow collided.
+    explicit = bool(slug)
+    base = slug or slugify(name)
+    candidate = base
+
+    if not explicit:
+        # Chosen by looking first, rather than by inserting and recovering. The
+        # recovery is a `session.rollback()`, and that expires every object in
+        # the session — including flows the caller is still holding, whose next
+        # attribute read then becomes a lazy load from sync code and a
+        # MissingGreenlet. Asking costs one SELECT.
+        taken = set(
+            (
+                await session.execute(
+                    select(Flow.slug).where(
+                        Flow.organization_id == organization_id,
+                        Flow.slug.like(f"{base}%"),
+                    )
+                )
+            ).scalars()
+        )
+        if base in taken:
+            candidate = next(
+                slug for slug in (f"{base}-{n}" for n in range(2, 1000)) if slug not in taken
+            )
 
     flow = Flow(
         organization_id=organization_id,
@@ -62,8 +90,14 @@ async def create_flow(
     try:
         await session.flush()
     except IntegrityError:
+        # Two requests picked the same free slug at the same moment. The unique
+        # constraint is what makes that safe rather than silent.
         await session.rollback()
-        raise ValueError(f"A flow with the slug {candidate!r} already exists.") from None
+        raise ValueError(
+            f"A flow with the slug {candidate!r} already exists."
+            if explicit
+            else "Two flows were created at the same moment. Try again."
+        ) from None
 
     version = FlowVersion(
         flow_id=flow.id, version=1, graph=graph.model_dump(mode="json"), created_by=user_id

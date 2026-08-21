@@ -625,8 +625,7 @@ class AgentNode(Node):
                 system
                 + "\n\n## Other agents you can hand this to\n\n"
                 + "\n".join(
-                    f"- {c['name']}"
-                    + (f" — {c['purpose']}" if c["purpose"] else "")
+                    f"- {c['name']}" + (f" — {c['purpose']}" if c["purpose"] else "")
                     for c in colleagues
                 )
                 + "\n\nIf the request belongs to one of them, call its transfer tool and stop. "

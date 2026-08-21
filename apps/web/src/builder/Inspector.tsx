@@ -19,6 +19,7 @@ import { cx } from "../lib/cx";
 import { NodeIconChip } from "./nodeIcons";
 import type { Suggestion } from "./suggestions";
 import { TemplateInput } from "./TemplateInput";
+import { ExpandButton, ExpandDialog } from "./ExpandField";
 import { CredentialPicker, ModelPicker, SkillPicker } from "./pickers";
 import { SubAgentEditor } from "./SubAgentEditor";
 import { MODEL_PROVIDERS, VCS_PROVIDERS, VOICES } from "./providers";
@@ -34,6 +35,8 @@ interface SchemaField {
   required: boolean;
   itemDef?: JsonSchema;
   default?: unknown;
+  /** From the schema, and the signal for whether a field wants a big editor. */
+  maxLength?: number;
 }
 
 export interface JsonSchema {
@@ -49,6 +52,7 @@ export interface JsonSchema {
   $defs?: Record<string, JsonSchema>;
   anyOf?: JsonSchema[];
   additionalProperties?: boolean | JsonSchema;
+  maxLength?: number;
 }
 
 /**
@@ -97,6 +101,7 @@ function fields(root: JsonSchema): SchemaField[] {
       required: required.has(key),
       itemDef: schema.items ? resolve(schema.items, root) : undefined,
       default: schema.default,
+      maxLength: schema.maxLength,
     };
   });
 }
@@ -149,6 +154,7 @@ export function Inspector({
   // asked for a UUID nobody can supply. Any node carrying both a `provider`
   // and a `credential_id` gets the pickers, so the next one is right by
   // default rather than by remembering.
+  const [expanded, setExpanded] = useState<SchemaField | null>(null);
   const keys = new Set(list.map((field) => field.key));
   const usesLlm = keys.has("provider") && keys.has("credential_id");
   const usesGit =
@@ -270,9 +276,31 @@ export function Inspector({
           <input
             value={name}
             onChange={(event) => onRename(event.target.value)}
-            className="w-full rounded-lg border border-ink-700 bg-ink-950/60 px-2.5 py-2 text-sm text-ink-100 outline-none focus:border-brand-400"
+            className="w-full rounded-xl border border-ink-700 bg-ink-950/60 px-3 py-2.5 text-sm text-ink-100 outline-none focus:border-brand-400"
           />
         </Labelled>
+
+        {expanded && (
+          <ExpandDialog
+            title={expanded.title}
+            hint={expanded.description}
+            onClose={() => setExpanded(null)}
+          >
+            <textarea
+              value={String(config[expanded.key] ?? "")}
+              onChange={(event) => set(expanded.key, event.target.value)}
+              spellCheck={false}
+              autoFocus
+              className={cx(
+                "h-[60vh] w-full resize-none rounded-2xl border border-ink-700 bg-ink-950/60 p-4",
+                "text-ink-100 outline-none focus:border-brand-400",
+                CODE_FIELDS.has(expanded.key)
+                  ? "font-mono text-[0.8rem] leading-relaxed"
+                  : "text-sm leading-relaxed",
+              )}
+            />
+          </ExpandDialog>
+        )}
 
         {list
           .filter(
@@ -306,6 +334,9 @@ export function Inspector({
               label={field.title}
               required={field.required}
               hint={field.description}
+              onExpand={
+                isLongText(field) ? () => setExpanded(field) : undefined
+              }
             >
               {spec.type === "trigger.webhook" && field.key === "methods" ? (
                 <MethodPicker
@@ -596,19 +627,24 @@ function Labelled({
   label,
   hint,
   required,
+  onExpand,
   children,
 }: {
   label: string;
   hint?: string;
   required?: boolean;
+  onExpand?: () => void;
   children: React.ReactNode;
 }) {
   return (
     <div>
-      <label className="mb-1.5 block text-[0.7rem] font-medium tracking-wide text-ink-300">
-        {label}
-        {required && <span style={{ color: "var(--status-warn)" }}> *</span>}
-      </label>
+      <div className="mb-1.5 flex items-center justify-between gap-2">
+        <label className="block text-[0.7rem] font-medium tracking-wide text-ink-300">
+          {label}
+          {required && <span style={{ color: "var(--status-warn)" }}> *</span>}
+        </label>
+        {onExpand && <ExpandButton onClick={onExpand} label={label} />}
+      </div>
       {children}
       {hint && (
         <p className="mt-1 text-[0.68rem] leading-relaxed text-ink-500">
@@ -619,8 +655,25 @@ function Labelled({
   );
 }
 
+/** Fields whose content is code or markup, and want a monospace editor. */
+const CODE_FIELDS = new Set(["code", "html", "variables", "instructions"]);
+
+/**
+ * Whether a field deserves the expand button.
+ *
+ * By capacity, not by name: anything the API will accept a thousand characters
+ * of is something a person may well write a thousand characters into, and the
+ * inspector rail is 356px wide. Naming the fields individually would mean the
+ * next long field silently arrives cramped.
+ */
+function isLongText(field: SchemaField): boolean {
+  if (field.type !== "string" || field.enum) return false;
+  return CODE_FIELDS.has(field.key) || (field.maxLength ?? 0) >= 1000;
+}
+
 const INPUT =
-  "w-full rounded-lg border border-ink-700 bg-ink-950/60 px-2.5 py-2 text-sm text-ink-100 outline-none focus:border-brand-400";
+  "w-full rounded-xl border border-ink-700 bg-ink-950/60 px-3 py-2.5 text-sm text-ink-100 " +
+  "outline-none transition-colors focus:border-brand-400 focus:ring-2 focus:ring-brand-400/15";
 
 /**
  * A concrete example rather than an empty `[]`. The Agent node's `tools`

@@ -30,7 +30,7 @@ export function Button({
   ...rest
 }: ButtonProps) {
   const base =
-    "group relative inline-flex items-center justify-center gap-2 rounded-lg " +
+    "group relative inline-flex items-center justify-center gap-2 rounded-xl " +
     "font-medium transition-all duration-150 disabled:cursor-not-allowed disabled:opacity-55 " +
     "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-400";
 
@@ -170,7 +170,7 @@ export const Field = forwardRef<HTMLInputElement, FieldProps>(function Field(
           aria-describedby={describedBy}
           aria-invalid={error ? true : undefined}
           className={cx(
-            "w-full rounded-lg border bg-ink-900/70 px-3.5 py-2.5 text-[0.95rem] text-ink-100",
+            "w-full rounded-xl border bg-ink-900/70 px-3.5 py-2.5 text-[0.95rem] text-ink-100",
             "placeholder:text-ink-500 transition-all duration-150",
             "focus:border-brand-400 focus:bg-ink-900 focus:ring-[3px] focus:ring-brand-500/15 focus:outline-none",
             "disabled:cursor-not-allowed disabled:opacity-60",
@@ -306,7 +306,7 @@ export function Card({
   children: ReactNode;
   className?: string;
 }) {
-  return <div className={cx("surface rounded-xl", className)}>{children}</div>;
+  return <div className={cx("surface rounded-2xl", className)}>{children}</div>;
 }
 
 export function Badge({

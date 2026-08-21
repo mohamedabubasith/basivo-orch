@@ -247,7 +247,7 @@ function NewCredential({
               setProvider(event.target.value);
               invalidateTest();
             }}
-            className="w-full rounded-lg border border-ink-700 bg-ink-950/60 px-3 py-2.5 text-sm text-ink-100 outline-none focus:border-brand-400"
+            className="w-full rounded-xl border border-ink-700 bg-ink-950/60 px-3 py-2.5 text-sm text-ink-100 outline-none focus:border-brand-400"
           >
             {PROVIDERS.map((option) => (
               <option key={option.value} value={option.value}>
