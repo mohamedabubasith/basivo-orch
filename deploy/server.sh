@@ -152,6 +152,20 @@ cmd_deploy() {
         "${COMPOSE[@]}" build
     fi
 
+    say "Checking the configuration"
+    # Before restarting anything. A setting the app rejects otherwise shows up
+    # as a container that exits, a health check that waits its full two minutes,
+    # and the real reason — one line of pydantic — scrolled off the top of the
+    # log. This prints that line in two seconds instead.
+    if ! "${COMPOSE[@]}" run --rm --no-deps --entrypoint python api -c \
+        "from basivo_orch.auth.settings import get_settings; get_settings(); print('config ok')" \
+        2>/tmp/basivo-config-check; then
+        grep -E "Value error|Field required|ValidationError" /tmp/basivo-config-check | sed 's/^/    /' \
+            || tail -20 /tmp/basivo-config-check | sed 's/^/    /'
+        die "deploy/.env is not valid. Nothing was restarted; the running version is untouched."
+    fi
+    ok "configuration accepted"
+
     say "Starting"
     # The API container applies migrations on boot (see docker-entrypoint.sh),
     # so ordering is: api first and alone, then everything else. Two containers

@@ -401,3 +401,52 @@ def test_only_the_api_image_applies_migrations():
         "the worker stage must not inherit or set the migrating entrypoint"
     )
     assert 'CMD ["python", "-m", "basivo_orch.worker"]' in worker
+
+
+def test_the_example_env_is_enough_to_boot_in_production():
+    """The failure this prevents: a deploy that builds, starts, and then exits
+    on one line of pydantic — `PUBLIC_BASE_URL must be https in production` —
+    while the health check waits out its full two minutes and the real reason
+    scrolls off the top of the log.
+
+    So the example env is checked against the same validation the container
+    runs. Anything production requires has to be listed there, or this fails
+    here instead of on someone's server.
+    """
+    import os
+    from pathlib import Path
+
+    from basivo_orch.auth.settings import Settings
+
+    root = Path(__file__).resolve().parents[4]
+    env = {
+        # What compose injects.
+        "DATABASE_URL": "postgresql+asyncpg://basivo:x@postgres:5432/basivo_orch",
+        "REDIS_URL": "redis://redis:6379/0",
+        # What bootstrap generates and the operator fills in.
+        "SECRET_KEY": "k" * 60,
+        "EMAIL_WEBHOOK_URL": "https://n8n.example.com/webhook/basivo",
+        "EMAIL_WEBHOOK_SECRET": "s" * 32,
+    }
+    for line in (root / "deploy/.env.example").read_text().splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            key, value = line.split("=", 1)
+            if value.strip():
+                env[key.strip()] = value.strip()
+
+    assert env.get("ENVIRONMENT") == "production", "the example must describe a real deployment"
+
+    original = dict(os.environ)
+    try:
+        os.environ.clear()
+        os.environ.update(env)
+        # `_env_file=None` or a developer's own .env leaks in and the check
+        # passes for the wrong reason.
+        settings = Settings(_env_file=None)
+    finally:
+        os.environ.clear()
+        os.environ.update(original)
+
+    assert str(settings.public_base_url).startswith("https://")
+    assert str(settings.frontend_base_url).startswith("https://")
