@@ -37,7 +37,13 @@
 	}
 }
 
-(spa) {
+# ORDER IS LOAD-BEARING. Caddy evaluates `handle` blocks in the order written,
+# and they are mutually exclusive: the first matching block wins and no later
+# one is consulted. So this snippet must be imported BEFORE api_proxy —
+# `/auth/verify` matches `/auth/*`, and with the proxy first a confirmation link
+# reached the API, which only serves POST there and answered 405 Method Not
+# Allowed to everyone clicking a link in their email.
+(spa_auth_pages) {
 	# `/auth/*` is contested. The API serves POST /auth/verify and
 	# POST /auth/reset-password, and the API *also* mails users a link to
 	# `{FRONTEND_BASE_URL}/auth/verify?token=…` — a page, not an endpoint, at
@@ -56,7 +62,11 @@
 		rewrite * /index.html
 		file_server
 	}
+}
 
+# Imported LAST: a catch-all `handle` swallows everything that reached it, so
+# anything after this is dead configuration.
+(spa_files) {
 	# Everything else is the single-page app. try_files sends unknown paths to
 	# index.html so a deep link like /app/security survives a hard refresh
 	# instead of 404ing.
@@ -87,8 +97,9 @@
 
 {$CONSOLE_ADDRESS} {
 	encode zstd gzip
+	import spa_auth_pages
 	import api_proxy
-	import spa
+	import spa_files
 	import security_headers
 }
 
@@ -114,7 +125,8 @@
 	@console_routes path /login /register /two-factor /forgot-password /confirm-email /app /app/*
 	redir @console_routes {$CONSOLE_SCHEME}://{$CONSOLE_ADDRESS}{uri} 308
 
+	import spa_auth_pages
 	import api_proxy
-	import spa
+	import spa_files
 	import security_headers
 }

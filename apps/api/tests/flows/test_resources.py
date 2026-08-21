@@ -487,3 +487,43 @@ def test_the_landing_host_never_redirects_api_paths_or_loses_a_post():
         assert f" {prefix}/* " in api_paths or api_paths.rstrip().endswith(f"{prefix}/*"), (
             f"{prefix}/* is not proxied"
         )
+
+
+def test_the_verification_page_is_matched_before_the_api_proxy():
+    """`handle` blocks are mutually exclusive and first-match-wins, so the order
+    of these imports decides what a confirmation link does.
+
+    The API serves POST /auth/verify; the app serves a *page* at the same path
+    for the GET a browser makes when someone clicks the link in their email.
+    With the proxy imported first, `/auth/verify` matched `/auth/*` and every
+    confirmation link in every email answered 405 Method Not Allowed.
+
+    This has broken once already, which is why it is pinned rather than
+    commented.
+    """
+    from pathlib import Path
+
+    caddyfile = (Path(__file__).resolve().parents[4] / "apps/web/Caddyfile").read_text()
+
+    for host_block in caddyfile.split("{$")[1:]:  # each site block
+        imports = [
+            line.strip().split()[1]
+            for line in host_block.splitlines()
+            if line.strip().startswith("import ")
+        ]
+        if not imports:
+            continue
+        assert "spa_auth_pages" in imports and "api_proxy" in imports
+        assert imports.index("spa_auth_pages") < imports.index("api_proxy"), (
+            f"api_proxy is imported before the page exception: {imports}"
+        )
+        # The catch-all file server swallows everything that reaches it, so
+        # nothing may be imported after it.
+        assert imports[-2:] == ["spa_files", "security_headers"] or imports[-1] == "spa_files", (
+            f"spa_files must come last: {imports}"
+        )
+
+    # And the exception is GET-only: the API's own POST must still be proxied.
+    block = caddyfile.split("(spa_auth_pages)")[1].split("(spa_files)")[0]
+    assert "method GET" in block
+    assert "/auth/verify" in block and "/auth/reset-password" in block
