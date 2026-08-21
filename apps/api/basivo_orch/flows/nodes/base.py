@@ -197,6 +197,16 @@ class Node(ABC):
     #: that reached one is failed for a human rather than silently repeated.
     replay_safe: ClassVar[bool] = True
 
+    #: Whether running this node is expensive in CPU and memory rather than in
+    #: waiting. An agent call is minutes of *waiting*, so a dozen can overlap
+    #: happily; a video render is a browser capturing 720 frames, and two of
+    #: them on the same small box take longer together than they would in
+    #: sequence — while also being how the box runs out of memory.
+    #:
+    #: The engine admits one heavy node per process at a time (see
+    #: `HEAVY_SLOT`). Concurrency for everything else is untouched.
+    heavy: ClassVar[bool] = False
+
     @abstractmethod
     async def run(self, config: Any, ctx: NodeContext) -> NodeResult:
         """Do the work. Raise `NodeError` to fail with a readable message."""

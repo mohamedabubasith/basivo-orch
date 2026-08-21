@@ -32,7 +32,7 @@ import shlex
 import shutil
 import tempfile
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -157,7 +157,16 @@ class VideoRenderConfig(BaseModel):
     fps: int = Field(default=30, ge=1, le=60)
     #: Each worker is a separate Chrome (~256MB). Two is a sane default for a
     #: container that is also running everything else.
-    workers: int = Field(default=2, ge=1, le=8)
+    #: Chromium processes the renderer may run in parallel. Each is roughly
+    #: 256MB and one core, so the deployment decides the default
+    #: (BASIVO_RENDER_WORKERS) rather than the flow author: two containers each
+    #: launching four browsers on a four-core box is slower than either doing
+    #: it alone, and much closer to the memory limit.
+    workers: int = Field(
+        default_factory=lambda: max(1, min(8, int(os.environ.get("BASIVO_RENDER_WORKERS", "2")))),
+        ge=1,
+        le=8,
+    )
     filename: str = Field(default="video", max_length=100)
 
     @model_validator(mode="after")
@@ -197,6 +206,10 @@ class VideoRenderNode(Node):
     category = "design"
     config_model = VideoRenderConfig
     output_paths = ("artifact_id", "url", "duration_seconds", "size_bytes", "format")
+
+    #: A browser capturing every frame, then an encode. The heaviest thing
+    #: this product does.
+    heavy: ClassVar[bool] = True
     #: One attempt: a retry means another several minutes of the same work, and
     #: a render that failed on the composition will fail again identically.
     max_attempts = 1
@@ -277,6 +290,32 @@ def _declared_duration(html: str) -> float:
     return float(match.group(1)) if match else 10.0
 
 
+#: A render will not start with less than this much free disk. Frames for a
+#: 30-second 1080p video are hundreds of megabytes before they are encoded and
+#: thrown away, and on a box where the database shares the volume, filling the
+#: disk does not fail a render — it stops Postgres accepting writes, which
+#: takes the whole product down. Failing one node with a clear message is the
+#: cheaper outcome by a wide margin.
+MIN_FREE_DISK_GB = float(os.environ.get("BASIVO_MIN_FREE_DISK_GB", "3"))
+
+
+def free_disk_gb(path: str | None = None) -> float:
+    usage = shutil.disk_usage(path or tempfile.gettempdir())
+    return usage.free / 1_073_741_824
+
+
+def ensure_disk_space(minimum_gb: float = MIN_FREE_DISK_GB) -> None:
+    free = free_disk_gb()
+    if free < minimum_gb:
+        raise NodeError(
+            f"Only {free:.1f}GB of disk is free and a render needs at least "
+            f"{minimum_gb:g}GB of scratch space. Nothing was rendered — the "
+            "alternative is filling the disk the database is on. Free some space "
+            "or lower BASIVO_MIN_FREE_DISK_GB if you know better.",
+            retryable=False,
+        )
+
+
 async def _render(
     html: str,
     *,
@@ -285,6 +324,7 @@ async def _render(
     assets: dict[str, bytes] | None = None,
 ) -> tuple[bytes, str]:
     """Run the renderer in a scratch project. Returns (bytes, combined logs)."""
+    ensure_disk_space()
     command = hyperframes_command()
 
     with tempfile.TemporaryDirectory(prefix="basivo-video-") as workdir:
@@ -434,7 +474,9 @@ _PROBE_JS = """(t) => {
     let effective = 1;
     for (let node = el; node && node.nodeType === 1; node = node.parentElement) {
       const nodeStyle = node === el ? style : getComputedStyle(node);
-      if (nodeStyle.visibility === 'hidden' || nodeStyle.display === 'none') { effective = 0; break; }
+      if (nodeStyle.visibility === 'hidden' || nodeStyle.display === 'none') {
+        effective = 0; break;
+      }
       effective *= parseFloat(nodeStyle.opacity);
       if (effective <= 0.05) break;
     }
@@ -571,6 +613,8 @@ class VideoGeneratorNode(Node):
         "script",
         "words",
     )
+    #: Speech, a browser probe per attempt, a still, then the render.
+    heavy: ClassVar[bool] = True
     max_attempts = 1
     timeout_seconds = float(RENDER_TIMEOUT_SECONDS + 300)
 

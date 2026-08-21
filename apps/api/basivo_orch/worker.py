@@ -29,13 +29,15 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
+import pathlib
 import signal
 import socket
+import sys
 import uuid
 from datetime import UTC, datetime, timedelta
 
 import redis.asyncio as redis
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basivo_orch.auth.settings import get_settings as get_auth_settings
@@ -76,7 +78,30 @@ LEASE_SECONDS = 90
 INLINE_GRACE_SECONDS = RUN_TIMEOUT_SECONDS + 300
 
 #: How many runs one worker executes at once.
-MAX_CONCURRENT_RUNS = 4
+#: How many runs one worker executes at once. Two, not four: runs are mostly
+#: waiting on models, but the heavy ones (render, speech) are gated to one per
+#: process anyway, and a smaller number keeps peak memory predictable — which
+#: on a box shared with Postgres is worth more than theoretical throughput.
+#: Scale out with more worker containers rather than up with this.
+MAX_CONCURRENT_RUNS = max(1, int(os.environ.get("BASIVO_MAX_CONCURRENT_RUNS", "2")))
+
+#: Restart this process when it grows past this, once it is idle. Not a fix for
+#: a leak — a bound on one. Long-lived processes that load ONNX sessions, spawn
+#: browsers and hold agent conversations accumulate memory that no single line
+#: of code is responsible for, and a worker that quietly reaches the container
+#: limit is OOM-killed mid-run. Exiting cleanly between runs costs a few
+#: seconds of startup and gives the memory back.
+#:
+#: Zero disables it.
+RSS_LIMIT_MB = int(os.environ.get("BASIVO_WORKER_RSS_LIMIT_MB", "0"))
+
+#: Housekeeping cadence: idle-model unload, artifact retention, temp sweep.
+HOUSEKEEPING_SECONDS = float(os.environ.get("BASIVO_HOUSEKEEPING_SECONDS", "300"))
+
+#: Delete rendered artifacts older than this. They are reproducible outputs,
+#: not records: a poster from March is 500KB in the database, in every backup,
+#: and of interest to nobody. Zero keeps them forever.
+ARTIFACT_RETENTION_DAYS = int(os.environ.get("BASIVO_ARTIFACT_RETENTION_DAYS", "30"))
 
 
 def worker_identity() -> str:
@@ -278,6 +303,15 @@ async def work_loop(redis_client: RedisClient | None, stopping: asyncio.Event) -
             log.warning("worker.claim_failed", error=str(exc))
 
         if claimed is None:
+            if should_recycle(in_flight=len(running)):
+                # Idle and over the limit: the cleanest moment there is.
+                log.warning(
+                    "worker.recycling",
+                    resident_mb=round(resident_mb()),
+                    limit_mb=RSS_LIMIT_MB,
+                    note="restarting to return memory; queued runs are untouched",
+                )
+                return
             with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(stopping.wait(), timeout=POLL_SECONDS)
             continue
@@ -292,6 +326,114 @@ async def work_loop(redis_client: RedisClient | None, stopping: asyncio.Event) -
         # SIGTERM has just recreated the problem it exists to solve.
         log.info("worker.draining", in_flight=len(running))
         await asyncio.gather(*running, return_exceptions=True)
+
+
+def resident_mb() -> float:
+    """This process's resident memory, in MB.
+
+    Read from /proc where it exists and from `resource` otherwise, because the
+    same code runs in a Linux container and on a developer's Mac — and on Linux
+    `ru_maxrss` is a high-water mark, which would make a worker restart itself
+    forever after one expensive run.
+    """
+    try:
+        with open("/proc/self/statm") as handle:  # noqa: PTH123 — a proc file, not a path
+            pages = int(handle.read().split()[1])
+        return pages * os.sysconf("SC_PAGE_SIZE") / 1_048_576
+    except (OSError, IndexError, ValueError):
+        import resource
+
+        usage = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        # Linux reports kilobytes, macOS bytes.
+        return usage / 1024 if sys.platform != "darwin" else usage / 1_048_576
+
+
+def should_recycle(*, in_flight: int, limit_mb: int = RSS_LIMIT_MB) -> bool:
+    """Whether to hand this process back to the supervisor.
+
+    Only ever between runs. Exiting with work in flight would abandon runs the
+    reaper then has to reclaim — trading a memory problem for a correctness
+    one.
+    """
+    if limit_mb <= 0 or in_flight:
+        return False
+    return resident_mb() > limit_mb
+
+
+async def sweep_artifacts(session: AsyncSession, *, days: int = ARTIFACT_RETENTION_DAYS) -> int:
+    """Delete rendered files past their retention. Returns how many.
+
+    Deleted in batches rather than one statement: a single DELETE covering
+    months of 1MB rows takes a long lock and writes an enormous WAL segment,
+    and this runs beside a live API on the same small box.
+    """
+    if days <= 0:
+        return 0
+
+    from basivo_orch.flows.models import Artifact
+
+    cutoff = datetime.now(UTC) - timedelta(days=days)
+    removed = 0
+    for _ in range(20):  # a bounded amount of work per housekeeping tick
+        result = await session.execute(
+            select(Artifact.id).where(Artifact.created_at < cutoff).limit(50)
+        )
+        ids = [row for row in result.scalars()]
+        if not ids:
+            break
+        await session.execute(delete(Artifact).where(Artifact.id.in_(ids)))
+        await session.commit()
+        removed += len(ids)
+    if removed:
+        log.info("worker.artifacts_swept", removed=removed, older_than_days=days)
+    return removed
+
+
+def sweep_temp_directories(prefix: str = "basivo-", older_than_seconds: float = 3600) -> int:
+    """Remove render scratch directories a killed process left behind.
+
+    `TemporaryDirectory` cleans up on exit; it cannot clean up after SIGKILL,
+    and a render's frame directory is hundreds of megabytes. On a 50GB disk
+    shared with the database, a handful of those is the difference between a
+    slow week and a full disk — and a full disk under Postgres is not a slow
+    week.
+    """
+    import shutil
+    import tempfile
+    import time as _time
+
+    root = pathlib.Path(tempfile.gettempdir())
+    now = _time.time()
+    removed = 0
+    for entry in root.glob(f"{prefix}*"):
+        try:
+            if not entry.is_dir() or now - entry.stat().st_mtime < older_than_seconds:
+                continue
+            shutil.rmtree(entry, ignore_errors=True)
+            removed += 1
+        except OSError:
+            continue
+    if removed:
+        log.info("worker.temp_swept", removed=removed)
+    return removed
+
+
+async def housekeeping_loop(stopping: asyncio.Event) -> None:
+    """The chores that keep a long-lived worker from growing without bound."""
+    from basivo_orch.flows.nodes.speech import release_engine_if_idle
+
+    while not stopping.is_set():
+        with contextlib.suppress(TimeoutError):
+            await asyncio.wait_for(stopping.wait(), timeout=HOUSEKEEPING_SECONDS)
+        if stopping.is_set():
+            return
+        try:
+            await asyncio.to_thread(release_engine_if_idle)
+            await asyncio.to_thread(sweep_temp_directories)
+            async with SessionLocal() as session:
+                await sweep_artifacts(session)
+        except Exception as exc:  # noqa: BLE001 — chores must never kill the worker
+            log.warning("worker.housekeeping_failed", error=str(exc))
 
 
 async def reaper_loop(stopping: asyncio.Event) -> None:
@@ -328,6 +470,7 @@ async def main() -> None:
     tasks = [
         asyncio.create_task(work_loop(client, stopping)),
         asyncio.create_task(reaper_loop(stopping)),
+        asyncio.create_task(housekeeping_loop(stopping)),
         asyncio.create_task(run_scheduler(client)),
     ]
     try:

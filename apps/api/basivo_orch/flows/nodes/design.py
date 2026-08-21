@@ -24,7 +24,7 @@ happen just because the output is pretty.
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -108,6 +108,10 @@ class RenderNode(Node):
     category = "design"
     config_model = RenderConfig
     output_paths = ("artifact_id", "url", "width", "height", "size_bytes")
+
+    #: Headless Chromium with real fonts. Cheaper than a video, still the kind
+    #: of work that should not run four-up on two cores.
+    heavy: ClassVar[bool] = True
     max_attempts = 2
     timeout_seconds = 120.0
 

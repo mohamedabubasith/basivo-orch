@@ -223,9 +223,7 @@ async def test_an_unknown_voice_names_some_real_ones(http_client, monkeypatch):
         await speech.speak("hello", voice="Morgan Freeman", speed=1.0)
 
 
-async def test_the_node_reports_words_and_timings_for_the_caption_layer(
-    http_client, monkeypatch
-):
+async def test_the_node_reports_words_and_timings_for_the_caption_layer(http_client, monkeypatch):
     """What downstream nodes consume: a duration and per-word spans."""
     from basivo_orch.flows.nodes import speech
 
@@ -296,9 +294,7 @@ async def test_real_narration_lands_near_the_documented_pace():
     assert len(timings) == words
     assert timings[0]["start"] < 0.6
     assert timings[-1]["end"] <= seconds + 0.05
-    assert all(
-        a["end"] <= b["start"] + 0.001 for a, b in zip(timings, timings[1:], strict=False)
-    )
+    assert all(a["end"] <= b["start"] + 0.001 for a, b in zip(timings, timings[1:], strict=False))
 
 
 @needs_model

@@ -29,9 +29,11 @@ dominate the cost of speaking one sentence.
 from __future__ import annotations
 
 import asyncio
+import gc
 import os
 import re
 import threading
+import time
 from pathlib import Path
 from typing import Any, ClassVar, Literal
 
@@ -39,6 +41,9 @@ from pydantic import BaseModel, Field
 
 from basivo_orch.flows.nodes.base import Node, NodeContext, NodeError, NodeResult
 from basivo_orch.flows.templating import render_value
+from basivo_orch.logging import get_logger
+
+log = get_logger(__name__)
 
 #: Where the ONNX model and the voice styles live. Baked into the worker image
 #: rather than downloaded at run time: a render must not fail because a model
@@ -94,6 +99,13 @@ _LANGUAGE_BY_PREFIX = {
 
 _engine: Any = None
 _engine_lock = threading.Lock()
+_engine_last_used: float = 0.0
+
+#: Drop the model after this long without a word to say. It is ~400MB of
+#: resident memory for a session that a nightly-poster workspace uses twice a
+#: day: holding it for the other 23 hours is how a long-lived worker's RSS
+#: quietly doubles and stays there.
+IDLE_UNLOAD_SECONDS = float(os.environ.get("BASIVO_SPEECH_IDLE_UNLOAD", "600"))
 
 
 def language_for(voice: str) -> str:
@@ -106,7 +118,8 @@ def model_paths() -> tuple[Path, Path]:
 
 def load_engine() -> Any:
     """The process-wide Kokoro session. Built once, under a lock."""
-    global _engine
+    global _engine, _engine_last_used
+    _engine_last_used = time.monotonic()
     if _engine is not None:
         return _engine
 
@@ -140,7 +153,34 @@ def load_engine() -> Any:
             engine.has_timings = True
 
         _engine = engine
+        _engine_last_used = time.monotonic()
         return _engine
+
+
+def release_engine_if_idle(now: float | None = None) -> bool:
+    """Free the model if nothing has spoken for a while. Returns whether it did.
+
+    Called from the worker's own housekeeping rather than from a timer inside
+    this module: a background task that outlives the thing it serves is its own
+    kind of leak, and the worker already has a loop that runs on a schedule.
+    """
+    global _engine, _engine_last_used
+    if _engine is None:
+        return False
+    if (now or time.monotonic()) - _engine_last_used < IDLE_UNLOAD_SECONDS:
+        return False
+
+    with _engine_lock:
+        if _engine is None:
+            return False
+        _engine = None
+
+    # onnxruntime frees its arenas when the session is collected, and the
+    # collection is not prompt on its own — this is a few hundred megabytes,
+    # so it is worth asking directly rather than waiting for a generation.
+    gc.collect()
+    log.info("speech.model_released", idle_seconds=int(IDLE_UNLOAD_SECONDS))
+    return True
 
 
 def word_timings(text: str, phonemes: list[Any]) -> list[dict[str, Any]]:
@@ -277,6 +317,8 @@ class SpeakNode(Node):
     #: Synthesis is a pure function of (text, voice, speed) and touches nothing
     #: outside this system, so repeating it after a recovery is safe.
     replay_safe: ClassVar[bool] = True
+    #: Neural inference on the CPU, saturating a core for seconds at a time.
+    heavy: ClassVar[bool] = True
     max_attempts = 2
     timeout_seconds = 300.0
 

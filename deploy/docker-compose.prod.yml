@@ -1,13 +1,34 @@
-# Production stack for a single 1 GB instance.
+# Production stack for a single 4 vCPU / 16 GB instance.
 #
 # Everything lives on one box: Postgres and Redis beside the app rather than as
-# managed services. That is the whole reason this costs $7/month instead of
-# $44 — and the trade-off is stated plainly in deploy/README.md rather than
-# discovered later.
+# managed services. That is the whole reason this costs a tenth of the managed
+# equivalent — and the trade-off is stated plainly in deploy/README.md rather
+# than discovered later.
 #
-# Memory limits are set on every service. On a 1 GB box an unbounded Postgres
-# cache plus a Node build is exactly how you get the kernel OOM-killer picking
-# a victim at random, and the victim is usually the API.
+# **The stack is deliberately capped at about HALF the machine.** The limits
+# below add up to ~7.5 GB of 16, and heavy work is gated to one render at a
+# time per worker. Reasons, in order of how much they cost when ignored:
+#
+#   1. Rendering is spiky. A video render is a browser holding hundreds of
+#      captured frames; a limit set to "whatever is free" means the spike is
+#      absorbed by the page cache one day and by the OOM-killer the next.
+#   2. Postgres needs the rest of the RAM as filesystem cache. Its own
+#      shared_buffers is only part of the story — the kernel caching the data
+#      files is what keeps queries off the disk.
+#   3. Headroom is what makes a bad deploy survivable. A leak, a runaway
+#      composition, an accidental 4K render: with half the box free those are
+#      an alert, not an outage.
+#
+# The CPU arithmetic: two workers at 0.9 plus Postgres at 1.0, the API at 0.8
+# and Redis at 0.3 sums to more than four, but those are ceilings, not
+# reservations, and the two that can actually saturate a core for minutes —
+# the workers — are capped at 1.8 between them. Real peak during a render is
+# about two of the four cores. Raise the worker `cpus` and BASIVO_RENDER_WORKERS
+# together if you would rather have faster renders than headroom.
+#
+# Memory limits are set on every service, because an unbounded Postgres cache
+# beside a Node build is how the kernel OOM-killer ends up picking a victim at
+# random, and the victim is usually the API.
 
 name: basivo
 
@@ -24,13 +45,25 @@ services:
     command:
       - postgres
       - -c
-      - shared_buffers=96MB
+      - shared_buffers=768MB
       - -c
-      - effective_cache_size=256MB
+      # What the planner believes the OS is caching. Set from the memory left
+      # over after our limits, not from total RAM: claiming 12GB of cache on a
+      # box where we allowed ourselves 7.5 makes the planner pick index scans
+      # that then hit the disk.
+      - effective_cache_size=4GB
       - -c
-      - max_connections=50
+      - max_connections=60
       - -c
-      - work_mem=4MB
+      - work_mem=16MB
+      - -c
+      - maintenance_work_mem=256MB
+      # Artifacts are megabyte-sized rows: deleting a month of them writes a
+      # lot of WAL, and a bigger max keeps that from checkpointing constantly.
+      - -c
+      - max_wal_size=2GB
+      - -c
+      - wal_compression=on
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -41,7 +74,8 @@ services:
     deploy:
       resources:
         limits:
-          memory: 320M
+          memory: 1600M
+          cpus: "1.0"
     # Not published to the host. Only the api container can reach it, over the
     # compose network — there is no path from the internet to port 5432.
     expose:
@@ -57,7 +91,7 @@ services:
       - --appendonly
       - "no"
       - --maxmemory
-      - 64mb
+      - 256mb
       # Redis here holds rate-limit counters, lockout state, OTPs and the live
       # tail of run events — all of it reconstructible or short-lived. Evicting
       # the oldest key under pressure is correct; refusing writes is not.
@@ -71,7 +105,8 @@ services:
     deploy:
       resources:
         limits:
-          memory: 96M
+          memory: 320M
+          cpus: "0.3"
     expose:
       - "6379"
 
@@ -91,7 +126,8 @@ services:
     deploy:
       resources:
         limits:
-          memory: 384M
+          memory: 640M
+          cpus: "0.8"
     expose:
       - "8000"
 
@@ -111,18 +147,47 @@ services:
     # for HyperFrames — which is why the worker image is heavier than the API
     # and gets more memory below.
     env_file: [.env]
+    # Two of them, each running two runs at once, so four runs can be in
+    # flight — but only ONE heavy step (render or speech) per container, gated
+    # in the engine. Two containers rather than one process doing four is
+    # deliberate: a worker that has to be recycled for memory takes half the
+    # capacity with it instead of all of it.
     environment:
       DATABASE_URL: postgresql+asyncpg://basivo:${POSTGRES_PASSWORD}@postgres:5432/basivo_orch
       REDIS_URL: redis://redis:6379/0
+      BASIVO_MAX_CONCURRENT_RUNS: "2"
+      # One render at a time per container. Two Chromium captures on shared
+      # cores finish later than they would in sequence.
+      BASIVO_HEAVY_CONCURRENCY: "1"
+      # Hand the process back when it grows past this while idle. Not a fix for
+      # a leak — a bound on one. The container limit is 2600M, so this fires
+      # with room to spare rather than being OOM-killed mid-run.
+      BASIVO_WORKER_RSS_LIMIT_MB: "1800"
+      # Drop the 400MB voice model after ten idle minutes.
+      BASIVO_SPEECH_IDLE_UNLOAD: "600"
+      # Renders need scratch space; the database is on the same volume.
+      BASIVO_MIN_FREE_DISK_GB: "5"
+      BASIVO_ARTIFACT_RETENTION_DAYS: "30"
+      # Chromium's own worker count. One, because this container is capped at
+      # 0.9 of a core: a second browser process would share the same quota and
+      # only add memory and context switching.
+      BASIVO_RENDER_WORKERS: "1"
     depends_on:
       postgres: {condition: service_healthy}
       redis: {condition: service_healthy}
-    # A run holds an agent conversation and its tool results in memory, so the
-    # worker gets more headroom than the API, which only assembles responses.
+    # Chromium in a container uses /dev/shm for its shared buffers, and
+    # Docker's default is 64MB. A 1080p capture exhausts that and the browser
+    # crashes with an error that mentions nothing about shared memory — this
+    # line is the whole fix.
+    shm_size: 512m
     deploy:
+      replicas: 2
       resources:
         limits:
-          memory: 768M
+          # A run holds an agent conversation and its tool results; a render
+          # adds a browser and a voice model on top.
+          memory: 2600M
+          cpus: "0.9"
     # SIGTERM makes the worker stop claiming and drain what it holds; the
     # default 10s would kill a run mid-model-call on every deploy.
     stop_grace_period: 120s
@@ -150,7 +215,8 @@ services:
     deploy:
       resources:
         limits:
-          memory: 96M
+          memory: 192M
+          cpus: "0.3"
 
 volumes:
   postgres_data:

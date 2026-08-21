@@ -39,7 +39,7 @@ Stated plainly, because these are real:
   snapshots are $0.05/GB-month — see below.
 - **Deploys have a gap.** `docker compose up -d` restarts containers; expect
   roughly 40 seconds.
-- **Builds happen on the box.** Slow (several minutes on 1 GB), but it keeps
+- **Builds happen on the box.** Slow (several minutes), but it keeps
   the deployment to one moving part and needs no registry.
 
 ## `./deploy.sh`
@@ -181,3 +181,36 @@ Removes the instance, its static IP, the SES identity and the SMTP user.
   keep it somewhere private.
 - Unattended security upgrades are enabled. An unpatched box is the likeliest
   way this gets compromised.
+
+
+## Sizing: the stack takes half the machine on purpose
+
+On a 4 vCPU / 16 GB box the limits in `docker-compose.prod.yml` add up to
+**~7.9 GB — under half**. That is not timidity, it is three specific things:
+
+- **Rendering is spiky.** A video render is a browser holding hundreds of
+  captured frames. Sized to "whatever is free", that spike is absorbed by the
+  page cache one day and by the OOM-killer the next.
+- **Postgres wants the rest as filesystem cache.** `shared_buffers` is only
+  part of its memory story; the kernel caching the data files is what keeps
+  queries off the disk.
+- **Headroom is what makes a bad day survivable.** A leak, a runaway
+  composition, an accidental 4K render — with half the box free those are an
+  alert instead of an outage.
+
+### What keeps it there
+
+| Guard | Where | What it prevents |
+|---|---|---|
+| One heavy node per worker process | `BASIVO_HEAVY_CONCURRENCY=1` | Four Chromium captures competing for four cores — slower than doing them in turn, and how peak memory doubles |
+| Two runs per worker, two workers | `BASIVO_MAX_CONCURRENT_RUNS=2`, `replicas: 2` | Unpredictable peaks; and a worker recycled for memory takes half the capacity with it, not all of it |
+| Voice model dropped when idle | `BASIVO_SPEECH_IDLE_UNLOAD=600` | ~400 MB held for 23 hours by a workspace that speaks twice a day |
+| Worker recycles itself when bloated | `BASIVO_WORKER_RSS_LIMIT_MB=1800` | Being OOM-killed mid-run. It exits only when idle, so nothing is abandoned |
+| Render refuses to start without space | `BASIVO_MIN_FREE_DISK_GB=5` | A full disk. That does not fail a render, it stops Postgres accepting writes |
+| Artifacts expire | `BASIVO_ARTIFACT_RETENTION_DAYS=30` | Megabyte rows accumulating in the database and in every backup |
+| Orphaned scratch directories swept | housekeeping loop | Frame directories a SIGKILLed render left behind |
+| `shm_size: 512m` on the worker | compose | Chromium crashing on Docker's 64 MB `/dev/shm` with an error that never mentions shared memory |
+
+Raise the worker `cpus` and `BASIVO_RENDER_WORKERS` together if you would
+rather have faster renders than headroom. Everything else should stay put until
+there is a measurement saying otherwise.

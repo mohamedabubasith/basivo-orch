@@ -402,7 +402,7 @@ def test_a_composition_that_brings_its_own_audio_has_it_replaced():
         '<html><body><div id="stage" data-composition-id="p" data-duration="4">'
         '<audio id="audio" src="voice.mp3" preload="auto"></audio>'
         '<div class="clip">hi</div></div>'
-        '<script>window.__timelines={p:1}</script></body></html>'
+        "<script>window.__timelines={p:1}</script></body></html>"
     )
 
     stripped, count = strip_audio(rogue)
@@ -448,7 +448,9 @@ async def test_the_probe_sees_through_an_invisible_ancestor():
     </style></head><body>
     <div id="stage" data-composition-id="p" data-start="0" data-duration="4"
          data-width="640" data-height="360" data-fps="24">
-      <div class="clip" data-start="0" data-duration="4" data-track-index="0"><h1>SCENE ONE</h1></div>
+      <div class="clip" data-start="0" data-duration="4" data-track-index="0">
+        <h1>SCENE ONE</h1>
+      </div>
     </div>
     <script src="https://cdn.jsdelivr.net/npm/gsap@3/dist/gsap.min.js"></script>
     <script>const tl=gsap.timeline({paused:true});tl.set('#stage',{opacity:1},0);

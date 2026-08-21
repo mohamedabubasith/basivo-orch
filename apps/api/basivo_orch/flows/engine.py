@@ -25,6 +25,8 @@ HTTP are where the wall-clock actually goes; the database work is microseconds.
 from __future__ import annotations
 
 import asyncio
+import os
+import time
 import uuid
 from collections import defaultdict
 from datetime import UTC, datetime
@@ -48,6 +50,39 @@ from basivo_orch.flows.nodes.base import (
 from basivo_orch.logging import get_logger
 
 log = get_logger(__name__)
+
+#: How many CPU-bound nodes may run at once *in this process*. One, by default:
+#: a render is a browser capturing hundreds of frames, and a second one in
+#: parallel finishes later than it would have in sequence while doubling peak
+#: memory. Raise it only on a box with cores to spare
+#: (BASIVO_HEAVY_CONCURRENCY).
+HEAVY_CONCURRENCY = max(1, int(os.environ.get("BASIVO_HEAVY_CONCURRENCY", "1")))
+
+#: Created lazily, because a Semaphore binds to the running loop and this
+#: module is imported long before there is one.
+_heavy_slot: asyncio.Semaphore | None = None
+
+
+class _NullGate:
+    """Stands in for the semaphore when a node is not heavy, so the call site
+    stays one `async with` rather than a branch around the whole body."""
+
+    async def __aenter__(self) -> None:
+        return None
+
+    async def __aexit__(self, *_: object) -> None:
+        return None
+
+
+_NO_GATE = _NullGate()
+
+
+def heavy_slot() -> asyncio.Semaphore:
+    global _heavy_slot
+    if _heavy_slot is None:
+        _heavy_slot = asyncio.Semaphore(HEAVY_CONCURRENCY)
+    return _heavy_slot
+
 
 #: Ceiling on a whole run. Without one, a flow whose HTTP node points at a
 #: server that accepts the connection and never answers holds a worker forever.
@@ -575,8 +610,17 @@ class Engine:
             )
 
             try:
-                async with asyncio.timeout(implementation.timeout_seconds):
-                    result = await implementation.run(config, ctx)
+                # One heavy node per process. Without this, a worker running
+                # four runs at once can have four Chromium captures competing
+                # for two cores — which is slower than doing them in turn and
+                # is how a small box reaches its memory limit.
+                gate = heavy_slot() if implementation.heavy else _NO_GATE
+                waited = time.perf_counter()
+                async with gate:
+                    if implementation.heavy and time.perf_counter() - waited > 1.0:
+                        await progress("Waiting for the renderer — another heavy step is using it")
+                    async with asyncio.timeout(implementation.timeout_seconds):
+                        result = await implementation.run(config, ctx)
 
                 finished = datetime.now(UTC)
                 async with self._db:
