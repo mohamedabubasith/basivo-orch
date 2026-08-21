@@ -1,7 +1,7 @@
 # Built for arm64 (Graviton). The dev machine is Apple Silicon, so this is a
 # native build both ways — no emulation, no cross-compilation.
 
-FROM python:3.12-slim-bookworm AS builder
+FROM python:3.12-slim-bookworm AS deps
 
 COPY --from=ghcr.io/astral-sh/uv:0.5.11 /uv /usr/local/bin/uv
 
@@ -12,10 +12,15 @@ ENV UV_COMPILE_BYTECODE=1 \
 WORKDIR /app
 
 # Dependencies resolve from the lockfile in their own layer, so editing source
-# does not re-resolve and re-download the world on every build.
+# does not re-resolve and re-download the world on every build. Its own STAGE,
+# not just its own layer, because the worker image needs this venv (for the
+# playwright CLI) without depending on our source — see `worker-tools`.
 COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-install-project --no-dev
+
+
+FROM deps AS builder
 
 COPY basivo_orch ./basivo_orch
 COPY migrations ./migrations
@@ -72,17 +77,17 @@ CMD ["uvicorn", "basivo_orch.main:app", \
 # HyperFrames, Chromium for the frame capture and the poster screenshots, and
 # the voice model.
 #
-# A separate target rather than one fat image, because the API is redeployed
+# A separate image rather than one fat one, because the API is redeployed
 # constantly and this adds roughly 700MB. On a VPS that meters inbound traffic,
 # pulling that on every API deploy is a bill for nothing.
 #
-# The model is baked in at build time and never fetched at run time. A render
-# that downloads 109MB the first time it speaks is a render that fails the day
-# Hugging Face is slow, and it would do it again in every new container.
+# **The heavy layers come before the app on purpose.** This used to be
+# `FROM runtime`, which contains our source — so changing one line of Python
+# invalidated apt, 363MB of npm, the Chromium download and the model, and every
+# deploy paid for all of it again. Nothing below depends on our code until the
+# final COPY, so a code change now rebuilds one layer.
 
-FROM runtime AS worker
-
-USER root
+FROM python:3.12-slim-bookworm AS worker-tools
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -98,13 +103,21 @@ RUN apt-get update \
     && npm cache clean --force \
     && apt-get purge -y gnupg \
     && apt-get autoremove -y \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --create-home --uid 10001 basivo
+
+# The venv comes from `deps`, not from `builder`: it holds the playwright CLI
+# needed for the next step, and taking it from the code-free stage is what
+# keeps the Chromium download out of every deploy.
+WORKDIR /app
+COPY --from=deps /app/.venv /app/.venv
+ENV PATH="/app/.venv/bin:$PATH"
 
 # Chromium and the shared libraries it needs. `playwright install --with-deps`
 # installs both, and into a path every user can read — the default is the
 # invoking user's home, which the `basivo` user cannot see.
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright
-RUN /app/.venv/bin/playwright install --with-deps chromium \
+RUN playwright install --with-deps chromium \
     && chmod -R a+rX /opt/playwright
 
 # HyperFrames renders with puppeteer-core, which bundles NO browser: left to
@@ -121,6 +134,7 @@ RUN /app/.venv/bin/playwright install --with-deps chromium \
 # supports HeadlessExperimental.beginFrame — HyperFrames' fast capture path.
 # Plain Chromium works too and falls back to screenshots, which is slower but
 # correct.
+#
 # The `test -x` is what makes an unresolved symlink fail the BUILD instead of
 # the first render — the difference between a broken image and a container that
 # looks healthy until someone asks for a video.
@@ -132,22 +146,38 @@ RUN shell="$(find /opt/playwright -type f -name headless_shell -perm -u+x | head
     echo "hyperframes browser: $(readlink -f /opt/basivo/chrome)"
 ENV HYPERFRAMES_BROWSER_PATH=/opt/basivo/chrome
 
-# The voice model: two files, ~109MB, in a layer of their own so editing source
-# does not re-download them.
+# The voice model: two files, ~109MB. Fetched with curl from pinned URLs rather
+# than through our own `fetch_model()`, because calling into the package would
+# make this layer depend on our source — which is the whole thing this stage
+# exists to avoid. `test_the_dockerfile_and_the_code_agree_on_the_model` keeps
+# these URLs identical to MODEL_SOURCES.
 ENV BASIVO_SPEECH_MODEL_DIR=/opt/basivo/speech
 RUN mkdir -p /opt/basivo/speech \
-    && /app/.venv/bin/python -c "from basivo_orch.flows.nodes.speech import fetch_model; fetch_model()" \
-    && chmod -R a+rX /opt/basivo
+    && curl -fsSL -o /opt/basivo/speech/kokoro-timestamped-q8f16.onnx \
+        "https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX-timestamped/resolve/main/onnx/model_q8f16.onnx" \
+    && curl -fsSL -o /opt/basivo/speech/voices-v1.0.bin \
+        "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin" \
+    && chmod -R a+rX /opt/basivo \
+    && ls -l /opt/basivo/speech
 
-# Everything the render path shells out to, checked once here. Each of these
-# failing at run time costs a queued run and an error message nobody expects.
+# Everything the render path shells out to, checked once here rather than on
+# the first render — a missing tool should fail the build, not a queued run.
 RUN set -e; \
     ffmpeg -version  | head -1; \
     ffprobe -version | head -1; \
     node --version; \
     hyperframes --help >/dev/null && echo "hyperframes ok"; \
-    /app/.venv/bin/python -c "from basivo_orch.flows.nodes.speech import model_paths; \
-m, v = model_paths(); assert m.exists() and v.exists(), (m, v); print('voice model ok')"
+    test -s /opt/basivo/speech/voices-v1.0.bin && echo "voice model ok"
+
+
+FROM worker-tools AS worker
+
+# The only layer our source touches. Everything above stays cached across a
+# code change, which is the difference between a one minute deploy and fifteen.
+COPY --from=builder --chown=basivo:basivo /app /app
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
 
 USER basivo
 

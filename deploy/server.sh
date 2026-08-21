@@ -142,7 +142,15 @@ cmd_deploy() {
     cmd_backup || warn "backup failed; continuing"
 
     say "Building"
-    "${COMPOSE[@]}" build --pull
+    # No --pull. It re-downloaded python:3.12-slim, the uv image and the Caddy
+    # image on every deploy — bandwidth and a minute, to almost never find a
+    # change. `./deploy/server.sh deploy --pull` when you actually want fresh
+    # base images, which is worth doing about monthly for security updates.
+    if [ "${2:-}" = "--pull" ] || [ "${BASIVO_PULL_BASE:-}" = "1" ]; then
+        "${COMPOSE[@]}" build --pull
+    else
+        "${COMPOSE[@]}" build
+    fi
 
     say "Starting"
     # The API container applies migrations on boot (see docker-entrypoint.sh),

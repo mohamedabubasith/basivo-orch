@@ -305,3 +305,32 @@ async def test_speed_changes_the_length_in_the_direction_you_would_expect():
     _, slow, _ = await speak(line, voice="am_michael", speed=0.9)
     _, fast, _ = await speak(line, voice="am_michael", speed=1.3)
     assert fast < slow
+
+
+def test_the_dockerfile_and_the_code_agree_on_the_model():
+    """The worker image downloads the model with curl, not with `fetch_model()`.
+
+    That is deliberate — calling into the package would make the Chromium and
+    model layers depend on our source, and a one-line code change would
+    re-download 500MB on every deploy. The cost of that choice is two copies of
+    the URLs, so this is the thing that keeps them identical. A silent
+    divergence means the image ships a model the code does not expect, which
+    surfaces as empty timings and captions that never appear.
+    """
+    from pathlib import Path
+
+    from basivo_orch.flows.nodes.speech import MODEL_FILE, MODEL_SOURCES, VOICES_FILE
+
+    dockerfile = Path(__file__).resolve().parents[2] / "Dockerfile"
+    text = dockerfile.read_text()
+
+    for name, url in MODEL_SOURCES.items():
+        assert url in text, f"{name}: the Dockerfile does not fetch {url}"
+    for filename in (MODEL_FILE, VOICES_FILE):
+        assert f"/opt/basivo/speech/{filename}" in text, (
+            f"the Dockerfile writes a different filename than the code reads ({filename})"
+        )
+
+    # And the model must be the timestamped export, or the voice works while
+    # captions silently cannot.
+    assert "timestamped" in MODEL_SOURCES[MODEL_FILE]

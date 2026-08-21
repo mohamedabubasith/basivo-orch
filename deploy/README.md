@@ -256,7 +256,18 @@ API key becomes undecryptable.
 
 The first `deploy` builds two images from scratch — the worker one carries
 FFmpeg, Node 22, Chromium and the voice model, so expect 10–15 minutes. Later
-deploys reuse the layers and take about a minute.
+deploys reuse those layers and take about a minute.
+
+That "about a minute" depends on the layer order in `apps/api/Dockerfile`, and
+it is easy to lose. The worker's heavy layers — apt, the npm install, the
+Chromium download, the model — sit in a `worker-tools` stage that never sees our
+source, and the app is copied in last. Move a `COPY` of the source above any of
+them and every deploy starts re-downloading 500MB again.
+
+For faster still: build the images in CI, push to a registry, and have the
+server `docker compose pull`. That turns a deploy into a download of the changed
+layer. Worth it when a rebuild-on-the-box minute starts to grate; not worth the
+extra moving parts before then.
 
 ### 3. Afterwards
 
