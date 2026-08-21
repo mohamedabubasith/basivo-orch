@@ -127,6 +127,12 @@ services:
     build:
       context: ../apps/api
       dockerfile: Dockerfile
+      # EXPLICIT, not the default. Without a target Docker builds the LAST
+      # stage in the file, and adding the worker stage silently made that the
+      # worker: the api container ran `python -m basivo_orch.worker`, never
+      # started uvicorn, never applied the migrations from its entrypoint, and
+      # every service then failed on `relation "run" does not exist`.
+      target: runtime
     image: basivo-api:latest
     restart: unless-stopped
     logging: *logging

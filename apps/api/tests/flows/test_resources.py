@@ -344,3 +344,60 @@ def _context(recorder: _Recorder, *, http):
         resolve_credential=resolve_credential,
         http=http,
     )
+
+
+# ---------------------------------------------------------------------------
+# The deployment
+# ---------------------------------------------------------------------------
+
+
+def test_every_service_built_from_our_dockerfile_names_its_stage():
+    """The failure this prevents took a deployment down.
+
+    Without `target:`, Docker builds the LAST stage in the Dockerfile. Adding
+    the worker stage at the end therefore made the *api* service build the
+    worker: the container ran `python -m basivo_orch.worker`, never started
+    uvicorn, never ran the migrations its entrypoint applies, and every service
+    then failed with `relation "run" does not exist`. Nothing in the compose
+    file looked wrong.
+    """
+    from pathlib import Path
+
+    import yaml
+
+    root = Path(__file__).resolve().parents[4]
+    compose = yaml.safe_load((root / "deploy/docker-compose.prod.yml").read_text())
+    dockerfile = (root / "apps/api/Dockerfile").read_text()
+
+    stages = {
+        line.split(" AS ")[1].strip()
+        for line in dockerfile.splitlines()
+        if line.startswith("FROM ") and " AS " in line
+    }
+    assert {"deps", "builder", "runtime", "worker-tools", "worker"} <= stages
+
+    for name, service in compose["services"].items():
+        build = service.get("build")
+        if not isinstance(build, dict) or "apps/api" not in str(build.get("context", "")):
+            continue
+        target = build.get("target")
+        assert target, f"service {name!r} builds our Dockerfile without a target"
+        assert target in stages, f"service {name!r} targets unknown stage {target!r}"
+
+    assert compose["services"]["api"]["build"]["target"] == "runtime"
+    assert compose["services"]["worker"]["build"]["target"] == "worker"
+
+
+def test_only_the_api_image_applies_migrations():
+    """Two containers racing for the Alembic lock is a coin toss over which one
+    crashes, so the entrypoint that migrates belongs to exactly one of them."""
+    from pathlib import Path
+
+    dockerfile = (Path(__file__).resolve().parents[2] / "Dockerfile").read_text()
+    runtime, worker = dockerfile.split("FROM worker-tools AS worker")
+
+    assert "docker-entrypoint.sh" in runtime
+    assert "ENTRYPOINT" not in worker, (
+        "the worker stage must not inherit or set the migrating entrypoint"
+    )
+    assert 'CMD ["python", "-m", "basivo_orch.worker"]' in worker
