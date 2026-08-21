@@ -101,8 +101,18 @@
 	# would otherwise open the app on this hostname — a second origin holding
 	# its own session cookie, and a user who bookmarks the wrong one. One
 	# redirect keeps exactly one home for the product.
-	@console_routes path /login /register /two-factor /forgot-password /confirm-email /app /app/* /auth /auth/*
-	redir @console_routes {$CONSOLE_SCHEME}://{$CONSOLE_ADDRESS}{uri} permanent
+	#
+	# 308, not `permanent` (301): a browser turns a redirected POST into a GET
+	# on 301 and 302. The app's own fetches are relative, so a form submitted
+	# from a page rendered on this host POSTs here — and as a 301 that arrived
+	# at the console as a GET, which the API answers with 405 Method Not
+	# Allowed. 308 preserves the method.
+	#
+	# `/auth/*` is deliberately NOT in this list. Those are API endpoints, not
+	# pages, and they are proxied below on both hosts; redirecting them was the
+	# other half of the same 405.
+	@console_routes path /login /register /two-factor /forgot-password /confirm-email /app /app/*
+	redir @console_routes {$CONSOLE_SCHEME}://{$CONSOLE_ADDRESS}{uri} 308
 
 	import api_proxy
 	import spa

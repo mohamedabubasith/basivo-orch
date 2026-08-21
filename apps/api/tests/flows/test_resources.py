@@ -450,3 +450,40 @@ def test_the_example_env_is_enough_to_boot_in_production():
 
     assert str(settings.public_base_url).startswith("https://")
     assert str(settings.frontend_base_url).startswith("https://")
+
+
+def test_the_landing_host_never_redirects_api_paths_or_loses_a_post():
+    """Two halves of one 405.
+
+    The landing host serves the same bundle, so a form rendered there POSTs to
+    a relative path — and the app's `/auth/*` calls are API endpoints, not
+    pages. Redirecting them sent registration to the console as a *GET*
+    (browsers rewrite the method on 301 and 302), and the API answers GET
+    /auth/register with 405 Method Not Allowed.
+
+    So: API paths are proxied on both hosts rather than redirected, and what is
+    redirected uses 308, which preserves the method.
+    """
+    from pathlib import Path
+
+    caddyfile = (Path(__file__).resolve().parents[4] / "apps/web/Caddyfile").read_text()
+
+    redirect_line = next(
+        line for line in caddyfile.splitlines() if line.strip().startswith("@console_routes")
+    )
+    assert "/auth" not in redirect_line, "API paths must be proxied, not redirected"
+    assert "/login" in redirect_line and "/app/*" in redirect_line
+
+    redir = next(line for line in caddyfile.splitlines() if line.strip().startswith("redir "))
+    assert redir.rstrip().endswith("308"), "301 and 302 turn a POST into a GET"
+
+    # And the API prefixes are proxied — including the bare collection forms,
+    # since Caddy's `/orgs/*` does not match `/orgs` itself.
+    api_paths = next(
+        line for line in caddyfile.splitlines() if line.strip().startswith("path /auth")
+    )
+    for prefix in ("/auth", "/users", "/orgs", "/api", "/flows", "/hooks"):
+        assert f" {prefix} " in api_paths, f"{prefix} (bare) is not proxied"
+        assert f" {prefix}/* " in api_paths or api_paths.rstrip().endswith(f"{prefix}/*"), (
+            f"{prefix}/* is not proxied"
+        )
