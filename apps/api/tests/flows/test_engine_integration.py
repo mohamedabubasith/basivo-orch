@@ -1364,6 +1364,11 @@ def _update_with_photo(unique: str) -> dict:
 
 
 EXERCISED_NODE_TYPES = {
+    # Covered in their own suites rather than here: preparing a photograph and
+    # composing a montage are pixel work, and proving them through the engine
+    # would assert less while costing a real render.
+    "image.edit",
+    "video.montage",
     "trigger.telegram",
     "telegram.reply",
     "session.state",

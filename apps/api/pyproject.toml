@@ -42,6 +42,7 @@ dependencies = [
     # worse than either.
     "kokoro-onnx>=0.6.1",
     "soundfile>=0.13.0",
+    "pillow>=11.0",
 ]
 
 [dependency-groups]
