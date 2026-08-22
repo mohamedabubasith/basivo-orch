@@ -9,6 +9,7 @@ depends on is asserted rather than assumed.
 
 from __future__ import annotations
 
+import json
 import uuid
 
 import pytest
@@ -99,8 +100,10 @@ def test_the_render_branch_holds_and_releases_the_lock():
 def test_the_photo_branch_stores_what_arrived():
     graph = built("studio-video-bot")
     keep = next(node for node in graph.nodes if node.id == "keep")
-    assert keep.config["artifact_id"] == "{{ input.photos.0.artifact_id }}"
-    assert keep.config["file_unique_id"] == "{{ input.photos.0.file_unique_id }}", (
+    # Addressed to the trigger by name: `keep` sits after a condition, whose
+    # output carries no photographs.
+    assert keep.config["artifact_id"] == "{{ nodes.inbox.output.photos.0.artifact_id }}"
+    assert keep.config["file_unique_id"] == "{{ nodes.inbox.output.photos.0.file_unique_id }}", (
         "without this the same photograph forwarded twice is collected twice"
     )
 
@@ -121,3 +124,61 @@ def test_the_bot_survives_a_missing_llm_credential():
         validate_graph(graph, known_types=registry.REGISTRY)
     except GraphError as error:  # pragma: no cover - shown when it regresses
         pytest.fail(f"install would fail: {error.problems}")
+
+
+def test_no_node_reads_input_from_something_that_cannot_supply_it():
+    """`input` is the UPSTREAM NODE's output, not the trigger's.
+
+    This has now been the cause of three separate failures: a reply after a
+    condition asking for `input.chat_id`, a condition after a condition asking
+    for `input.command`, and a session node after a condition asking for
+    `input.photos`. A condition emits {result, comparisons} and nothing else,
+    so anything downstream of one has to name the node it means.
+
+    The symptom is not a crash at install or publish. It is a bot that answers
+    the wrong branch, days later, with a message the operator cannot make sense
+    of.
+    """
+    import re
+
+    graph = built("studio-video-bot")
+    by_id = {node.id: node for node in graph.nodes}
+    upstream: dict[str, list[str]] = {}
+    for edge in graph.edges:
+        upstream.setdefault(edge.target, []).append(edge.source)
+
+    # What each node type actually puts in its output, for the fields a
+    # template is likely to ask for.
+    supplies = {
+        "logic.condition": {"result", "comparisons"},
+        "trigger.telegram": {
+            "chat_id", "kind", "text", "command", "callback_data", "callback_id",
+            "photos", "message_id", "media_group_id", "user", "chat_type",
+        },
+        "session.state": {
+            "chat_id", "state", "photos", "photo_count", "photo_ids", "brief",
+            "options", "status_message_id", "last_video_artifact_id", "iteration",
+            "spend_usd", "locked", "acquired", "added", "duplicate", "is_new",
+        },
+        "telegram.reply": {"message_id", "chat_id", "sent"},
+        "agent.llm": {"text", "json", "stop_reason", "handover_to", "usage"},
+        "video.invitation": {"artifact_id", "url", "seconds", "width", "height"},
+    }
+
+    problems: list[str] = []
+    for node in graph.nodes:
+        wanted = set(re.findall(r"\{\{ input\.([a-z_]+)", json.dumps(node.config)))
+        if not wanted:
+            continue
+        sources = upstream.get(node.id, [])
+        assert sources, f"{node.id} reads input but nothing feeds it"
+        for source in sources:
+            available = supplies.get(by_id[source].type, set())
+            missing = wanted - available
+            if missing:
+                problems.append(
+                    f"{node.id} reads input.{'/'.join(sorted(missing))} "
+                    f"but its upstream {source} ({by_id[source].type}) does not supply it"
+                )
+
+    assert not problems, "\n  ".join(problems)

@@ -191,10 +191,23 @@ async def install_flow_template(
     if template is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"No template called {template_name!r}.")
 
+    # The agent node has to name the same provider as the credential it uses.
+    llm_provider = "anthropic"
+    if payload.llm_credential_id:
+        from basivo_orch.credentials.models import Credential
+
+        try:
+            record = await session.get(Credential, uuid.UUID(payload.llm_credential_id))
+        except ValueError:
+            record = None
+        if record is not None and record.organization_id == context.organization_id:
+            llm_provider = record.provider
+
     graph = Graph.model_validate(
         template.build(
             telegram_credential_id=payload.telegram_credential_id,
             llm_credential_id=payload.llm_credential_id,
+            llm_provider=llm_provider,
         )
     )
     try:

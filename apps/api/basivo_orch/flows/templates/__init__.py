@@ -31,7 +31,12 @@ class FlowTemplate:
     tags: tuple[str, ...] = field(default_factory=tuple)
 
 
-def studio_video_bot(*, telegram_credential_id: str = "", llm_credential_id: str = "") -> dict:
+def studio_video_bot(
+    *,
+    telegram_credential_id: str = "",
+    llm_credential_id: str = "",
+    llm_provider: str = "anthropic",
+) -> dict:
     """A Telegram bot that turns photographs into a wedding invitation film.
 
     The shape of this graph is the answer to "how does a conversation fit in a
@@ -73,10 +78,10 @@ def studio_video_bot(*, telegram_credential_id: str = "", llm_credential_id: str
                 "position": {"x": 560, "y": 140},
                 "config": {
                     "action": "add_photo",
-                    "chat_id": "{{ input.chat_id }}",
-                    "artifact_id": "{{ input.photos.0.artifact_id }}",
-                    "file_unique_id": "{{ input.photos.0.file_unique_id }}",
-                    "caption": "{{ input.text }}",
+                    "chat_id": "{{ nodes.inbox.output.chat_id }}",
+                    "artifact_id": "{{ nodes.inbox.output.photos.0.artifact_id }}",
+                    "file_unique_id": "{{ nodes.inbox.output.photos.0.file_unique_id }}",
+                    "caption": "{{ nodes.inbox.output.text }}",
                 },
             },
             {
@@ -87,7 +92,7 @@ def studio_video_bot(*, telegram_credential_id: str = "", llm_credential_id: str
                 "config": {
                     "credential_id": tg,
                     "action": "send",
-                    "chat_id": "{{ input.chat_id }}",
+                    "chat_id": "{{ nodes.inbox.output.chat_id }}",
                     "text": (
                         "{{ input.photo_count }} photo(s) saved. "
                         "Send more, or /make when you are ready."
@@ -104,9 +109,13 @@ def studio_video_bot(*, telegram_credential_id: str = "", llm_credential_id: str
                 "config": {
                     "match": "any",
                     "comparisons": [
-                        {"left": "{{ input.command }}", "operator": "equals", "right": "/make"},
                         {
-                            "left": "{{ input.callback_data }}",
+                            "left": "{{ nodes.inbox.output.command }}",
+                            "operator": "equals",
+                            "right": "/make",
+                        },
+                        {
+                            "left": "{{ nodes.inbox.output.callback_data }}",
                             "operator": "equals",
                             "right": "again",
                         },
@@ -118,7 +127,7 @@ def studio_video_bot(*, telegram_credential_id: str = "", llm_credential_id: str
                 "type": "session.state",
                 "name": "One at a time",
                 "position": {"x": 820, "y": 340},
-                "config": {"action": "lock", "chat_id": "{{ input.chat_id }}"},
+                "config": {"action": "lock", "chat_id": "{{ nodes.inbox.output.chat_id }}"},
             },
             {
                 "id": "free",
@@ -139,7 +148,7 @@ def studio_video_bot(*, telegram_credential_id: str = "", llm_credential_id: str
                 "config": {
                     "credential_id": tg,
                     "action": "send",
-                    "chat_id": "{{ input.chat_id }}",
+                    "chat_id": "{{ nodes.inbox.output.chat_id }}",
                     "text": "Still making the last one. I will send it here when it is done.",
                 },
             },
@@ -151,7 +160,7 @@ def studio_video_bot(*, telegram_credential_id: str = "", llm_credential_id: str
                 "config": {
                     "credential_id": tg,
                     "action": "send",
-                    "chat_id": "{{ input.chat_id }}",
+                    "chat_id": "{{ nodes.inbox.output.chat_id }}",
                     "text": "Making your invitation. About a minute.",
                 },
             },
@@ -160,7 +169,7 @@ def studio_video_bot(*, telegram_credential_id: str = "", llm_credential_id: str
                 "type": "session.state",
                 "name": "The job so far",
                 "position": {"x": 1600, "y": 220},
-                "config": {"action": "read", "chat_id": "{{ input.chat_id }}"},
+                "config": {"action": "read", "chat_id": "{{ nodes.inbox.output.chat_id }}"},
             },
             # The director. Optional in spirit: if the model returns nonsense,
             # `merge_details` keeps the card it already had.
@@ -171,6 +180,11 @@ def studio_video_bot(*, telegram_credential_id: str = "", llm_credential_id: str
                 "position": {"x": 1860, "y": 220},
                 "config": {
                     "credential_id": llm_credential_id,
+                    # Taken from the credential at install time. A node saying
+                    # "anthropic" holding an OpenAI key calls the wrong
+                    # vendor's endpoint with the right secret, and the error
+                    # that comes back explains none of that.
+                    "provider": llm_provider,
                     "system": (
                         "You turn a photographer's note into the fields of a wedding "
                         "invitation card. Reply with JSON only, no prose, using these keys "
@@ -238,7 +252,7 @@ def studio_video_bot(*, telegram_credential_id: str = "", llm_credential_id: str
                 "type": "session.state",
                 "name": "Unlock",
                 "position": {"x": 2900, "y": 220},
-                "config": {"action": "unlock", "chat_id": "{{ input.chat_id }}"},
+                "config": {"action": "unlock", "chat_id": "{{ nodes.inbox.output.chat_id }}"},
             },
             # --- was it the approve button? -------------------------------
             {
@@ -248,7 +262,11 @@ def studio_video_bot(*, telegram_credential_id: str = "", llm_credential_id: str
                 "position": {"x": 820, "y": 620},
                 "config": {
                     "comparisons": [
-                        {"left": "{{ input.callback_data }}", "operator": "equals", "right": "ok"}
+                        {
+                            "left": "{{ nodes.inbox.output.callback_data }}",
+                            "operator": "equals",
+                            "right": "ok",
+                        }
                     ]
                 },
             },
@@ -260,7 +278,7 @@ def studio_video_bot(*, telegram_credential_id: str = "", llm_credential_id: str
                 "config": {
                     "credential_id": tg,
                     "action": "send",
-                    "chat_id": "{{ input.chat_id }}",
+                    "chat_id": "{{ nodes.inbox.output.chat_id }}",
                     "text": (
                         "Lovely. The video above is yours to forward. Send new photos "
                         "whenever you want another."
@@ -268,14 +286,54 @@ def studio_video_bot(*, telegram_credential_id: str = "", llm_credential_id: str
                 },
             },
             {
-                "id": "help",
-                "type": "telegram.reply",
-                "name": "How it works",
+                "id": "is_note",
+                "type": "logic.condition",
+                "name": "A note?",
                 "position": {"x": 1080, "y": 720},
+                "config": {
+                    "match": "all",
+                    "comparisons": [
+                        {
+                            "left": "{{ nodes.inbox.output.text }}",
+                            "operator": "is_not_empty",
+                        },
+                        {"left": "{{ nodes.inbox.output.command }}", "operator": "is_empty"},
+                    ],
+                },
+            },
+            {
+                "id": "note",
+                "type": "session.state",
+                "name": "Remember the brief",
+                "position": {"x": 1340, "y": 660},
+                "config": {
+                    "action": "update",
+                    "chat_id": "{{ nodes.inbox.output.chat_id }}",
+                    "brief": "{{ nodes.inbox.output.text }}",
+                },
+            },
+            {
+                "id": "noted",
+                "type": "telegram.reply",
+                "name": "Confirm the brief",
+                "position": {"x": 1600, "y": 660},
                 "config": {
                     "credential_id": tg,
                     "action": "send",
                     "chat_id": "{{ input.chat_id }}",
+                    "text": "Noted. Send /make when you are ready and I will put it together.",
+                    "silent": True,
+                },
+            },
+            {
+                "id": "help",
+                "type": "telegram.reply",
+                "name": "How it works",
+                "position": {"x": 1340, "y": 860},
+                "config": {
+                    "credential_id": tg,
+                    "action": "send",
+                    "chat_id": "{{ nodes.inbox.output.chat_id }}",
                     "text": (
                         "Send me the couple's photos, then a note with the names, the "
                         "date, the venue and the functions. Then send /make and I will "
@@ -301,7 +359,10 @@ def studio_video_bot(*, telegram_credential_id: str = "", llm_credential_id: str
             {"source": "release", "target": "unlock"},
             {"source": "is_make", "target": "is_ok", "source_handle": "false"},
             {"source": "is_ok", "target": "thanks", "source_handle": "true"},
-            {"source": "is_ok", "target": "help", "source_handle": "false"},
+            {"source": "is_ok", "target": "is_note", "source_handle": "false"},
+            {"source": "is_note", "target": "note", "source_handle": "true"},
+            {"source": "note", "target": "noted"},
+            {"source": "is_note", "target": "help", "source_handle": "false"},
         ],
     }
 

@@ -337,15 +337,23 @@ class Engine:
             log.warning("skill.load_count_failed", skill_id=str(skill_id))
 
     async def _session_state(self, **kwargs: Any) -> dict[str, Any]:
-        """One conversation's state, for a bot flow. See `bot_sessions.apply`."""
+        """One conversation's state, for a bot flow. See `bot_sessions.apply`.
+
+        Behind `self._db` like every other database call on the engine. Nodes
+        in a wave run concurrently and share one AsyncSession, which permits
+        exactly one operation at a time — without the lock, two session nodes
+        in the same wave raise "concurrent operations are not permitted", and
+        the bot answers nothing.
+        """
         from basivo_orch.flows import bot_sessions
 
-        return await bot_sessions.apply(
-            self.session,
-            organization_id=self.run.organization_id,
-            flow_id=self.run.flow_id,
-            **kwargs,
-        )
+        async with self._db:
+            return await bot_sessions.apply(
+                self.session,
+                organization_id=self.run.organization_id,
+                flow_id=self.run.flow_id,
+                **kwargs,
+            )
 
     def _downstream(self, node_id: str, port: str) -> list[dict[str, str]]:
         """Which nodes are wired to one of this node's output ports.
