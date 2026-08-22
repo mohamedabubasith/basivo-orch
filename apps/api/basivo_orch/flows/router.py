@@ -193,6 +193,7 @@ async def install_flow_template(
 
     # The agent node has to name the same provider as the credential it uses.
     llm_provider = "anthropic"
+    llm_model = payload.llm_model.strip()
     if payload.llm_credential_id:
         from basivo_orch.credentials.models import Credential
 
@@ -202,12 +203,32 @@ async def install_flow_template(
             record = None
         if record is not None and record.organization_id == context.organization_id:
             llm_provider = record.provider
+            if not llm_model:
+                # Asked, not invented. Model names change constantly and a
+                # guessed one fails on the operator's first message rather than
+                # here; the account's own list is the only honest source. If
+                # the provider has no catalogue the field stays blank and the
+                # node says so plainly when it runs.
+                from basivo_orch.credentials.crypto import decrypt as _decrypt
+                from basivo_orch.credentials.model_catalog import fetch_models
+
+                try:
+                    available = await fetch_models(
+                        record.provider,
+                        api_key=_decrypt(record.secret_encrypted),
+                        base_url=record.base_url or "",
+                        options=record.options or {},
+                    )
+                    llm_model = available[0] if available else ""
+                except Exception:  # noqa: BLE001 - an install must not fail on this
+                    llm_model = ""
 
     graph = Graph.model_validate(
         template.build(
             telegram_credential_id=payload.telegram_credential_id,
             llm_credential_id=payload.llm_credential_id,
             llm_provider=llm_provider,
+            llm_model=llm_model,
         )
     )
     try:

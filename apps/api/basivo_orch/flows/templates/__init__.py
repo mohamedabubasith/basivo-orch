@@ -36,6 +36,7 @@ def studio_video_bot(
     telegram_credential_id: str = "",
     llm_credential_id: str = "",
     llm_provider: str = "anthropic",
+    llm_model: str = "",
 ) -> dict:
     """A Telegram bot that turns photographs into a wedding invitation film.
 
@@ -171,8 +172,6 @@ def studio_video_bot(
                 "position": {"x": 1600, "y": 220},
                 "config": {"action": "read", "chat_id": "{{ nodes.inbox.output.chat_id }}"},
             },
-            # The director. Optional in spirit: if the model returns nonsense,
-            # `merge_details` keeps the card it already had.
             {
                 "id": "director",
                 "type": "agent.llm",
@@ -185,15 +184,22 @@ def studio_video_bot(
                     # vendor's endpoint with the right secret, and the error
                     # that comes back explains none of that.
                     "provider": llm_provider,
+                    "model": llm_model,
                     "system": (
-                        "You turn a photographer's note into the fields of a wedding "
-                        "invitation card. Reply with JSON only, no prose, using these keys "
-                        "when the note gives you them: bride, groom, joiner, date_line, "
-                        "time_line, venue, closing, header_symbol, palette, functions "
-                        "(a list of {name, when, where}). Leave out anything the note does "
-                        "not mention rather than inventing it — a wrong date on an "
-                        "invitation is worse than a missing one. palette must be one of "
-                        "maroon_gold, ivory_gold, emerald_gold, blush_rose, royal_blue."
+                        "You turn a photographer's rough note into a brief for whoever "
+                        "designs the video. Write plain prose, no JSON, no preamble.\n\n"
+                        "Say what the video is for (a wedding invitation, an engagement "
+                        "announcement, a birthday), then every fact the note gives you, "
+                        "spelled exactly as written: names, dates, times, venues, the "
+                        "order of functions. Never invent, correct or complete a fact — a "
+                        "wrong date on an invitation is worse than a missing one, and you "
+                        "cannot tell which detail the family will check first.\n\n"
+                        "Then describe how it should look and feel in two or three "
+                        "sentences: colours, the mood, how the photographs should be used, "
+                        "what should be on screen at the start and at the end. Where the "
+                        "note says nothing, choose something appropriate to the occasion "
+                        "and the culture it plainly belongs to, and say so plainly rather "
+                        "than hedging."
                     ),
                     "prompt": "{{ input.brief }}",
                     "max_iterations": 1,
@@ -201,18 +207,25 @@ def studio_video_bot(
             },
             {
                 "id": "film",
-                "type": "video.invitation",
-                "name": "The invitation",
+                "type": "video.generate",
+                "name": "Make the video",
                 "position": {"x": 2120, "y": 220},
                 "config": {
+                    "credential_id": llm_credential_id,
+                    "provider": llm_provider,
+                    "model": llm_model,
+                    # What the operator typed, put in front of a model that
+                    # writes the animation. This is the path a studio can take
+                    # anywhere — an engagement film, a house-warming, a temple
+                    # function — without anyone adding a node for each one.
+                    "brief": "{{ nodes.director.output.text }}",
                     "photos": "{{ nodes.job.output.photo_ids }}",
-                    "details": "{{ nodes.director.output.text }}",
-                    "bride": "",
-                    "groom": "",
-                    "seconds": 22,
-                    "aspect": "9:16",
-                    "palette": "maroon_gold",
+                    "duration_seconds": 20,
+                    "size": "story",
                     "quality": "standard",
+                    "fps": 30,
+                    "max_attempts": 3,
+                    "filename": "video",
                 },
             },
             {

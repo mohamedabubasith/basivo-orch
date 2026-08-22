@@ -209,3 +209,52 @@ def test_a_montage_really_renders_to_an_mp4(tmp_path):
     )
     assert data[4:12] == b"ftypisom" or b"ftyp" in data[:16], "not an MP4"
     assert len(data) > 20_000, f"suspiciously small: {len(data)} bytes"
+
+
+# ---------------------------------------------------------------------------
+# Photographs in an agent-written composition
+# ---------------------------------------------------------------------------
+
+
+def test_a_composition_may_only_use_the_photographs_it_was_given():
+    """A browser renders a missing image as nothing at all.
+
+    No error, no log, just a blank where a photograph should be — found when
+    someone watches the finished video. The model is told exactly which names
+    exist, so asking for another is a mistake worth sending back rather than
+    rendering.
+    """
+    from basivo_orch.flows.nodes.video import missing_images
+
+    available = {"p0.jpg", "p1.jpg"}
+
+    assert missing_images('<img src="p0.jpg"><img src="p1.jpg">', available) == []
+
+    invented = missing_images('<img src="couple-hero.jpg">', available)
+    assert len(invented) == 1
+    assert "couple-hero.jpg" in invented[0]
+    assert "p0.jpg, p1.jpg" in invented[0], "the model is told what it may use instead"
+
+
+def test_an_external_image_is_refused():
+    """The renderer has no network for assets, so a remote URL is an empty
+    frame — and a composition reaching out to one is also an exfiltration path
+    for whatever ends up in the URL."""
+    from basivo_orch.flows.nodes.video import missing_images
+
+    problems = missing_images('<img src="https://images.example.com/couple.jpg">', {"p0.jpg"})
+    assert problems and "no network" in problems[0]
+
+
+def test_the_gsap_tag_is_not_mistaken_for_a_missing_asset():
+    """It is in the shell we provide, not something the model chose."""
+    from basivo_orch.flows.nodes.video import missing_images
+
+    shell = '<script src="https://cdn.jsdelivr.net/npm/gsap@3/dist/gsap.min.js"></script>'
+    assert missing_images(shell, set()) == []
+
+
+def test_data_uris_and_anchors_are_left_alone():
+    from basivo_orch.flows.nodes.video import missing_images
+
+    assert missing_images('<img src="data:image/png;base64,AAA"><a href="#end">x</a>', set()) == []

@@ -33,6 +33,9 @@ class TemplateInstall(BaseModel):
     name: str | None = Field(default=None, max_length=160)
     telegram_credential_id: str = Field(default="", max_length=64)
     llm_credential_id: str = Field(default="", max_length=64)
+    #: Left blank, install asks the credential's provider what models the
+    #: account has and takes the first.
+    llm_model: str = Field(default="", max_length=160)
 
 
 class TelegramConnect(BaseModel):

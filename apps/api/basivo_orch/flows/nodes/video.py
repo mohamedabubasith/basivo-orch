@@ -111,6 +111,38 @@ def strip_code_fences(text: str) -> str:
     return body.strip()
 
 
+def missing_images(html: str, available: set[str]) -> list[str]:
+    """Filenames the composition asks for that will not be there.
+
+    A browser renders a missing image as nothing at all: no error, no log, just
+    a blank where a photograph should be, discovered when someone watches the
+    finished video. Since the model is told exactly which names exist, asking
+    for another is a mistake worth sending back to it rather than rendering.
+
+    External URLs are the same failure with a different cause — the renderer
+    has no network for assets — so they are reported together.
+    """
+    import re as _re
+
+    asked = set(_re.findall(r"""(?:src|href)=["']([^"']+)["']""", html))
+    problems: list[str] = []
+    for reference in sorted(asked):
+        if reference.startswith(("data:", "#")):
+            continue
+        if reference.startswith(("http://", "https://")):
+            # The GSAP tag is the one exception, and it is in the shell we
+            # provide rather than something the model chose.
+            if "gsap" not in reference:
+                problems.append(f"references {reference}, and the renderer has no network")
+            continue
+        if reference not in available:
+            problems.append(
+                f"references {reference!r}, which does not exist"
+                + (f" (available: {', '.join(sorted(available))})" if available else "")
+            )
+    return problems
+
+
 def composition_problems(html: str) -> list[str]:
     """What is missing from this composition, in words a person can act on.
 
@@ -526,9 +558,15 @@ async def probe_composition(
     return visible, errors
 
 
-def review(html: str, visible: dict[float, list[str]], errors: list[str]) -> list[str]:
+def review(
+    html: str,
+    visible: dict[float, list[str]],
+    errors: list[str],
+    available_images: set[str] | None = None,
+) -> list[str]:
     """Everything wrong with this composition, phrased for the model that wrote it."""
     problems = composition_problems(html)
+    problems += missing_images(html, available_images or set())
     problems += [f"JavaScript error: {error}" for error in errors]
 
     empty = [str(moment) for moment, texts in visible.items() if not texts]
@@ -564,6 +602,12 @@ class VideoGeneratorConfig(BaseModel):
     )
     duration_seconds: int = Field(default=6, ge=2, le=60)
     size: Literal["landscape", "square", "story"] = "landscape"
+
+    #: Photographs the composition may use, as artifact ids or a reference —
+    #: usually {{ input.photo_ids }} from a conversation. Without these an
+    #: agent-written video can only be type and colour, which for a photography
+    #: studio is the whole thing missing.
+    photos: str = Field(default="", title="Photos", max_length=4_000)
 
     provider: str = Field(default="openai", max_length=48)
     model: str = Field(default="", max_length=160)
@@ -654,11 +698,42 @@ class VideoGeneratorNode(Node):
             else float(config.duration_seconds)
         )
 
+        # Photographs become real files beside index.html, and the model is
+        # told their names. It cannot be allowed to invent one: a filename that
+        # does not exist renders as an empty box, silently, in the middle of
+        # someone's wedding video.
+        from basivo_orch.flows.nodes.montage import _photo_ids
+
+        photo_assets: dict[str, bytes] = {}
+        if config.photos.strip():
+            wanted = _photo_ids(render_value(config.photos, ctx.template_context()))
+            for index, artifact_id in enumerate(wanted[:12]):
+                if ctx.load_artifact and (blob := await ctx.load_artifact(artifact_id)):
+                    photo_assets[f"p{index}.jpg"] = blob
+            await ctx.step("video.photos", {"count": len(photo_assets)})
+
         instructions = (
             f"{COMPOSITION_INSTRUCTIONS}\n\n"
             f"This composition is {width}x{height}, exactly {target_seconds:g} seconds, "
             f"{config.fps}fps."
         )
+        if photo_assets:
+            instructions += (
+                "\n\nPHOTOGRAPHS ARE PROVIDED, sitting beside your HTML file. Reference "
+                "them by these exact names and no others: "
+                + ", ".join(photo_assets)
+                + ".\n"
+                "- Use every one of them, in order, unless the brief says otherwise.\n"
+                '- Full bleed: <img src="p0.jpg"> with width:100%; height:100%; '
+                "object-fit:cover.\n"
+                "- Give each one slow movement (a scale from 1.05 to 1.15 over its whole "
+                "time on screen) and cross-fade between them. A photograph held perfectly "
+                "still reads as a broken video.\n"
+                "- Put text over a darkened band or below the picture, never across a "
+                "face.\n"
+                "- Do not invent any other filename, and do not use an external URL: "
+                "there is no network and the frame would render empty."
+            )
         if config.narration:
             instructions += (
                 "\n\nA VOICE IS ALREADY RECORDED for this video and will play over it. "
@@ -697,6 +772,7 @@ class VideoGeneratorNode(Node):
                 *await probe_composition(
                     html, width=width, height=height, duration=float(config.duration_seconds)
                 ),
+                available_images=set(photo_assets),
             )
             await ctx.step(
                 "video.attempt",
@@ -757,7 +833,7 @@ class VideoGeneratorNode(Node):
             preview_id = saved_preview["artifact_id"]
             await ctx.step("video.preview", saved_preview)
 
-        assets: dict[str, bytes] = {}
+        assets: dict[str, bytes] = dict(photo_assets)
         narration_id = ""
         if config.narration and narration_audio:
             lines = caption_lines(words) if config.captions else []
