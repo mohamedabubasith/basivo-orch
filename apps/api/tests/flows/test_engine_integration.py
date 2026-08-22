@@ -1369,6 +1369,7 @@ EXERCISED_NODE_TYPES = {
     # would assert less while costing a real render.
     "image.edit",
     "video.montage",
+    "video.invitation",
     "trigger.telegram",
     "telegram.reply",
     "session.state",

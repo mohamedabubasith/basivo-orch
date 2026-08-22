@@ -120,6 +120,25 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright
 RUN playwright install --with-deps chromium \
     && chmod -R a+rX /opt/playwright
 
+# Fonts, because this renders wedding invitations in India.
+#
+# Playwright's dependency set brings Liberation and nothing else, so a name in
+# Tamil or Devanagari renders as a row of empty boxes — a failure that looks
+# like a bug in the customer's phone rather than a missing package, and one
+# nobody notices until an invitation goes out. `fonts-indic` covers Devanagari,
+# Tamil, Telugu, Kannada, Malayalam, Gujarati, Bengali and Gurmukhi.
+#
+# EB Garamond is here for a different reason: an invitation set in DejaVu Serif
+# looks like a spreadsheet, and the default serif on a bare Linux container is
+# DejaVu Serif.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        fonts-indic \
+        fonts-noto-core \
+        fonts-ebgaramond \
+    && rm -rf /var/lib/apt/lists/* \
+    && fc-cache -f >/dev/null 2>&1 || true
+
 # HyperFrames renders with puppeteer-core, which bundles NO browser: left to
 # itself it downloads Chrome 152 from Google on the first render, into every
 # fresh container, and fails outright if that download is blocked. So it is
