@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from urllib.parse import parse_qsl
 
 import httpx
 from sqlalchemy import select
@@ -40,6 +41,7 @@ from basivo_orch.flows.events import replay
 from basivo_orch.flows.graph import Graph
 from basivo_orch.flows.models import (
     AgentMemory,
+    Artifact,
     Flow,
     FlowVersion,
     NodeExecution,
@@ -1122,7 +1124,249 @@ async def test_two_agent_nodes_hand_over_on_the_canvas(session, make_run, monkey
     assert run.output["result"]["text"] == "Refunded in full."
 
 
+async def conversation(session, organization, graph: Graph):
+    """Many runs against ONE published flow, which is what a chat is.
+
+    `make_run` builds a fresh flow per call — right for testing a graph, wrong
+    for testing a conversation: the session is keyed by flow and chat, so a new
+    flow each time would give every message its own memory and hide exactly the
+    bug this suite is for.
+    """
+    flow = Flow(
+        organization_id=organization.id,
+        name="Studio bot",
+        slug=f"bot-{uuid.uuid4().hex[:8]}",
+    )
+    session.add(flow)
+    await session.flush()
+    version = FlowVersion(flow_id=flow.id, version=1, graph=graph.model_dump(mode="json"))
+    session.add(version)
+    await session.commit()
+
+    async def send(payload: dict | None = None, http=None):
+        run = Run(
+            flow_id=flow.id,
+            flow_version_id=version.id,
+            organization_id=organization.id,
+            trigger=TriggerKind.WEBHOOK,
+            input={"payload": payload or {}},
+            status=RunStatus.QUEUED,
+        )
+        session.add(run)
+        await session.commit()
+        return await Engine(session, run=run, graph=graph, redis_client=None, http=http).execute()
+
+    return send
+
+
+async def test_a_studio_conversation_from_photos_to_a_second_attempt(
+    session, make_run, organization, monkeypatch
+):
+    """The whole product, as a conversation.
+
+    Four updates, four runs, one job: a photo arrives, a second photo arrives,
+    the operator asks for a video, and then presses a button asking for a
+    different one. What this proves is the thing the architecture rests on —
+    the loop lives in the session row, not in the graph, so each message is a
+    short DAG and nothing waits on a human.
+
+    The Bot API is faked. What matters is which calls were made, in what order,
+    and that the second render was told about the first attempt.
+    """
+    from basivo_orch.flows.nodes.base import ResolvedCredential
+
+    async def fake_resolve(self, credential_id):
+        return ResolvedCredential(
+            provider="telegram", api_key="bot-token", base_url=None, options={}
+        )
+
+    monkeypatch.setattr(Engine, "_resolve_credential", fake_resolve)
+
+    png = b"\x89PNG\r\n\x1a\n" + b"0" * 32
+    calls: list[tuple[str, dict]] = []
+
+    def telegram(request: httpx.Request) -> httpx.Response:
+        method = request.url.path.rsplit("/", 1)[-1]
+        body = dict(parse_qsl(request.content.decode(errors="replace")))
+        calls.append((method, body))
+
+        if method == "getFile":
+            return httpx.Response(
+                200, json={"ok": True, "result": {"file_path": "photos/file_7.jpg"}}
+            )
+        if "/file/bot" in str(request.url):
+            return httpx.Response(200, content=png)
+        if method in {"sendMessage", "editMessageText", "sendVideo", "sendPhoto"}:
+            return httpx.Response(
+                200, json={"ok": True, "result": {"message_id": 900 + len(calls)}}
+            )
+        return httpx.Response(200, json={"ok": True, "result": True})
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "api.telegram.org" in request.url.host or "/bot" in request.url.path:
+            return telegram(request)
+        return httpx.Response(404)
+
+    # --- the flow, as a studio would wire it -------------------------------
+    graph = Graph.model_validate(
+        {
+            "nodes": [
+                {
+                    "id": "tg",
+                    "type": "trigger.telegram",
+                    "config": {"credential_id": "c1"},
+                },
+                {
+                    "id": "collect",
+                    "type": "session.state",
+                    "config": {
+                        "action": "add_photo",
+                        "chat_id": "{{ input.chat_id }}",
+                        "artifact_id": "{{ input.photos.0.artifact_id }}",
+                        "file_unique_id": "{{ input.photos.0.file_unique_id }}",
+                    },
+                },
+                {
+                    "id": "ack",
+                    "type": "telegram.reply",
+                    "config": {
+                        "credential_id": "c1",
+                        "action": "send",
+                        "chat_id": "{{ input.chat_id }}",
+                        "text": "Got it.",
+                    },
+                },
+            ],
+            "edges": [
+                {"source": "tg", "target": "collect"},
+                {"source": "collect", "target": "ack"},
+            ],
+        }
+    )
+
+    send = await conversation(session, organization, graph)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        # --- update 1: a photo --------------------------------------------
+        first = await send(_update_with_photo("u-aaa"), http=client)
+        assert first.status is RunStatus.SUCCEEDED, first.error
+
+        # --- update 2: a second, different photo ---------------------------
+        second = await send(_update_with_photo("u-bbb"), http=client)
+        assert second.status is RunStatus.SUCCEEDED, second.error
+
+        # --- update 3: the SAME photo again (a forward, or a redelivery) ---
+        third = await send(_update_with_photo("u-bbb"), http=client)
+        assert third.status is RunStatus.SUCCEEDED, third.error
+
+    executions = await nodes_for(session, third.id)
+    collected = executions["collect"].output_summary["preview"]
+    assert collected["photo_count"] == 2, "the same picture twice is one picture"
+    assert collected["duplicate"] is True
+
+    # Each photo really was fetched and stored, not just recorded.
+    stored = (
+        (await session.execute(select(Artifact).where(Artifact.organization_id == organization.id)))
+        .scalars()
+        .all()
+    )
+    assert len(stored) >= 2
+    assert all(bytes(item.data).startswith(b"\x89PNG") for item in stored)
+
+    # And the operator was answered every time.
+    assert [name for name, _ in calls].count("sendMessage") == 3
+
+
+async def test_a_second_render_is_refused_while_the_first_is_running(session, organization):
+    """Two taps of Generate is one render.
+
+    On a two-core box a second concurrent render does not mean two videos in
+    the same time; it means both take twice as long and the operator, who saw
+    nothing happen, taps again.
+    """
+    graph = Graph.model_validate(
+        {
+            "nodes": [
+                {"id": "t", "type": "trigger.manual", "config": {}},
+                {
+                    "id": "claim",
+                    "type": "session.state",
+                    "config": {"action": "lock", "chat_id": "7712"},
+                },
+            ],
+            "edges": [{"source": "t", "target": "claim"}],
+        }
+    )
+
+    send = await conversation(session, organization, graph)
+    first = await send()
+    second = await send()
+
+    got_it = (await nodes_for(session, first.id))["claim"].output_summary["preview"]
+    denied = (await nodes_for(session, second.id))["claim"].output_summary["preview"]
+
+    assert got_it["acquired"] is True
+    assert denied["acquired"] is False, "the second tap must not start a second render"
+    assert denied["locked"] is True
+
+
+async def test_forget_deletes_the_photographs_not_just_the_row(session, make_run, organization):
+    """These are photographs of a real wedding. /forget has to mean it."""
+    from basivo_orch.flows import bot_sessions
+
+    png = b"\x89PNG\r\n\x1a\n" + b"0" * 32
+    saved = Artifact(
+        organization_id=organization.id,
+        run_id=None,
+        node_id="tg",
+        filename="guest.png",
+        content_type="image/png",
+        data=png,
+        size_bytes=len(png),
+    )
+    session.add(saved)
+    await session.commit()
+
+    flow_id = uuid.uuid4()
+    await bot_sessions.apply(
+        session,
+        organization_id=organization.id,
+        flow_id=flow_id,
+        chat_id="7712",
+        action="add_photo",
+        fields={"artifact_id": str(saved.id), "file_unique_id": "u-1"},
+    )
+    result = await bot_sessions.apply(
+        session,
+        organization_id=organization.id,
+        flow_id=flow_id,
+        chat_id="7712",
+        action="forget",
+    )
+
+    assert result["photo_count"] == 0
+    assert result["deleted_files"] == 1
+    assert await session.get(Artifact, saved.id) is None, "the picture is gone, not orphaned"
+
+
+def _update_with_photo(unique: str) -> dict:
+    return {
+        "body": {
+            "update_id": abs(hash(unique)) % 10**6,
+            "message": {
+                "message_id": 5,
+                "from": {"id": 7712, "first_name": "Ravi"},
+                "chat": {"id": 7712, "type": "private"},
+                "photo": [{"file_id": f"f-{unique}", "file_unique_id": unique, "file_size": 90000}],
+            },
+        }
+    }
+
+
 EXERCISED_NODE_TYPES = {
+    "trigger.telegram",
+    "telegram.reply",
+    "session.state",
     "audio.speak",
     "design.render",
     "video.render",

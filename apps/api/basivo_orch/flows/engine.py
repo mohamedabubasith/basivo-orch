@@ -336,6 +336,17 @@ class Engine:
         except Exception:  # pragma: no cover - telemetry, never load-bearing
             log.warning("skill.load_count_failed", skill_id=str(skill_id))
 
+    async def _session_state(self, **kwargs: Any) -> dict[str, Any]:
+        """One conversation's state, for a bot flow. See `bot_sessions.apply`."""
+        from basivo_orch.flows import bot_sessions
+
+        return await bot_sessions.apply(
+            self.session,
+            organization_id=self.run.organization_id,
+            flow_id=self.run.flow_id,
+            **kwargs,
+        )
+
     def _downstream(self, node_id: str, port: str) -> list[dict[str, str]]:
         """Which nodes are wired to one of this node's output ports.
 
@@ -639,6 +650,7 @@ class Engine:
                 save_memory=self._save_memory,
                 load_skills=self._load_skills,
                 record_skill_load=self._record_skill_load,
+                session_state=self._session_state,
                 downstream=lambda port, _id=node.id: self._downstream(_id, port),
                 http=http,
             )

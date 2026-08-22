@@ -25,17 +25,21 @@ from basivo_orch.flows.nodes.design import RenderNode
 from basivo_orch.flows.nodes.gitops import AutofixNode, CommentNode, TicketNode
 from basivo_orch.flows.nodes.http import HttpRequestNode, assert_public_url
 from basivo_orch.flows.nodes.logic import FALSE_PORT, TRUE_PORT, ConditionNode, SetVariablesNode
+from basivo_orch.flows.nodes.session import SessionNode
 from basivo_orch.flows.nodes.social import SocialPostNode
 from basivo_orch.flows.nodes.speech import SpeakNode
+from basivo_orch.flows.nodes.telegram import TelegramReplyNode
 from basivo_orch.flows.nodes.triggers import (
     ManualTriggerNode,
     ScheduleTriggerNode,
+    TelegramTriggerNode,
     WebhookTriggerNode,
 )
 from basivo_orch.flows.nodes.video import VideoGeneratorNode, VideoRenderNode
 
 _NODES: tuple[type[Node], ...] = (
     ManualTriggerNode,
+    TelegramTriggerNode,
     WebhookTriggerNode,
     ScheduleTriggerNode,
     HttpRequestNode,
@@ -47,7 +51,9 @@ _NODES: tuple[type[Node], ...] = (
     AutofixNode,
     CommentNode,
     RenderNode,
+    SessionNode,
     SocialPostNode,
+    TelegramReplyNode,
     SpeakNode,
     VideoRenderNode,
     VideoGeneratorNode,

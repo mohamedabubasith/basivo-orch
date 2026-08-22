@@ -18,11 +18,13 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import uuid
 from collections.abc import Mapping
 from typing import Any
 
 from fastapi import HTTPException, status
 
+from basivo_orch.auth.settings import get_settings as get_auth_settings
 from basivo_orch.flows.nodes.triggers import WebhookTriggerConfig
 
 #: Headers that must never land in the run's stored payload. The whole
@@ -37,6 +39,7 @@ _SCRUBBED_HEADERS = frozenset(
         "x-gitlab-token",
         "x-hub-signature",
         "x-hub-signature-256",
+        "x-telegram-bot-api-secret-token",
     }
 )
 
@@ -67,7 +70,9 @@ def authenticate_hook(
         expected = "sha256=" + hmac.new(key, raw_body, hashlib.sha256).hexdigest()
         if hmac.compare_digest(signature.encode(), expected.encode()):
             return
-    for header in ("x-gitlab-token", "x-webhook-secret"):
+    # Telegram sends the exact string given to setWebhook, on every update.
+    # Same shape as GitLab's: a shared secret, verbatim, in a header.
+    for header in ("x-gitlab-token", "x-webhook-secret", "x-telegram-bot-api-secret-token"):
         if presented := headers.get(header):
             if hmac.compare_digest(presented.encode(), key):
                 return
@@ -128,3 +133,34 @@ def hook_idempotency_key(headers: Mapping[str, str]) -> str | None:
     if delivery := headers.get("x-gitlab-event-uuid"):
         return f"gl-{delivery}"
     return None
+
+
+def telegram_idempotency_key(body: Any) -> str | None:
+    """Telegram's guarantee is at-least-once, and it means it.
+
+    An update is redelivered until the webhook answers 200 — so a slow reply,
+    a deploy mid-request, or a 502 all produce the same update again. Without
+    this, one photo becomes three photos in the session and one /generate
+    becomes three renders of the same job, which on a two-core box is the whole
+    afternoon.
+
+    `update_id` is monotonic per bot and stable across redeliveries, which is
+    exactly what the run table's idempotency column wants.
+    """
+    if isinstance(body, dict) and (update_id := body.get("update_id")) is not None:
+        return f"tg-{update_id}"
+    return None
+
+
+def telegram_hook_secret(flow_id: uuid.UUID) -> str:
+    """The secret Telegram sends back on every update for this flow.
+
+    Derived, not stored. Telegram only ever repeats the string given to
+    `setWebhook`, so both ends can compute it from something both ends already
+    have — which means no column, no migration, no secret sitting in a flow's
+    config where an exported graph would carry it. Rotating the deployment's
+    SECRET_KEY rotates every bot's webhook secret, which is the correct
+    blast radius for a key compromise.
+    """
+    key = get_auth_settings().secret_key.get_secret_value().encode()
+    return hmac.new(key, f"telegram-hook:{flow_id}".encode(), hashlib.sha256).hexdigest()

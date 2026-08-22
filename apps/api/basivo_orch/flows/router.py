@@ -63,6 +63,8 @@ from basivo_orch.flows.webhooks import (
     authenticate_hook,
     ensure_method_allowed,
     hook_idempotency_key,
+    telegram_hook_secret,
+    telegram_idempotency_key,
     wrap_hook_payload,
 )
 
@@ -745,27 +747,44 @@ async def inbound_hook(
     if version is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, _HOOK_404)
     graph = Graph.model_validate(version.graph)
-    trigger = next((node for node in graph.nodes if node.type == "trigger.webhook"), None)
+    trigger = next(
+        (node for node in graph.nodes if node.type in {"trigger.webhook", "trigger.telegram"}),
+        None,
+    )
     if trigger is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, _HOOK_404)
-    config = WebhookTriggerConfig.model_validate(trigger.config)
 
     raw_body = await request.body()
+    telegram = trigger.type == "trigger.telegram"
+    if telegram:
+        # A bot's secret is generated when the bot is connected, not typed by
+        # the person: Telegram only ever sends the value given to setWebhook,
+        # so there is nothing for a studio owner to invent or keep in sync.
+        config = WebhookTriggerConfig(
+            require_signature=True,
+            secret=telegram_hook_secret(flow.id),
+            methods=["POST"],
+        )
+    else:
+        config = WebhookTriggerConfig.model_validate(trigger.config)
+
     authenticate_hook(config, raw_body=raw_body, headers=request.headers)
     ensure_method_allowed(config, request.method)
 
+    payload = wrap_hook_payload(
+        method=request.method,
+        headers=request.headers,
+        query=request.query_params,
+        raw_body=raw_body,
+    )
     run, created = await service.create_run(
         session,
         flow=flow,
         version=version,
         trigger=TriggerKind.WEBHOOK,
-        payload=wrap_hook_payload(
-            method=request.method,
-            headers=request.headers,
-            query=request.query_params,
-            raw_body=raw_body,
-        ),
-        idempotency_key=hook_idempotency_key(request.headers),
+        payload=payload,
+        idempotency_key=(telegram_idempotency_key(payload.get("body")) if telegram else None)
+        or hook_idempotency_key(request.headers),
     )
     if created:
         service.enqueue(run)

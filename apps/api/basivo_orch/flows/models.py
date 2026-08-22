@@ -462,3 +462,70 @@ class AgentMemory(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+class BotSession(Base):
+    """One conversation between an operator and a bot, across many runs.
+
+    The engine runs a DAG once and stops, and it rejects cycles — so "keep
+    changing it until the customer is happy" cannot be a loop in the graph. It
+    is this row instead: every inbound message starts its own short run, reads
+    the state, does one thing, writes the state back, and replies.
+
+    That is not a workaround. A long-running run waiting on a human would hold
+    a worker for hours, lose everything if the process restarted, and give no
+    honest answer to "what is it doing right now". A session row survives a
+    deploy, and each interaction gets its own run log.
+    """
+
+    __tablename__ = "bot_session"
+    __table_args__ = (
+        # One live conversation per chat per bot. The operator's phone is the
+        # identity; there is no login on this surface.
+        UniqueConstraint("flow_id", "chat_id", name="uq_bot_session_chat"),
+        Index("ix_bot_session_sweep", "expires_at"),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("organization.id", ondelete="CASCADE"), index=True
+    )
+    flow_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("flow.id", ondelete="CASCADE"))
+    #: Telegram's chat id. A string because group ids are negative, channel ids
+    #: are large, and one day this table will hold WhatsApp too.
+    chat_id: Mapped[str] = mapped_column(String(64))
+
+    #: COLLECTING → READY → RENDERING → REVIEW → DELIVERED.
+    state: Mapped[str] = mapped_column(String(32), default="COLLECTING")
+
+    #: [{"artifact_id", "file_unique_id", "caption"}], in the order sent.
+    #: `file_unique_id` is Telegram's stable id for the same picture, which is
+    #: how the same photo forwarded twice is not collected twice.
+    photos: Mapped[list[dict[str, Any]]] = mapped_column(JSONColumn, default=list)
+    #: What the operator asked for, and the settings behind it.
+    brief: Mapped[str] = mapped_column(Text, default="")
+    options: Mapped[dict[str, Any]] = mapped_column(JSONColumn, default=dict)
+
+    #: The one message the pipeline keeps editing, rather than a wall of
+    #: "now doing X" messages nobody can scroll past.
+    status_message_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    last_video_artifact_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("artifact.id", ondelete="SET NULL"), nullable=True
+    )
+    #: How many videos this job has produced. The cap on it is what stops one
+    #: indecisive afternoon from costing a month of compute.
+    iteration: Mapped[int] = mapped_column(Integer, default=0)
+    spend_usd: Mapped[float] = mapped_column(Float, default=0.0)
+
+    #: Held while a render is in flight. A timestamp rather than a boolean, so
+    #: a worker killed mid-render releases the lock by expiry instead of
+    #: leaving the operator with a bot that never answers again.
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+    #: Wedding photographs are personal data. An abandoned job is swept, and
+    #: the operator can bring the moment forward with /forget.
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

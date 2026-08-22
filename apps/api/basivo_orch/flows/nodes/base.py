@@ -129,6 +129,11 @@ class NodeContext:
     #: Count a skill as used, so the library can show what earns its place.
     record_skill_load: Callable[..., Awaitable[None]] | None = None
 
+    #: Read or change the state of one conversation, transactionally. The
+    #: engine owns the session and the row lock; see `flows/bot_sessions.py`
+    #: for why the whole operation lives on that side rather than here.
+    session_state: Callable[..., Awaitable[dict[str, Any]]] | None = None
+
     #: Nodes wired to one of this node's output ports, as
     #: [{"id", "name", "type", "purpose"}]. How an agent discovers the
     #: colleagues it may hand over to: the edges on the canvas are the team.
