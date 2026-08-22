@@ -27,6 +27,22 @@ class FlowUpdate(BaseModel):
     graph: Graph | None = None
 
 
+class TemplateInstall(BaseModel):
+    """What a template needs before its first message arrives."""
+
+    name: str | None = Field(default=None, max_length=160)
+    telegram_credential_id: str = Field(default="", max_length=64)
+    llm_credential_id: str = Field(default="", max_length=64)
+
+
+class TelegramConnect(BaseModel):
+    credential_id: str = Field(min_length=1, max_length=64)
+    #: Discard whatever queued up while the bot was pointed elsewhere. On by
+    #: default: those updates were meant for another deployment, and replaying
+    #: them here renders videos nobody asked for.
+    drop_pending: bool = True
+
+
 class FlowRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

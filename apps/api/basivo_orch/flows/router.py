@@ -16,10 +16,12 @@ Three routers, because there are three audiences with different credentials:
 from __future__ import annotations
 
 import hmac
+import json
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, Literal
 
+import httpx
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
@@ -57,6 +59,8 @@ from basivo_orch.flows.schemas import (
     RunDetail,
     RunRead,
     RunRequest,
+    TelegramConnect,
+    TemplateInstall,
 )
 from basivo_orch.flows.streaming import SSE_HEADERS, event_stream
 from basivo_orch.flows.webhooks import (
@@ -141,6 +145,156 @@ async def create_flow(
         graph=Graph.model_validate(version.graph),
         version=version.version,
     )
+
+
+@management_router.get("/orgs/{organization_id}/flow-templates")
+async def list_flow_templates(
+    context: OrgContext = Depends(require(Permission.FLOW_READ)),
+) -> list[dict[str, Any]]:
+    """Flows that arrive already wired, for someone who has not drawn one before."""
+    from basivo_orch.flows.templates import TEMPLATES
+
+    return [
+        {
+            "name": item.name,
+            "title": item.title,
+            "summary": item.summary,
+            "detail": item.detail,
+            "needs": list(item.needs),
+            "tags": list(item.tags),
+        }
+        for item in TEMPLATES.values()
+    ]
+
+
+@management_router.post(
+    "/orgs/{organization_id}/flow-templates/{template_name}",
+    response_model=FlowDetail,
+    status_code=status.HTTP_201_CREATED,
+)
+async def install_flow_template(
+    template_name: str,
+    payload: TemplateInstall,
+    context: OrgContext = Depends(require(Permission.FLOW_CREATE)),
+    session: AsyncSession = Depends(get_async_session),
+) -> FlowDetail:
+    """Create a flow from a template, with the credentials already filled in.
+
+    The credentials are arguments rather than something to wire afterwards
+    because the alternative is a flow that installs, looks finished, and fails
+    on its first message with "pick a credential" on a node the person has
+    never opened.
+    """
+    from basivo_orch.flows.templates import TEMPLATES
+
+    template = TEMPLATES.get(template_name)
+    if template is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"No template called {template_name!r}.")
+
+    graph = Graph.model_validate(
+        template.build(
+            telegram_credential_id=payload.telegram_credential_id,
+            llm_credential_id=payload.llm_credential_id,
+        )
+    )
+    try:
+        flow, version = await service.create_flow(
+            session,
+            organization_id=context.organization_id,
+            user_id=context.user.id,
+            name=payload.name or template.title,
+            slug=None,
+            description=template.summary,
+            graph=graph,
+        )
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+
+    return FlowDetail(
+        **FlowRead.model_validate(flow).model_dump(),
+        graph=Graph.model_validate(version.graph),
+        version=version.version,
+    )
+
+
+@management_router.post("/orgs/{organization_id}/flows/{flow_id}/telegram/connect")
+async def connect_telegram_bot(
+    flow_id: uuid.UUID,
+    payload: TelegramConnect,
+    context: OrgContext = Depends(require(Permission.FLOW_UPDATE)),
+    session: AsyncSession = Depends(get_async_session),
+) -> dict[str, Any]:
+    """Point a bot at this flow.
+
+    Two calls to Telegram and no configuration for the operator to keep in
+    sync. `getMe` proves the token before anything is saved — a typo caught at
+    paste time is worth a great deal more than a bot that silently never
+    answers — and `setWebhook` registers the URL along with a secret derived
+    from this deployment's key, so nothing about the secret has to be typed,
+    stored or exported.
+    """
+    flow = await _load_flow(session, context.organization_id, flow_id)
+
+    from basivo_orch.auth.settings import get_settings as get_auth_settings
+    from basivo_orch.credentials.crypto import decrypt
+    from basivo_orch.credentials.models import Credential
+
+    try:
+        credential = await session.get(Credential, uuid.UUID(payload.credential_id))
+    except ValueError:
+        credential = None
+    if (
+        credential is None
+        or credential.organization_id != context.organization_id
+        or credential.provider != "telegram"
+    ):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Pick a Telegram credential holding the bot's token.",
+        )
+
+    base = (credential.base_url or "https://api.telegram.org").rstrip("/")
+    api = f"{base}/bot{decrypt(credential.secret_encrypted)}"
+    hook_url = f"{str(get_auth_settings().public_base_url).rstrip('/')}/hooks/{flow.id}"
+
+    async with httpx.AsyncClient(timeout=20) as http:
+        me = (await http.get(f"{api}/getMe")).json()
+        if not me.get("ok"):
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                "Telegram rejected that token. Check it with BotFather and paste it again.",
+            )
+        registered = (
+            await http.post(
+                f"{api}/setWebhook",
+                data={
+                    "url": hook_url,
+                    "secret_token": telegram_hook_secret(flow.id),
+                    # Everything else a bot can receive is noise for this flow,
+                    # and each one would be a run.
+                    "allowed_updates": json.dumps(["message", "edited_message", "callback_query"]),
+                    "drop_pending_updates": payload.drop_pending,
+                },
+            )
+        ).json()
+
+    if not registered.get("ok"):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Telegram would not accept the webhook: {registered.get('description')}. "
+            "The URL has to be https and publicly reachable.",
+        )
+
+    bot = me["result"]
+    return {
+        "username": bot.get("username"),
+        "name": bot.get("first_name"),
+        "webhook": hook_url,
+        # Said plainly, because it is the difference between a bot that works
+        # and one that answers nothing: a flow has to be published before
+        # Telegram's deliveries have anything to run.
+        "published": flow.published_version_id is not None,
+    }
 
 
 @management_router.get("/orgs/{organization_id}/flows", response_model=list[FlowSummary])

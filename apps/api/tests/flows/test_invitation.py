@@ -163,6 +163,9 @@ def test_an_invitation_needs_a_name():
         class Ctx:
             save_artifact = staticmethod(lambda *a, **k: None)
 
+            def template_context(self):
+                return {}
+
         asyncio.run(node.run(InvitationConfig(seconds=10), Ctx()))
 
 

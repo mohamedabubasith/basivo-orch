@@ -24,7 +24,8 @@ there is any, is decoration rather than delivery.
 from __future__ import annotations
 
 import html as html_escape
-from typing import Literal
+import json
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -95,6 +96,14 @@ class InvitationConfig(BaseModel):
     #: choice, and defaulting to one imposes it on every customer.
     header_symbol: str = Field(default="", max_length=40, title="Blessing")
 
+    #: Everything above, as one JSON object, for when an agent upstream reads
+    #: the operator's message and fills the card in. Same arrangement as the
+    #: montage's plan and for the same reason: a typed list cannot be a
+    #: template reference, and "Mehendi on the 10th, Sangeet on the 11th" is
+    #: exactly the sort of thing a person types and a model is good at
+    #: structuring.
+    details: str = Field(default="", max_length=8_000, title="Details as JSON")
+
     seconds: float = Field(default=22.0, ge=MIN_SECONDS, le=MAX_SECONDS, title="Length")
     aspect: Literal["9:16", "1:1", "4:5", "16:9"] = Field(default="9:16", title="Shape")
     palette: Literal["maroon_gold", "ivory_gold", "emerald_gold", "blush_rose", "royal_blue"] = (
@@ -125,10 +134,14 @@ class InvitationNode(Node):
 
         if ctx.save_artifact is None:
             raise NodeError("An invitation can only be made inside a real run.")
+
+        template = ctx.template_context()
+        if config.details.strip():
+            config = merge_details(config, str(render_value(config.details, template)))
+
         if not (config.bride or config.groom):
             raise NodeError("An invitation needs at least one name on it. Set the bride and groom.")
 
-        template = ctx.template_context()
         ids = _photo_ids(render_value(config.photos, template)) if config.photos else []
 
         assets: dict[str, bytes] = {}
@@ -504,3 +517,64 @@ def build_invitation(
   </script>
 </div>
 </body></html>"""
+
+
+def merge_details(config: InvitationConfig, raw: str) -> InvitationConfig:
+    """Fold an agent's JSON into the card, field by field, ignoring nonsense.
+
+    Validated rather than trusted, like the montage's plan. The text this came
+    from was typed by a person into Telegram and passed through a model, so a
+    field that is not the right shape is dropped and the value already on the
+    node stands. A malformed answer costs an ordinary invitation, never a
+    failed run — an operator waiting on a video should not be told about JSON.
+    """
+    try:
+        given = json.loads(raw)
+    except ValueError:
+        return config
+    if not isinstance(given, dict):
+        return config
+
+    update: dict[str, Any] = {}
+    for field in (
+        "invite_line",
+        "bride",
+        "groom",
+        "joiner",
+        "date_line",
+        "time_line",
+        "venue",
+        "closing",
+        "header_symbol",
+    ):
+        value = given.get(field)
+        if isinstance(value, str) and value.strip():
+            update[field] = value.strip()[:200]
+
+    if isinstance(given.get("palette"), str) and given["palette"] in PALETTES:
+        update["palette"] = given["palette"]
+    if isinstance(given.get("seconds"), (int, float)):
+        update["seconds"] = max(MIN_SECONDS, min(MAX_SECONDS, float(given["seconds"])))
+
+    functions: list[Function] = []
+    for item in given.get("functions") or []:
+        if not isinstance(item, dict) or not str(item.get("name") or "").strip():
+            continue
+        try:
+            functions.append(
+                Function(
+                    name=str(item["name"])[:40],
+                    when=str(item.get("when") or "")[:60],
+                    where=str(item.get("where") or "")[:80],
+                )
+            )
+        except ValueError:
+            continue
+    if functions:
+        update["functions"] = functions[:6]
+
+    try:
+        return config.model_copy(update=update)
+    except ValueError:
+        # A field that survived the checks above and still will not validate.
+        return config
