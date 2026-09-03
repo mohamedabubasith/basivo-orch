@@ -99,7 +99,7 @@ RUN apt-get update \
     # which ships 18 — HyperFrames requires 22.
     && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
-    && npm install -g hyperframes@0.8.3 \
+    && npm install -g hyperframes@0.8.3 @anthropic-ai/claude-code@2.1.259 \
     && npm cache clean --force \
     && apt-get purge -y gnupg \
     && apt-get autoremove -y \
@@ -186,6 +186,7 @@ RUN set -e; \
     ffprobe -version | head -1; \
     node --version; \
     hyperframes --help >/dev/null && echo "hyperframes ok"; \
+    claude --version; \
     test -s /opt/basivo/speech/voices-v1.0.bin && echo "voice model ok"
 
 

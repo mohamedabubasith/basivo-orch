@@ -97,3 +97,21 @@ Every step is on the run detail page, in order: `fix.image` (with the size and
 type of each picture it read), `fix.listed`, `fix.searched`, `fix.read`,
 `fix.staged`, any `fix.refused`, then `fix.committed`, `pr.opened`, and
 `comment.posted` — with tokens and cost per step.
+
+
+## Which agent does the fixing
+
+The Auto-fix node has a **Repair engine** setting.
+
+- **auto** (default): with an Anthropic credential, the fix is made by
+  [Claude Code](https://docs.anthropic.com/en/docs/claude-code) running headless on
+  the worker. It works on a copy of the repository with file tools only (no shell,
+  no web), and the changes it makes are reviewed against the protected-path list
+  before anything is pushed. With any other provider the builtin repair loop runs,
+  because Claude Code only runs Claude models.
+- **claude_code**: insist on Claude Code. Fails plainly if the credential is not
+  Anthropic or the worker does not have it installed.
+- **builtin**: the original four-tool loop, for any provider.
+
+`cost_limit_usd` becomes Claude Code's `--max-budget-usd`; `max_tool_calls` is its
+turn limit. A run stopped by either is a failed run, never a half-pushed branch.

@@ -720,9 +720,7 @@ class VideoGeneratorNode(Node):
         if photo_assets:
             instructions += (
                 "\n\nPHOTOGRAPHS ARE PROVIDED, sitting beside your HTML file. Reference "
-                "them by these exact names and no others: "
-                + ", ".join(photo_assets)
-                + ".\n"
+                "them by these exact names and no others: " + ", ".join(photo_assets) + ".\n"
                 "- Use every one of them, in order, unless the brief says otherwise.\n"
                 '- Full bleed: <img src="p0.jpg"> with width:100%; height:100%; '
                 "object-fit:cover.\n"

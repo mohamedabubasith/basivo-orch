@@ -103,3 +103,16 @@ def make_run(session: AsyncSession, organization: Organization):
         return run
 
     return _make
+
+
+@pytest.fixture(autouse=True)
+def _no_claude_code_on_path(monkeypatch):
+    """Hide any real `claude` binary from every test.
+
+    The autofix node picks Claude Code automatically when it is installed, so
+    without this the suite passes on CI and fails on any developer machine that
+    has Claude Code — or the reverse. A test that wants the CLI sets
+    BASIVO_CLAUDE_CODE_BIN to a fake, which `binary()` checks before PATH.
+    """
+    monkeypatch.delenv("BASIVO_CLAUDE_CODE_BIN", raising=False)
+    monkeypatch.setattr("basivo_orch.flows.nodes.claude_code.shutil.which", lambda name: None)
