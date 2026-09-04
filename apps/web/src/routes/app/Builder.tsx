@@ -51,6 +51,7 @@ import { WorkspaceProvider, useWorkspace } from "../../lib/workspace";
 import { ThemeToggle } from "../../components/ThemeToggle";
 import { Alert, Button, PageLoader, Spinner } from "../../components/ui";
 import { FlowNodeCard } from "../../builder/FlowNodeCard";
+import { FlowEdge } from "../../builder/FlowEdge";
 import { connectionProblem, liveProblems } from "../../builder/connections";
 import { NodeGuide } from "../../builder/NodeGuide";
 import { ExpandDialog } from "../../builder/ExpandField";
@@ -76,6 +77,7 @@ import {
 import { duration } from "./bits";
 
 const NODE_TYPES = { basivo: FlowNodeCard };
+const EDGE_TYPES = { basivo: FlowEdge };
 
 /** Kept in one place: the layout maths and the components must agree. */
 const INSPECTOR_WIDTH = 340;
@@ -365,7 +367,7 @@ function BuilderInner() {
               connection.target,
               connection.sourceHandle,
             ),
-            type: "smoothstep",
+            type: "basivo",
             animated: true,
             style: { stroke: "var(--series)", strokeWidth: 2, opacity: 0.55 },
           },
@@ -920,6 +922,7 @@ function BuilderInner() {
               nodes={shownNodes}
               edges={edges}
               nodeTypes={NODE_TYPES}
+              edgeTypes={EDGE_TYPES}
               onNodesChange={handleNodesChange}
               onEdgesChange={(changes) => {
                 onEdgesChange(changes);
@@ -939,7 +942,7 @@ function BuilderInner() {
               minZoom={0.25}
               maxZoom={1.75}
               defaultEdgeOptions={{
-                type: "smoothstep",
+                type: "basivo",
                 animated: true,
                 // The series colour rather than a neutral grey: this line *is*
                 // the thing carrying data from one node to the next, so it gets

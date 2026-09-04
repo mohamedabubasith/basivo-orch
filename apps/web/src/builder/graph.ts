@@ -79,7 +79,7 @@ export function toCanvas(
     source: edge.source,
     target: edge.target,
     sourceHandle: edge.source_handle ?? "out",
-    type: "smoothstep",
+    type: "basivo",
     // A moving dash along the line, not just a static connector — it reads as
     // "data flows this way" the instant the canvas renders, before anything
     // has actually run. @xyflow/react ships the dash-offset keyframes for
