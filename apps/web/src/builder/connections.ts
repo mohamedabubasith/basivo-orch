@@ -117,7 +117,7 @@ export function liveProblems(
     const required = (spec?.config_schema.required as string[] | undefined) ?? [];
     const properties = (spec?.config_schema.properties ?? {}) as Record<
       string,
-      { title?: string }
+      { title?: string; pattern?: string; "x-pattern-hint"?: string }
     >;
     for (const key of required) {
       const value = node.data.config[key];
@@ -132,6 +132,16 @@ export function liveProblems(
         key.charAt(0).toUpperCase() + key.slice(1).replace(/_/g, " ");
       if (!byNode.has(node.id)) byNode.set(node.id, `${title} is required.`);
       summary.push(`${node.data.label}: ${title} is required.`);
+    }
+    // A filled field in the wrong shape, e.g. a repo without its owner.
+    for (const [key, schema] of Object.entries(properties)) {
+      const value = node.data.config[key];
+      if (typeof value !== "string" || value === "" || !schema.pattern) continue;
+      if (new RegExp(schema.pattern).test(value)) continue;
+      const title = schema.title ?? key;
+      const hint = schema["x-pattern-hint"] ?? "not in the expected form";
+      if (!byNode.has(node.id)) byNode.set(node.id, `${title} should be ${hint}.`);
+      summary.push(`${node.data.label}: ${title} should be ${hint}.`);
     }
   }
   return { byNode, summary };

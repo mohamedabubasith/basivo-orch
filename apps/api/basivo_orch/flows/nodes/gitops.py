@@ -428,7 +428,18 @@ class TicketConfig(BaseModel):
 
     git_provider: VcsProvider = "github"
     git_credential_id: str = Field(default="", description="A saved GitHub/GitLab credential.")
-    repo: str = Field(min_length=1, max_length=200, description="owner/name or group/project.")
+    repo: str = Field(
+        min_length=1,
+        max_length=200,
+        title="Repository",
+        description="owner/name, for example acme/website.",
+        # The pattern rides in the schema for the editor's live check; the
+        # validator below is what rejects it server-side, in plain words.
+        json_schema_extra={
+            "pattern": r"^[^/\s]+/[^\s]+$",
+            "x-pattern-hint": "owner/name, for example acme/website",
+        },
+    )
     title: str = Field(min_length=1, max_length=400, description="Supports {{ references }}.")
     body: str = Field(default="", max_length=20000, description="Supports {{ references }}.")
     labels: list[str] = Field(default_factory=list, max_length=10)
@@ -490,7 +501,18 @@ class CommentConfig(BaseModel):
 
     git_provider: VcsProvider = "github"
     git_credential_id: str = Field(default="", description="A saved GitHub/GitLab credential.")
-    repo: str = Field(min_length=1, max_length=200, description="owner/name or group/project.")
+    repo: str = Field(
+        min_length=1,
+        max_length=200,
+        title="Repository",
+        description="owner/name, for example acme/website.",
+        # The pattern rides in the schema for the editor's live check; the
+        # validator below is what rejects it server-side, in plain words.
+        json_schema_extra={
+            "pattern": r"^[^/\s]+/[^\s]+$",
+            "x-pattern-hint": "owner/name, for example acme/website",
+        },
+    )
     issue_number: str = Field(
         min_length=1,
         max_length=200,
@@ -570,9 +592,27 @@ class AutofixConfig(BaseModel):
     # -- where the code lives ------------------------------------------------
     git_provider: VcsProvider = "github"
     git_credential_id: str = Field(default="", description="A saved GitHub/GitLab credential.")
-    repo: str = Field(min_length=1, max_length=200, description="owner/name or group/project.")
-    base_branch: str = Field(default="main", max_length=200)
-    branch_prefix: str = Field(default="basivo/autofix", max_length=100)
+    repo: str = Field(
+        min_length=1,
+        max_length=200,
+        title="Repository",
+        description="owner/name, for example acme/website.",
+        # The pattern rides in the schema for the editor's live check; the
+        # validator below is what rejects it server-side, in plain words.
+        json_schema_extra={
+            "pattern": r"^[^/\s]+/[^\s]+$",
+            "x-pattern-hint": "owner/name, for example acme/website",
+        },
+    )
+    base_branch: str = Field(
+        default="main", max_length=200, title="Base branch", json_schema_extra={"x-advanced": True}
+    )
+    branch_prefix: str = Field(
+        default="basivo/autofix",
+        max_length=100,
+        title="Branch prefix",
+        json_schema_extra={"x-advanced": True},
+    )
 
     # -- what is broken --------------------------------------------------------
     problem: str = Field(
@@ -599,18 +639,34 @@ class AutofixConfig(BaseModel):
         default="auto",
         title="Repair engine",
         description="auto: Claude Code for an Anthropic credential, builtin otherwise.",
+        json_schema_extra={"x-advanced": True},
     )
 
     # -- limits -----------------------------------------------------------------
-    max_iterations: int = Field(default=12, ge=2, le=40)
-    max_tool_calls: int = Field(default=40, ge=2, le=200)
-    cost_limit_usd: float | None = Field(default=None, ge=0)
-    max_files: int = Field(default=10, ge=1, le=50, description="Refuse fixes touching more.")
+    max_iterations: int = Field(
+        default=12, ge=2, le=40, title="Max iterations", json_schema_extra={"x-advanced": True}
+    )
+    max_tool_calls: int = Field(
+        default=40, ge=2, le=200, title="Max tool calls", json_schema_extra={"x-advanced": True}
+    )
+    cost_limit_usd: float | None = Field(
+        default=None, ge=0, title="Cost limit (USD)", json_schema_extra={"x-advanced": True}
+    )
+    max_files: int = Field(
+        default=10,
+        ge=1,
+        le=50,
+        title="Max files changed",
+        description="Refuse fixes touching more.",
+        json_schema_extra={"x-advanced": True},
+    )
     #: Look at screenshots referenced in the problem text. A bug report is very
     #: often a picture — the stack trace photographed, the broken layout — and
     #: reading only the words throws the actual evidence away.
     read_images: bool = Field(
-        default=True, description="Fetch images in the problem text and show them to the model."
+        default=True,
+        description="Fetch images in the problem text and show them to the model.",
+        json_schema_extra={"x-advanced": True},
     )
     #: Optional second model, used only to look at pictures.
     #:
@@ -621,7 +677,10 @@ class AutofixConfig(BaseModel):
     #: repair model as text. Leave it empty when the main model reads images
     #: itself (OpenAI, Anthropic, Gemini) and the picture goes straight to it.
     vision_provider: str = Field(
-        default="", max_length=48, description="Leave empty unless you set a vision model."
+        default="",
+        max_length=48,
+        description="Leave empty unless you set a vision model.",
+        json_schema_extra={"x-advanced": True},
     )
     vision_model: str = Field(
         default="",
@@ -631,9 +690,12 @@ class AutofixConfig(BaseModel):
             "Gemini). The picture goes straight to it. Set one only if your model calls "
             "tools but cannot see, and it will describe the image first."
         ),
+        json_schema_extra={"x-advanced": True},
     )
     vision_credential_id: str = Field(
-        default="", description="Only needed if the vision model uses a different key."
+        default="",
+        description="Only needed if the vision model uses a different key.",
+        json_schema_extra={"x-advanced": True},
     )
     #: Editable so a team can widen it; the defaults are the ones that turn a
     #: fix bot into a code-execution vector if left open.
@@ -645,6 +707,7 @@ class AutofixConfig(BaseModel):
         # Pydantic copies this per instance, so the shared tuple is safe.
         default=list(DEFAULT_PROTECTED_PATHS),
         description="Glob patterns the agent may never write. Emptying this removes the guard.",
+        json_schema_extra={"x-advanced": True},
     )
 
     @model_validator(mode="after")

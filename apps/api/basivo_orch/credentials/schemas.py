@@ -90,3 +90,11 @@ class ModelListResponse(BaseModel):
     supported: bool
     models: list[str] = Field(default_factory=list)
     error: str | None = None
+
+
+class RepoListResponse(BaseModel):
+    """Repositories a code-hosting credential can open, for the Repo picker."""
+
+    supported: bool
+    repos: list[str] = Field(default_factory=list)
+    error: str | None = None

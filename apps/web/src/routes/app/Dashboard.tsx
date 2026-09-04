@@ -444,7 +444,7 @@ function EmptyState({ orgId }: { orgId: string }) {
           value={credentials === null ? "…" : String(credentials)}
           hint={credentials ? "saved" : "none saved yet"}
         />
-        <StatTile flat label="Success rate" value="–" hint="appears after the first run" />
+        <StatTile flat label="Success rate" value="0%" hint="appears after the first run" />
       </div>
 
       <Card className="p-6">

@@ -110,6 +110,15 @@ function captureCsrf(response: Response): void {
   if (fresh) csrfToken = fresh;
 }
 
+async function isCsrfRejection(response: Response): Promise<boolean> {
+  try {
+    const data = (await response.clone().json()) as { detail?: unknown };
+    return typeof data?.detail === "string" && data.detail.startsWith("CSRF token");
+  } catch {
+    return false;
+  }
+}
+
 async function ensureCsrf(): Promise<string | null> {
   if (csrfToken) return csrfToken;
   const response = await fetch(`${API_BASE}/auth/csrf`, {
@@ -294,6 +303,22 @@ export async function request<T>(
 
   let response = await send();
   captureCsrf(response);
+
+  // The cookie half of the CSRF pair rotates on every sign-in, in any tab,
+  // and this tab's in-memory half then no longer matches. That is a stale
+  // token, not an attack: fetch the current one and replay, once.
+  if (
+    response.status === 403 &&
+    !SAFE_METHODS.has(method) &&
+    !options.noRetry &&
+    (await isCsrfRejection(response))
+  ) {
+    csrfToken = null;
+    const token = await ensureCsrf();
+    if (token) headers.set(CSRF_HEADER, token);
+    response = await send();
+    captureCsrf(response);
+  }
 
   // An expired access token is the ordinary case, not an error: refresh once
   // and replay. Only for endpoints where a session could plausibly exist.

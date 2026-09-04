@@ -20,7 +20,7 @@ import { NodeIconChip } from "./nodeIcons";
 import type { Suggestion } from "./suggestions";
 import { TemplateInput } from "./TemplateInput";
 import { ExpandButton, ExpandDialog } from "./ExpandField";
-import { CredentialPicker, ModelPicker, SkillPicker } from "./pickers";
+import { CredentialPicker, ModelPicker, RepoPicker, SkillPicker } from "./pickers";
 import { SubAgentEditor } from "./SubAgentEditor";
 import { MODEL_PROVIDERS, VCS_PROVIDERS, VOICES } from "./providers";
 import { ToolEditor } from "./ToolEditor";
@@ -35,6 +35,8 @@ interface SchemaField {
   enum?: string[];
   /** What a person reads for each enum value; from the schema's x-enum-labels. */
   enumLabels?: Record<string, string>;
+  /** Tucked behind "Advanced settings"; from the schema's x-advanced. */
+  advanced?: boolean;
   required: boolean;
   itemDef?: JsonSchema;
   default?: unknown;
@@ -44,6 +46,9 @@ interface SchemaField {
 
 export interface JsonSchema {
   "x-enum-labels"?: Record<string, string>;
+  "x-advanced"?: boolean;
+  "x-pattern-hint"?: string;
+  pattern?: string;
   type?: string;
   title?: string;
   description?: string;
@@ -111,6 +116,7 @@ function fields(root: JsonSchema): SchemaField[] {
       type: schema.type ?? "string",
       enum: schema.enum,
       enumLabels: schema["x-enum-labels"],
+      advanced: schema["x-advanced"] === true,
       required: required.has(key),
       itemDef: schema.items ? resolve(schema.items, root) : undefined,
       default: schema.default,
@@ -168,6 +174,11 @@ export function Inspector({
   // and a `credential_id` gets the pickers, so the next one is right by
   // default rather than by remembering.
   const [expanded, setExpanded] = useState<SchemaField | null>(null);
+  // Settings most people never touch stay out of the way until asked for.
+  // Anything the schema marks advanced is hidden, not removed: one click
+  // shows all of them, in place, in their normal order.
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const advancedCount = list.filter((field) => field.advanced).length;
   const keys = new Set(list.map((field) => field.key));
   const usesLlm = keys.has("provider") && keys.has("credential_id");
   const usesGit =
@@ -324,6 +335,7 @@ export function Inspector({
         )}
 
         {list
+          .filter((field) => showAdvanced || !field.advanced)
           .filter(
             (field) =>
               // While memory is off there is no thread to key or bound, so the
@@ -379,6 +391,17 @@ export function Inspector({
                       {option.label}
                     </option>
                   ))}
+        {advancedCount > 0 && (
+          <button
+            type="button"
+            onClick={() => setShowAdvanced((open) => !open)}
+            className="w-full rounded-xl border border-dashed border-ink-700/70 px-3 py-2 text-xs text-ink-400 transition-colors hover:border-ink-500 hover:text-ink-200"
+          >
+            {showAdvanced
+              ? "Hide advanced settings"
+              : `Show advanced settings (${advancedCount})`}
+          </button>
+        )}
                 </select>
               ) : usesLlm &&
                 (field.key === "credential_id" ||
@@ -564,6 +587,19 @@ export function Inspector({
                     </option>
                   ))}
                 </select>
+              ) : usesGit && field.key === "repo" ? (
+                <RepoPicker
+                  orgId={orgId}
+                  credentialId={String(config.git_credential_id ?? "")}
+                  value={String(config.repo ?? "")}
+                  onChange={(v) => set("repo", v)}
+                />
+              ) : spec.type === "git.autofix" && field.key === "problem" ? (
+                <ProblemSource
+                  value={String(config.problem ?? "")}
+                  onChange={(v) => set("problem", v)}
+                  suggestions={suggestions}
+                />
               ) : usesGit && field.key === "git_provider" ? (
                 <select
                   value={String(config.git_provider ?? "github")}
@@ -781,7 +817,10 @@ function FieldInput({
         >
           <span
             className={cx(
-              "absolute top-[3px] h-4 w-4 rounded-full transition-transform",
+              // left-0 is load-bearing: without it the knob starts from the
+              // button's centred static position and the slide carries it
+              // clean out of the pill, over the On/Off word.
+              "absolute top-[3px] left-0 h-4 w-4 rounded-full transition-transform",
               checked ? "translate-x-6 bg-white" : "translate-x-1 bg-ink-100",
             )}
           />
@@ -990,3 +1029,86 @@ function MethodPicker({
     </div>
   );
 }
+
+/** Where the text of the problem comes from, as choices rather than a template. */
+const PROBLEM_SOURCES: { value: string; label: string; template: string }[] = [
+  {
+    value: "github_issue",
+    label: "The GitHub issue that triggered the webhook",
+    template: "{{ input.body.issue.title }}\n\n{{ input.body.issue.body }}",
+  },
+  {
+    value: "gitlab_issue",
+    label: "The GitLab issue that triggered the webhook",
+    template:
+      "{{ input.body.object_attributes.title }}\n\n{{ input.body.object_attributes.description }}",
+  },
+  {
+    value: "webhook_body",
+    label: "Everything the webhook sent",
+    template: "{{ input.body }}",
+  },
+  {
+    value: "previous",
+    label: "Whatever the previous node produced",
+    template: "{{ input }}",
+  },
+];
+
+function ProblemSource({
+  value,
+  onChange,
+  suggestions,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  suggestions: Suggestion[];
+}) {
+  const preset = PROBLEM_SOURCES.find((source) => source.template === value);
+  const [custom, setCustom] = useState(value !== "" && !preset);
+  const mode = custom ? "custom" : (preset?.value ?? "");
+
+  return (
+    <div className="space-y-2">
+      <select
+        value={mode}
+        onChange={(event) => {
+          const next = event.target.value;
+          if (next === "custom") {
+            setCustom(true);
+            return;
+          }
+          setCustom(false);
+          const chosen = PROBLEM_SOURCES.find((source) => source.value === next);
+          onChange(chosen ? chosen.template : "");
+        }}
+        className={INPUT}
+      >
+        <option value="">Where is the problem described?</option>
+        {PROBLEM_SOURCES.map((source) => (
+          <option key={source.value} value={source.value}>
+            {source.label}
+          </option>
+        ))}
+        <option value="custom">I will write it, or mix in my own words</option>
+      </select>
+      {custom && (
+        <TemplateInput
+          multiline
+          rows={4}
+          value={value}
+          onChange={onChange}
+          suggestions={suggestions}
+          placeholder="Describe the bug, or reference earlier nodes with {{ }}"
+        />
+      )}
+      {!custom && preset && (
+        <p className="text-[0.68rem] leading-relaxed text-ink-500">
+          The agent receives:{" "}
+          <code className="font-mono">{preset.template.replace(/\n\n/g, " ")}</code>
+        </p>
+      )}
+    </div>
+  );
+}
+

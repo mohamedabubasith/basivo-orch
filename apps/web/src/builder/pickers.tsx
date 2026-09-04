@@ -354,3 +354,114 @@ export function SkillPicker({
     </div>
   );
 }
+
+/**
+ * The repositories a saved GitHub or GitLab credential can open, as a list.
+ * Nobody has to know that a repo is written owner/name: whatever is in the
+ * list, the token can reach. A typed value stays available for hosts the
+ * list cannot see, and while the list is loading.
+ */
+export function RepoPicker({
+  orgId,
+  credentialId,
+  value,
+  onChange,
+}: {
+  orgId?: string | null;
+  credentialId: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  const [repos, setRepos] = useState<string[] | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+  const [typing, setTyping] = useState(false);
+
+  useEffect(() => {
+    if (!orgId || !credentialId) {
+      setRepos(null);
+      return;
+    }
+    let cancelled = false;
+    setRepos(null);
+    setNote(null);
+    api
+      .get<{ supported: boolean; repos: string[]; error?: string | null }>(
+        `/api/v1/orgs/${orgId}/credentials/${credentialId}/repos`,
+      )
+      .then((result) => {
+        if (cancelled) return;
+        setRepos(result.repos ?? []);
+        if (result.error) setNote(`The host refused the list: ${result.error}`);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setRepos([]);
+          setNote("Could not load the list. Type the repository instead.");
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [orgId, credentialId]);
+
+  if (!credentialId) {
+    return (
+      <p className="text-xs leading-relaxed text-ink-500">
+        Pick a credential above first. Its repositories appear here.
+      </p>
+    );
+  }
+
+  const listed = repos ?? [];
+  const known = value === "" || listed.includes(value);
+  if (typing || (repos !== null && (listed.length === 0 || !known))) {
+    return (
+      <div>
+        <input
+          value={value}
+          onChange={(event) => onChange(event.target.value.trim())}
+          placeholder="owner/name, for example acme/website"
+          className={INPUT}
+        />
+        {note && <p className="mt-1.5 text-[0.68rem] text-ink-500">{note}</p>}
+        {listed.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setTyping(false)}
+            className="mt-1.5 text-[0.68rem] text-brand-300 hover:underline"
+          >
+            Choose from the list instead
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className={INPUT}
+        disabled={repos === null}
+      >
+        <option value="">
+          {repos === null ? "Loading repositories…" : "Pick a repository…"}
+        </option>
+        {listed.map((repo) => (
+          <option key={repo} value={repo}>
+            {repo}
+          </option>
+        ))}
+      </select>
+      <button
+        type="button"
+        onClick={() => setTyping(true)}
+        className="mt-1.5 text-[0.68rem] text-ink-500 hover:text-ink-200"
+      >
+        Not in the list? Type it
+      </button>
+    </div>
+  );
+}
+

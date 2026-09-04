@@ -26,12 +26,18 @@ from basivo_orch.credentials.model_catalog import (
     fetch_models,
 )
 from basivo_orch.credentials.models import Credential
+from basivo_orch.credentials.repo_catalog import (
+    RepoFetchFailed,
+    RepoFetchNotSupported,
+    fetch_repos,
+)
 from basivo_orch.credentials.schemas import (
     PROVIDERS,
     CredentialCreate,
     CredentialRead,
     CredentialTestRequest,
     ModelListResponse,
+    RepoListResponse,
 )
 from basivo_orch.db import get_async_session
 
@@ -190,3 +196,39 @@ async def credential_models(
         return ModelListResponse(supported=False)
     except ModelFetchFailed as exc:
         return ModelListResponse(supported=True, error=str(exc))
+
+
+@router.get(
+    "/orgs/{organization_id}/credentials/{credential_id}/repos",
+    response_model=RepoListResponse,
+)
+async def credential_repos(
+    credential_id: uuid.UUID,
+    context: OrgContext = Depends(require(Permission.CREDENTIAL_READ)),
+    session: AsyncSession = Depends(get_async_session),
+) -> RepoListResponse:
+    """The repositories a saved GitHub or GitLab credential can open.
+
+    Feeds the Repo picker on the git nodes, so nobody has to know that a repo
+    is written owner/name. Same trust level as `credential_models`.
+    """
+    result = await session.execute(
+        select(Credential).where(
+            Credential.id == credential_id,
+            Credential.organization_id == context.organization_id,
+        )
+    )
+    record = result.scalar_one_or_none()
+    if record is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No such credential.")
+    try:
+        repos = await fetch_repos(
+            record.provider,
+            api_key=decrypt(record.secret_encrypted),
+            base_url=record.base_url or "",
+        )
+        return RepoListResponse(supported=True, repos=repos)
+    except RepoFetchNotSupported:
+        return RepoListResponse(supported=False)
+    except RepoFetchFailed as exc:
+        return RepoListResponse(supported=True, error=str(exc))

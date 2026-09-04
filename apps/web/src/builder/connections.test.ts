@@ -131,3 +131,22 @@ test("a wired, filled-in flow has nothing to say", () => {
   assert.equal(summary.length, 0);
   assert.equal(byNode.size, 0);
 });
+
+test("a repo typed without its owner is flagged with the expected form", () => {
+  const withPattern = new Map(specs);
+  withPattern.set("git.autofix", {
+    ...spec("git.autofix", ["repo"]),
+    config_schema: {
+      required: ["repo"],
+      properties: {
+        repo: { title: "Repository", pattern: "^[^/\\s]+/[^\\s]+$", "x-pattern-hint": "owner/name, for example acme/website" },
+      },
+    },
+  });
+  const t = node("t", { isTrigger: true, nodeType: "trigger.manual" });
+  const fix = node("f", { nodeType: "git.autofix", label: "Fix Code and Open PR", config: { repo: "basivo-autofix-demo" } });
+  const { byNode } = liveProblems([t, fix], [edge("t", "f")], withPattern);
+  assert.equal(byNode.get("f"), "Repository should be owner/name, for example acme/website.");
+  fix.data.config.repo = "acme/website";
+  assert.equal(liveProblems([t, fix], [edge("t", "f")], withPattern).byNode.size, 0);
+});
