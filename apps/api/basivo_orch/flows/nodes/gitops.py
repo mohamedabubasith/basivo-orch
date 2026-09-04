@@ -436,8 +436,17 @@ class TicketConfig(BaseModel):
 
 class TicketNode(Node):
     type = "git.ticket"
-    label = "Raise Ticket"
-    description = "Open a GitHub/GitLab issue from run data. The paper trail before the fix."
+    label = "Open Issue"
+    description = "Open a GitHub or GitLab issue from run data."
+    when = (
+        "Something went wrong or needs a human, and the record should live where the code "
+        "lives. Usually the step before Fix Code and Open PR."
+    )
+    needs = (
+        "A GitHub or GitLab credential saved under Credentials",
+        "A trigger before it, or any node whose output it should work on",
+    )
+    example = "Webhook -> Open Issue -> Fix Code and Open PR"
     tier = 2
     category = "devops"
     config_model = TicketConfig
@@ -506,7 +515,16 @@ class CommentNode(Node):
 
     type = "git.comment"
     label = "Comment on Issue"
-    description = "Post a comment on a GitHub issue/PR or GitLab issue."
+    description = "Post a comment on a GitHub issue or PR, or a GitLab issue."
+    when = (
+        "A flow should report progress or a result on an existing issue or pull request, for "
+        "example after a fix was attempted."
+    )
+    needs = (
+        "A GitHub or GitLab credential saved under Credentials",
+        "An issue or PR number from an earlier node or the trigger.",
+    )
+    example = "Webhook -> Fix Code and Open PR -> Comment on Issue"
     tier = 2
     category = "devops"
     config_model = CommentConfig
@@ -718,11 +736,22 @@ def choose_engine(config: AutofixConfig) -> tuple[str, str]:
 
 class AutofixNode(Node):
     type = "git.autofix"
-    label = "Auto-fix & PR"
-    description = (
-        "An agent reads the repo, stages a minimal fix, and opens a pull/merge "
-        "request for humans to review. It never merges."
+    label = "Fix Code and Open PR"
+    description = "An agent reads the repo, makes a minimal fix and opens a pull or merge request."
+    when = (
+        "A bug report or failing check should turn into a reviewed pull request without "
+        "anyone opening an editor. With an Anthropic credential the fix is done by Claude "
+        "Code."
     )
+    needs = (
+        "A GitHub or GitLab credential saved under Credentials",
+        (
+            "An LLM credential (OpenAI, Anthropic, Gemini, Groq or another provider) saved under "
+            "Credentials"
+        ),
+        "A problem statement: an issue number or the text from the trigger.",
+    )
+    example = "Webhook -> Open Issue -> Fix Code and Open PR -> Comment on Issue"
     tier = 2
     category = "devops"
     config_model = AutofixConfig

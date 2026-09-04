@@ -17,6 +17,10 @@ export interface NodeSpec {
   tier: number;
   category: string;
   is_trigger: boolean;
+  /** The guide behind the palette's info button: when to use it, what it needs, a typical chain. */
+  when: string;
+  needs: string[];
+  example: string;
   ports: string[];
   output_paths: string[];
   config_schema: Record<string, unknown>;
@@ -51,18 +55,29 @@ export function groupSpecs(
   const rest = specs.filter((spec) => !spec.is_trigger);
   const byCategory = new Map<string, NodeSpec[]>();
   for (const spec of rest) {
-    const list = byCategory.get(spec.category) ?? [];
+    const heading = title(spec.category);
+    const list = byCategory.get(heading) ?? [];
     list.push(spec);
-    byCategory.set(spec.category, list);
+    byCategory.set(heading, list);
   }
   return [
     ...(triggers.length ? [{ heading: "Triggers", specs: triggers }] : []),
     ...[...byCategory.entries()]
       .sort(([a], [b]) => a.localeCompare(b))
-      .map(([heading, list]) => ({ heading: title(heading), specs: list })),
+      .map(([heading, list]) => ({ heading, specs: list })),
   ];
 }
 
+/** Palette headings. The engine's category names are for grouping, not reading. */
+const HEADINGS: Record<string, string> = {
+  utility: "Logic & Data",
+  data: "Logic & Data",
+  ai: "AI",
+  design: "Images, Video & Voice",
+  devops: "Code & Git",
+  social: "Messaging",
+};
+
 function title(value: string): string {
-  return value.charAt(0).toUpperCase() + value.slice(1);
+  return HEADINGS[value] ?? value.charAt(0).toUpperCase() + value.slice(1);
 }

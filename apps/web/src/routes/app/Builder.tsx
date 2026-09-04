@@ -52,6 +52,8 @@ import { ThemeToggle } from "../../components/ThemeToggle";
 import { Alert, Button, PageLoader, Spinner } from "../../components/ui";
 import { FlowNodeCard } from "../../builder/FlowNodeCard";
 import { connectionProblem } from "../../builder/connections";
+import { NodeGuide } from "../../builder/NodeGuide";
+import { ExpandDialog } from "../../builder/ExpandField";
 import { NodeIconChip, nodeAccent } from "../../builder/nodeIcons";
 import { Inspector } from "../../builder/Inspector";
 import { TestRunPanel } from "../../builder/TestRunPanel";
@@ -1261,6 +1263,9 @@ function Palette({
   onAdd: (spec: NodeSpec) => void;
 }) {
   const [query, setQuery] = useState("");
+  // The node whose guide is open. One at a time: the guide is a dialog, and
+  // the question it answers is "what is this one".
+  const [guide, setGuide] = useState<NodeSpec | null>(null);
   // Fifteen node types is past the point where scanning works. Matching on
   // label AND type means both "video" and "social.post" find the right thing,
   // which are the two ways people actually search a palette.
@@ -1329,7 +1334,7 @@ function Palette({
                 // click or drag cannot produce a rejected graph.
                 const blocked = spec.is_trigger && hasTrigger;
                 return (
-                  <li key={spec.type}>
+                  <li key={spec.type} className="group/item relative">
                     <button
                       draggable={!blocked}
                       onDragStart={(event) =>
@@ -1346,7 +1351,7 @@ function Palette({
                           : spec.description
                       }
                       className={cx(
-                        "flex w-full items-center gap-2.5 rounded-xl border border-ink-700/60 bg-ink-850/60 px-2.5 py-2 text-left transition-all",
+                        "flex w-full items-center gap-2.5 rounded-xl border border-ink-700/60 bg-ink-850/60 px-2.5 py-2 pr-9 text-left transition-all",
                         blocked
                           ? "cursor-not-allowed opacity-40"
                           : "cursor-grab hover:-translate-y-px hover:border-ink-500 hover:shadow-md active:cursor-grabbing",
@@ -1357,10 +1362,22 @@ function Palette({
                         <span className="block truncate text-xs font-medium text-ink-200">
                           {spec.label}
                         </span>
-                        <span className="block truncate font-mono text-[0.62rem] text-ink-500">
-                          {spec.type}
+                        <span className="block truncate text-[0.66rem] text-ink-500">
+                          {spec.description}
                         </span>
                       </span>
+                    </button>
+                    {/* Outside the drag button so a click here never adds a
+                        node. Always visible: a control that appears on hover
+                        is a control nobody discovers on a touch screen. */}
+                    <button
+                      type="button"
+                      onClick={() => setGuide(spec)}
+                      aria-label={`What is ${spec.label}?`}
+                      title={`What is ${spec.label}?`}
+                      className="absolute top-1/2 right-2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-full border border-ink-600/70 text-[0.62rem] font-semibold text-ink-400 transition-colors hover:border-brand-400 hover:text-brand-300"
+                    >
+                      i
                     </button>
                   </li>
                 );
@@ -1373,8 +1390,20 @@ function Palette({
       {/* Pinned below the scroll area rather than trailing the list: a hint
           you have to scroll fifteen nodes to reach is a hint nobody reads. */}
       <p className="flex-none border-t border-ink-800/70 px-4 py-2.5 text-[0.66rem] leading-relaxed text-ink-600">
-        Drag onto the canvas, or click to drop one at the top left.
+        {hasTrigger
+          ? "Drag onto the canvas, or click to add. The i on each node explains when to use it."
+          : "Start with a trigger: it decides when the flow runs. Nothing else can start one."}
       </p>
+
+      {guide && (
+        <ExpandDialog
+          title={guide.label}
+          hint={guide.is_trigger ? "Trigger" : undefined}
+          onClose={() => setGuide(null)}
+        >
+          <NodeGuide spec={guide} />
+        </ExpandDialog>
+      )}
     </div>
   );
 }

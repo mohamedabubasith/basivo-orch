@@ -155,10 +155,13 @@ async def run_python(code: str, data: Any, *, timeout_seconds: float) -> tuple[A
 class CodeNode(Node):
     type = "code.python"
     label = "Python Code"
-    description = (
-        "Run your own Python. main(data) receives input, nodes, vars and "
-        "trigger; whatever it returns becomes the node's output."
+    description = "Run your own Python on the data passing through."
+    when = (
+        "No node does exactly what you need and it is a few lines of Python: parse, "
+        "transform, compute. Network is off inside it; use HTTP Request for calls."
     )
+    needs = ("A trigger before it, or any node whose output it should work on",)
+    example = "Webhook -> Python Code -> If / Else"
     tier = 1
     category = "utility"
     config_model = CodeConfig

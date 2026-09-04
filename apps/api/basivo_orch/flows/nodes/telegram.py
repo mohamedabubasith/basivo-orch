@@ -110,7 +110,15 @@ FIELDS_USED_BY: dict[str, tuple[str, ...]] = {
 class TelegramReplyNode(Node):
     type = "telegram.reply"
     label = "Telegram Reply"
-    description = "Send, edit or delete a message, or send a rendered file."
+    description = (
+        "Send, edit or delete a message, or send a file, in the chat that started the flow."
+    )
+    when = (
+        "The flow was started by the Telegram Bot trigger and something should go back to "
+        "that person: a text, a status update, a rendered video."
+    )
+    needs = ("The Telegram Bot trigger at the start of the flow",)
+    example = "Telegram Bot -> Describe a Video -> Telegram Reply"
     tier = 1
     category = "social"
     config_model = TelegramReplyConfig

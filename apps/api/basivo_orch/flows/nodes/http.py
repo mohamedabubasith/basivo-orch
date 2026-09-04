@@ -135,7 +135,16 @@ async def _read_capped(response: httpx.Response, method: str, url: str) -> bytes
 class HttpRequestNode(Node):
     type = "http.request"
     label = "HTTP Request"
-    description = "Call any HTTP endpoint. For cases no capability node covers."
+    description = "Call any HTTP endpoint."
+    when = (
+        "You need data from, or want to send data to, a service no other node covers. Headers "
+        "and body take templates from earlier nodes."
+    )
+    needs = (
+        "A trigger before it, or any node whose output it should work on",
+        "The endpoint's URL and any token it wants, ideally from a credential.",
+    )
+    example = "Schedule -> HTTP Request -> Set Variables -> Post to Social"
     tier = 1
     category = "utility"
     config_model = HttpRequestConfig

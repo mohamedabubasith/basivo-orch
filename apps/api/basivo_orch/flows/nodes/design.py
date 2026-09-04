@@ -102,10 +102,14 @@ class RenderNode(Node):
     """HTML to an image file, at whatever size the channel wants."""
 
     type = "design.render"
-    label = "Render Poster"
-    description = (
-        "Turn HTML into an image with real fonts, exact text and the same result every time."
+    label = "HTML to Image"
+    description = "Turn an HTML template into a PNG with real fonts."
+    when = (
+        "You want a poster, card or social image built from data: names, prices, dates. Write "
+        "or generate the HTML, this makes the picture."
     )
+    needs = ("A trigger before it, or any node whose output it should work on",)
+    example = "AI Agent -> HTML to Image -> Post to Social"
     tier = 2
     category = "design"
     config_model = RenderConfig

@@ -25,6 +25,7 @@ import { SubAgentEditor } from "./SubAgentEditor";
 import { MODEL_PROVIDERS, VCS_PROVIDERS, VOICES } from "./providers";
 import { ToolEditor } from "./ToolEditor";
 import type { NodeSpec } from "./specs";
+import { NodeGuide } from "./NodeGuide";
 
 interface SchemaField {
   key: string;
@@ -199,9 +200,17 @@ export function Inspector({
       </div>
 
       <div className="flex-1 space-y-4 overflow-y-auto p-4">
-        <p className="text-xs leading-relaxed text-ink-500">
-          {spec.description}
-        </p>
+        <details className="group rounded-xl border border-ink-800/70 bg-ink-900/40 px-3 py-2">
+          <summary className="cursor-pointer list-none text-xs text-ink-400 transition-colors hover:text-ink-200">
+            <span className="mr-1.5 inline-block transition-transform group-open:rotate-90">
+              ›
+            </span>
+            About this node
+          </summary>
+          <div className="pt-3">
+            <NodeGuide spec={spec} />
+          </div>
+        </details>
 
         {problem && (
           <p

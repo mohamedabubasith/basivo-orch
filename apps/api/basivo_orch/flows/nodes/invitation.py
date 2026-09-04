@@ -122,7 +122,16 @@ class InvitationConfig(BaseModel):
 class InvitationNode(Node):
     type = "video.invitation"
     label = "Wedding Invitation"
-    description = "An invitation film: names, date, venue and the function schedule."
+    description = "An invitation film with names, date, venue and schedule."
+    when = (
+        "A wedding or ceremony invitation: the details are known, the couple's photos are in "
+        "hand, and the studio wants the finished film."
+    )
+    needs = (
+        "The event details, typed or filled in by an AI Agent from a message.",
+        "Photos from the trigger or Prepare Photo.",
+    )
+    example = "Telegram Bot -> AI Agent -> Wedding Invitation -> Telegram Reply"
     tier = 3
     category = "design"
     config_model = InvitationConfig

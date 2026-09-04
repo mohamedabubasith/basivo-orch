@@ -195,6 +195,11 @@ class NodeTypeRead(BaseModel):
     tier: int
     category: str
     is_trigger: bool
+    #: The guide behind the palette's info button. Same warning as
+    #: output_paths: absent here, FastAPI strips them and the guide is blank.
+    when: str
+    needs: list[str]
+    example: str
     ports: list[str]
     #: Suggestable paths into this node's output — the editor's template
     #: autocomplete is built from these. Must be listed here or FastAPI's

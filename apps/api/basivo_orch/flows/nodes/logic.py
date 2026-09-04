@@ -77,8 +77,14 @@ class ConditionConfig(BaseModel):
 
 class ConditionNode(Node):
     type = "logic.condition"
-    label = "Condition / Router"
+    label = "If / Else"
     description = "Send the flow down one of two branches."
+    when = (
+        "The next step depends on a value: a status code, a word in a message, whether a "
+        "field is empty. Wire the true and false outputs to different nodes."
+    )
+    needs = ("A trigger before it, or any node whose output it should work on",)
+    example = "Webhook -> If / Else -> Open Issue, or -> Set Variables"
     tier = 1
     category = "utility"
     ports = (TRUE_PORT, FALSE_PORT)
@@ -133,8 +139,14 @@ class SetVariablesConfig(BaseModel):
 
 class SetVariablesNode(Node):
     type = "data.set"
-    label = "Variable / Set"
+    label = "Set Variables"
     description = "Shape data and carry values to later nodes."
+    when = (
+        "You need to rename, pick or compute a few values so later nodes get exactly what "
+        "they expect, without writing code."
+    )
+    needs = ("A trigger before it, or any node whose output it should work on",)
+    example = "HTTP Request -> Set Variables -> AI Agent"
     tier = 1
     category = "utility"
     config_model = SetVariablesConfig

@@ -232,10 +232,14 @@ class VideoRenderNode(Node):
     """A composition in, an MP4 out."""
 
     type = "video.render"
-    label = "Render Video"
-    description = (
-        "Turn an animated HTML composition into an MP4, from a template or your own composition."
+    label = "HTML to Video"
+    description = "Turn an animated HTML composition into an MP4."
+    when = (
+        "You already have an animated HTML composition, from a template or your own, and want "
+        "the video file."
     )
+    needs = ("A trigger before it, or any node whose output it should work on",)
+    example = "Set Variables -> HTML to Video -> Telegram Reply"
     tier = 2
     category = "design"
     config_model = VideoRenderConfig
@@ -644,8 +648,20 @@ class VideoGeneratorNode(Node):
     """Brief in, finished video out — with the agent's revisions on the log."""
 
     type = "video.generate"
-    label = "Video Generator"
-    description = "An agent writes the animation, this checks it renders, then makes the MP4."
+    label = "Describe a Video"
+    description = "Describe the video you want; an agent writes the animation and this renders it."
+    when = (
+        "A customer describes a video in words, optionally with photos, and should get an MP4 "
+        "back. This is the general path for any occasion."
+    )
+    needs = (
+        (
+            "An LLM credential (OpenAI, Anthropic, Gemini, Groq or another provider) saved under "
+            "Credentials"
+        ),
+        "Photos from the trigger or Prepare Photo, when the video should include them.",
+    )
+    example = "Telegram Bot -> Chat Memory -> Describe a Video -> Telegram Reply"
     tier = 2
     category = "design"
     config_model = VideoGeneratorConfig

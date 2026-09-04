@@ -83,6 +83,12 @@ class MontageNode(Node):
     type = "video.montage"
     label = "Photo Montage"
     description = "Turn photographs into a video with motion, music and titles."
+    when = (
+        "You have a set of photos and want a short film from them with no generative model "
+        "involved: predictable, fast, cheap."
+    )
+    needs = ("Photos from the trigger or Prepare Photo.",)
+    example = "Telegram Bot -> Prepare Photo -> Photo Montage -> Telegram Reply"
     tier = 3
     category = "design"
     config_model = MontageConfig

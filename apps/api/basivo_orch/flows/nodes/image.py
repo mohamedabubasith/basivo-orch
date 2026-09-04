@@ -57,6 +57,12 @@ class ImageEditNode(Node):
     type = "image.edit"
     label = "Prepare Photo"
     description = "Orient, resize, crop and correct a photo before it is used."
+    when = (
+        "Photos come in from phones at odd sizes and rotations and a later node wants them "
+        "clean and uniform."
+    )
+    needs = ("Photos from the trigger or an earlier node.",)
+    example = "Telegram Bot -> Prepare Photo -> Photo Montage"
     tier = 1
     category = "design"
     config_model = ImageEditConfig

@@ -296,12 +296,11 @@ class SpeakConfig(BaseModel):
 
 class SpeakNode(Node):
     type = "audio.speak"
-    label = "Speak"
-    description = (
-        "Turn text into narration with a real voice, on this machine. No API "
-        "key, no per-word cost. Reports when each word is spoken, so captions "
-        "can land on the word."
-    )
+    label = "Text to Speech"
+    description = "Turn text into narration with a real voice, on this machine."
+    when = "A video or message needs a spoken voice track and you do not want to pay a speech API."
+    needs = ("Text from an earlier node.",)
+    example = "AI Agent -> Text to Speech -> HTML to Video"
     tier = 2
     category = "design"
     config_model = SpeakConfig

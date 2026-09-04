@@ -26,8 +26,14 @@ class ManualTriggerConfig(BaseModel):
 
 class ManualTriggerNode(Node):
     type = "trigger.manual"
-    label = "Manual Trigger"
-    description = "Run on demand from the UI or the API."
+    label = "Run Manually"
+    description = "Start the flow yourself, from the Run button or an API call."
+    when = (
+        "You want to test a flow, or run it on demand from your own code. Every flow starts "
+        "with exactly one trigger; pick this one when nothing external should start it."
+    )
+    needs = ("Nothing. Press Run, or POST to the flow's run endpoint with a JSON body.",)
+    example = "Run Manually -> AI Agent -> Post to Social"
     tier = 1
     category = "trigger"
     is_trigger = True
@@ -65,8 +71,19 @@ class WebhookTriggerConfig(BaseModel):
 
 class WebhookTriggerNode(Node):
     type = "trigger.webhook"
-    label = "Webhook Trigger"
-    description = "Start the flow from an inbound HTTP call."
+    label = "Webhook"
+    description = "Start the flow when another system calls a URL."
+    when = (
+        "Another app, form or service should kick off this flow by sending an HTTP request. "
+        "The request body becomes the trigger output."
+    )
+    needs = (
+        (
+            "The URL shown on the node, pasted into the other system. Optionally the signing "
+            "secret it displays."
+        ),
+    )
+    example = "Webhook -> If / Else -> Open Issue"
     tier = 1
     category = "trigger"
     is_trigger = True
@@ -105,8 +122,16 @@ class ScheduleTriggerConfig(BaseModel):
 
 class ScheduleTriggerNode(Node):
     type = "trigger.schedule"
-    label = "Scheduler Trigger"
-    description = "Run on a cron expression or a fixed interval."
+    label = "Schedule"
+    description = "Start the flow on a timer."
+    when = (
+        "Something should happen every hour, every morning, or on a cron expression, with no "
+        "one pressing anything."
+    )
+    needs = (
+        ("A cron expression or an interval. The flow must be published for the schedule to fire."),
+    )
+    example = "Schedule -> HTTP Request -> AI Agent -> Post to Social"
     tier = 1
     category = "trigger"
     is_trigger = True
@@ -163,7 +188,18 @@ class TelegramTriggerConfig(BaseModel):
 class TelegramTriggerNode(Node):
     type = "trigger.telegram"
     label = "Telegram Bot"
-    description = "Start when someone messages your bot. Photos arrive as files."
+    description = "Start when someone messages your bot."
+    when = (
+        "Customers talk to you through Telegram: they send photos and text, the flow answers. "
+        "Photos arrive as files the next nodes can use."
+    )
+    needs = (
+        (
+            "A bot token from BotFather saved under Credentials, then Connect on the node after "
+            "publishing."
+        ),
+    )
+    example = "Telegram Bot -> Chat Memory -> AI Agent -> Telegram Reply"
     tier = 1
     category = "trigger"
     is_trigger = True

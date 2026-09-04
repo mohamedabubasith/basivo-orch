@@ -490,10 +490,19 @@ async def _save_memory(
 class AgentNode(Node):
     type = "agent.llm"
     label = "AI Agent"
-    description = (
-        "A model with tools, in a loop, on any major provider. Every turn, "
-        "tool call, token count and cost is recorded as its own step."
+    description = "A model with tools, working in a loop until the job is done."
+    when = (
+        "The step needs judgement: read a message and decide, write text, call tools, or hand "
+        "the conversation to another agent. Use a plain node when the step is mechanical."
     )
+    needs = (
+        (
+            "An LLM credential (OpenAI, Anthropic, Gemini, Groq or another provider) saved under "
+            "Credentials"
+        ),
+        "A trigger before it, or any node whose output it should work on",
+    )
+    example = "Telegram Bot -> AI Agent -> Telegram Reply"
     tier = 2
     category = "ai"
     config_model = AgentConfig

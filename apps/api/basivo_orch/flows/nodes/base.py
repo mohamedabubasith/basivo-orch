@@ -193,6 +193,14 @@ class Node(ABC):
     category: ClassVar[str] = "utility"
     #: Trigger nodes start a flow and take no inputs.
     is_trigger: ClassVar[bool] = False
+    #: The guide the palette shows when someone asks what a node is for.
+    #: `when`: the situation that calls for it, in one or two sentences.
+    #: `needs`: what must exist before it works (a credential, a node before
+    #: it, a running bot), one item per entry. `example`: a typical chain it
+    #: sits in, written as labels joined by arrows.
+    when: ClassVar[str] = ""
+    needs: ClassVar[tuple[str, ...]] = ()
+    example: ClassVar[str] = ""
     #: Ports other than the default, for branching nodes.
     ports: ClassVar[tuple[str, ...]] = (DEFAULT_PORT,)
     #: Dotted paths into this node's output that are stable enough to suggest
@@ -245,6 +253,9 @@ class Node(ABC):
             "tier": cls.tier,
             "category": cls.category,
             "is_trigger": cls.is_trigger,
+            "when": cls.when,
+            "needs": list(cls.needs),
+            "example": cls.example,
             "ports": list(cls.ports),
             "output_paths": list(cls.output_paths),
             "config_schema": cls.config_model.model_json_schema(),

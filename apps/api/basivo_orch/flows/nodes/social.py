@@ -88,6 +88,15 @@ class SocialPostNode(Node):
     type = "social.post"
     label = "Post to Social"
     description = "Post text and an image to Telegram, Discord, Slack, Mastodon or Bluesky."
+    when = (
+        "The result of a flow should be published somewhere people read. Not for replying to "
+        "the person who messaged your bot; use Telegram Reply for that."
+    )
+    needs = (
+        "A credential for the target network saved under Credentials.",
+        "A trigger before it, or any node whose output it should work on",
+    )
+    example = "Schedule -> AI Agent -> HTML to Image -> Post to Social"
     tier = 2
     category = "social"
     config_model = SocialPostConfig
