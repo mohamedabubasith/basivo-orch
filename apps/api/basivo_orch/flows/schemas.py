@@ -38,6 +38,12 @@ class TemplateInstall(BaseModel):
     llm_model: str = Field(default="", max_length=160)
 
 
+class GitHubConnect(BaseModel):
+    credential_id: str = Field(min_length=1, max_length=64)
+    repo: str = Field(min_length=3, max_length=200, description="owner/name")
+    events: list[str] = Field(default_factory=lambda: ["issues"], max_length=6)
+
+
 class TelegramConnect(BaseModel):
     credential_id: str = Field(min_length=1, max_length=64)
     #: Discard whatever queued up while the bot was pointed elsewhere. On by

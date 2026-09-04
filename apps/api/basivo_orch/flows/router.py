@@ -54,6 +54,7 @@ from basivo_orch.flows.schemas import (
     FlowRead,
     FlowSummary,
     FlowUpdate,
+    GitHubConnect,
     NodeTypeRead,
     RunAccepted,
     RunDetail,
@@ -64,9 +65,12 @@ from basivo_orch.flows.schemas import (
 )
 from basivo_orch.flows.streaming import SSE_HEADERS, event_stream
 from basivo_orch.flows.webhooks import (
-    authenticate_hook,
+    GITHUB_HOOK_EVENTS,
+    authenticate_inbound,
     ensure_method_allowed,
+    github_hook_secret,
     hook_idempotency_key,
+    register_github_webhook,
     telegram_hook_secret,
     telegram_idempotency_key,
     wrap_hook_payload,
@@ -249,6 +253,57 @@ async def install_flow_template(
         graph=Graph.model_validate(version.graph),
         version=version.version,
     )
+
+
+@management_router.post("/orgs/{organization_id}/flows/{flow_id}/github/connect")
+async def connect_github_repository(
+    flow_id: uuid.UUID,
+    payload: GitHubConnect,
+    context: OrgContext = Depends(require(Permission.FLOW_UPDATE)),
+    session: AsyncSession = Depends(get_async_session),
+) -> dict[str, Any]:
+    """Register this flow's hook URL as a webhook on a GitHub repository.
+
+    The person picks a credential and a repository; GitHub's settings page,
+    the URL, the secret and the event list are never seen. The secret is
+    derived from the deployment key (see `github_hook_secret`), so nothing is
+    stored and the inbound hook can check every delivery's signature.
+    """
+    flow = await _load_flow(session, context.organization_id, flow_id)
+
+    from basivo_orch.auth.settings import get_settings as get_auth_settings
+    from basivo_orch.credentials.crypto import decrypt
+    from basivo_orch.credentials.models import Credential
+
+    try:
+        credential = await session.get(Credential, uuid.UUID(payload.credential_id))
+    except ValueError:
+        credential = None
+    if (
+        credential is None
+        or credential.organization_id != context.organization_id
+        or credential.provider != "github"
+    ):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Pick a GitHub credential first.")
+    events = [e for e in payload.events if e in GITHUB_HOOK_EVENTS] or ["issues"]
+    hook_url = f"{str(get_auth_settings().public_base_url).rstrip('/')}/hooks/{flow.id}"
+    async with httpx.AsyncClient(timeout=20) as http:
+        result = await register_github_webhook(
+            http,
+            token=decrypt(credential.secret_encrypted),
+            repo=payload.repo.strip(),
+            hook_url=hook_url,
+            secret=github_hook_secret(flow.id),
+            events=events,
+            api_base=credential.base_url or "https://api.github.com",
+        )
+    return {
+        "repo": payload.repo.strip(),
+        "events": result["events"],
+        "webhook": hook_url,
+        "updated": result["updated"],
+        "published": flow.published_version_id is not None,
+    }
 
 
 @management_router.post("/orgs/{organization_id}/flows/{flow_id}/telegram/connect")
@@ -956,7 +1011,7 @@ async def inbound_hook(
     else:
         config = WebhookTriggerConfig.model_validate(trigger.config)
 
-    authenticate_hook(config, raw_body=raw_body, headers=request.headers)
+    authenticate_inbound(flow.id, config, raw_body=raw_body, headers=request.headers)
     ensure_method_allowed(config, request.method)
 
     payload = wrap_hook_payload(

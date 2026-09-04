@@ -21,6 +21,7 @@ import type { Suggestion } from "./suggestions";
 import { TemplateInput } from "./TemplateInput";
 import { ExpandButton, ExpandDialog } from "./ExpandField";
 import { CredentialPicker, ModelPicker, RepoPicker, SkillPicker } from "./pickers";
+import { ApiError, api } from "../lib/api";
 import { SubAgentEditor } from "./SubAgentEditor";
 import { MODEL_PROVIDERS, VCS_PROVIDERS, VOICES } from "./providers";
 import { ToolEditor } from "./ToolEditor";
@@ -37,6 +38,8 @@ interface SchemaField {
   enumLabels?: Record<string, string>;
   /** Tucked behind "Advanced settings"; from the schema's x-advanced. */
   advanced?: boolean;
+  /** Edited by a bespoke panel, never by the generic form; from x-hidden. */
+  hidden?: boolean;
   required: boolean;
   itemDef?: JsonSchema;
   default?: unknown;
@@ -47,6 +50,7 @@ interface SchemaField {
 export interface JsonSchema {
   "x-enum-labels"?: Record<string, string>;
   "x-advanced"?: boolean;
+  "x-hidden"?: boolean;
   "x-pattern-hint"?: string;
   pattern?: string;
   type?: string;
@@ -117,6 +121,7 @@ function fields(root: JsonSchema): SchemaField[] {
       enum: schema.enum,
       enumLabels: schema["x-enum-labels"],
       advanced: schema["x-advanced"] === true,
+      hidden: schema["x-hidden"] === true,
       required: required.has(key),
       itemDef: schema.items ? resolve(schema.items, root) : undefined,
       default: schema.default,
@@ -275,33 +280,14 @@ export function Inspector({
         )}
 
         {spec.type === "trigger.webhook" && (
-          <div className="rounded-lg border border-ink-700/70 bg-ink-950/40 p-3">
-            <p className="text-[0.68rem] font-medium text-ink-300">
-              This webhook's URL
-            </p>
-            {isPublished ? (
-              <code className="mt-1.5 block truncate rounded-md bg-ink-950/60 px-2 py-1.5 font-mono text-[0.68rem] text-ink-200">
-                {publicBase}/hooks/{flowId}
-              </code>
-            ) : (
-              <p className="mt-1 text-[0.68rem] leading-relaxed text-ink-500">
-                Appears after you publish. An unpublished flow has no stable URL
-                for callers to depend on.
-              </p>
-            )}
-            <p className="mt-1.5 text-[0.68rem] leading-relaxed text-ink-500">
-              No API key: paste it straight into GitHub or GitLab webhook
-              settings. The secret below authenticates every delivery (GitHub's{" "}
-              <code className="text-ink-400">X-Hub-Signature-256</code>,
-              GitLab's <code className="text-ink-400">X-Gitlab-Token</code>, or
-              a plain <code className="text-ink-400">X-Webhook-Secret</code>),
-              so this URL only answers while{" "}
-              <em className="not-italic text-ink-300">Require signature</em> is
-              on. The delivery arrives as{" "}
-              <code className="text-ink-400">{"{{ input.body }}"}</code>;
-              API-key endpoints live under the Endpoints button above.
-            </p>
-          </div>
+          <WebhookSource
+            config={config}
+            set={set}
+            orgId={orgId}
+            flowId={flowId}
+            publicBase={publicBase}
+            isPublished={isPublished}
+          />
         )}
 
         <Labelled label="Name" hint="Shown on the canvas and in the run log.">
@@ -335,6 +321,7 @@ export function Inspector({
         )}
 
         {list
+          .filter((field) => !field.hidden)
           .filter((field) => showAdvanced || !field.advanced)
           .filter(
             (field) =>
@@ -1127,5 +1114,179 @@ function ProblemSource({
       )}
     </div>
   );
+}
+
+const GITHUB_EVENTS: { value: string; label: string }[] = [
+  { value: "issues", label: "An issue is opened or edited" },
+  { value: "issue_comment", label: "Someone comments on an issue" },
+  { value: "pull_request", label: "A pull request is opened or updated" },
+  { value: "push", label: "Code is pushed" },
+];
+
+/**
+ * Where a webhook's calls come from. Two answers: "a GitHub repository", in
+ * which case this platform registers the webhook at GitHub itself when the
+ * person presses Connect; or "anything that can POST", in which case they
+ * get the URL and paste it wherever they like. Nobody is shown a secret in
+ * the first case, because a derived one is used and checked on both ends.
+ */
+function WebhookSource({
+  config,
+  set,
+  orgId,
+  flowId,
+  publicBase,
+  isPublished,
+}: {
+  config: Record<string, unknown>;
+  set: (key: string, value: unknown) => void;
+  orgId?: string | null;
+  flowId?: string;
+  publicBase?: string;
+  isPublished?: boolean;
+}) {
+  const provider = String(config.listen_provider ?? "");
+  const credential = String(config.listen_credential_id ?? "");
+  const repo = String(config.listen_repo ?? "");
+  const events = Array.isArray(config.listen_events)
+    ? (config.listen_events as string[])
+    : ["issues"];
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
+
+  async function connect() {
+    if (!orgId || !flowId) return;
+    setBusy(true);
+    setNote(null);
+    try {
+      const result = await api.post<{ repo: string; events: string[]; updated: boolean }>(
+        `/api/v1/orgs/${orgId}/flows/${flowId}/github/connect`,
+        { credential_id: credential, repo, events },
+      );
+      setNote({
+        ok: true,
+        text: `${result.updated ? "Updated" : "Connected"}. GitHub now calls this flow when ${describe(result.events)} in ${result.repo}.`,
+      });
+    } catch (err) {
+      setNote({
+        ok: false,
+        text: err instanceof ApiError ? err.message : "Could not connect to GitHub.",
+      });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="space-y-3 rounded-lg border border-ink-700/70 bg-ink-950/40 p-3">
+      <Labelled label="Where do calls come from?">
+        <select
+          value={provider}
+          onChange={(event) => set("listen_provider", event.target.value)}
+          className={INPUT}
+        >
+          <option value="">Anything that can POST. I will paste the URL myself.</option>
+          <option value="github">A GitHub repository. Set it up for me.</option>
+        </select>
+      </Labelled>
+
+      {provider === "github" ? (
+        <>
+          <Labelled label="GitHub credential">
+            <CredentialPicker
+              orgId={orgId}
+              provider="github"
+              value={credential}
+              onChange={(v) => set("listen_credential_id", v)}
+            />
+          </Labelled>
+          <Labelled label="Repository">
+            <RepoPicker
+              orgId={orgId}
+              credentialId={credential}
+              value={repo}
+              onChange={(v) => set("listen_repo", v)}
+            />
+          </Labelled>
+          <Labelled label="Start this flow when">
+            <div className="space-y-1.5">
+              {GITHUB_EVENTS.map((event) => (
+                <label key={event.value} className="flex items-center gap-2 text-xs text-ink-200">
+                  <input
+                    type="checkbox"
+                    checked={events.includes(event.value)}
+                    onChange={(e) =>
+                      set(
+                        "listen_events",
+                        e.target.checked
+                          ? [...events, event.value]
+                          : events.filter((v) => v !== event.value),
+                      )
+                    }
+                  />
+                  {event.label}
+                </label>
+              ))}
+            </div>
+          </Labelled>
+          {isPublished ? (
+            <button
+              type="button"
+              onClick={() => void connect()}
+              disabled={busy || !credential || !repo || events.length === 0}
+              className="w-full rounded-xl bg-brand-500 px-3 py-2 text-sm font-medium text-white transition-opacity disabled:opacity-40"
+            >
+              {busy ? "Connecting…" : "Connect GitHub"}
+            </button>
+          ) : (
+            <p className="text-[0.68rem] leading-relaxed text-ink-500">
+              Publish the flow, then press Connect here. Publishing gives the
+              flow the stable address GitHub will call.
+            </p>
+          )}
+          {note && (
+            <p
+              className="text-[0.72rem] leading-relaxed"
+              style={{ color: note.ok ? "var(--status-good)" : "var(--status-bad)" }}
+            >
+              {note.text}
+            </p>
+          )}
+          <p className="text-[0.68rem] leading-relaxed text-ink-500">
+            The delivery arrives as <code className="text-ink-400">{"{{ input.body }}"}</code>.
+            For an issue, the title is{" "}
+            <code className="text-ink-400">{"{{ input.body.issue.title }}"}</code>.
+          </p>
+        </>
+      ) : (
+        <>
+          <p className="text-[0.68rem] font-medium text-ink-300">This webhook's URL</p>
+          {isPublished ? (
+            <code className="block truncate rounded-md bg-ink-950/60 px-2 py-1.5 font-mono text-[0.68rem] text-ink-200">
+              {publicBase}/hooks/{flowId}
+            </code>
+          ) : (
+            <p className="text-[0.68rem] leading-relaxed text-ink-500">
+              Appears after you publish. An unpublished flow has no stable URL
+              for callers to depend on.
+            </p>
+          )}
+          <p className="text-[0.68rem] leading-relaxed text-ink-500">
+            Turn on Require signature and set a secret; callers send it as{" "}
+            <code className="text-ink-400">X-Webhook-Secret</code> (GitLab:{" "}
+            <code className="text-ink-400">X-Gitlab-Token</code>). The delivery
+            arrives as <code className="text-ink-400">{"{{ input.body }}"}</code>.
+          </p>
+        </>
+      )}
+    </div>
+  );
+}
+
+function describe(events: string[]): string {
+  const names = events.map(
+    (value) => GITHUB_EVENTS.find((e) => e.value === value)?.label.toLowerCase() ?? value,
+  );
+  return names.length <= 1 ? names[0] ?? "something happens" : names.slice(0, -1).join(", ") + " or " + names[names.length - 1];
 }
 

@@ -59,6 +59,18 @@ class WebhookTriggerConfig(BaseModel):
         max_length=200,
         description="Sent by callers as the X-Webhook-Secret header.",
     )
+    #: "Listen to a GitHub repository": the platform registers the webhook at
+    #: GitHub itself when the author presses Connect, so nobody has to find
+    #: the repository's settings page or copy a URL and secret. Remembered
+    #: here so the panel shows what was chosen; hidden from the generic form.
+    listen_provider: Literal["", "github"] = Field(default="", json_schema_extra={"x-hidden": True})
+    listen_credential_id: str = Field(
+        default="", max_length=64, json_schema_extra={"x-hidden": True}
+    )
+    listen_repo: str = Field(default="", max_length=200, json_schema_extra={"x-hidden": True})
+    listen_events: list[str] = Field(
+        default_factory=lambda: ["issues"], json_schema_extra={"x-hidden": True}
+    )
 
     @model_validator(mode="after")
     def _secret_when_required(self) -> WebhookTriggerConfig:

@@ -22,6 +22,7 @@ import uuid
 from collections.abc import Mapping
 from typing import Any
 
+import httpx
 from fastapi import HTTPException, status
 
 from basivo_orch.auth.settings import get_settings as get_auth_settings
@@ -164,3 +165,114 @@ def telegram_hook_secret(flow_id: uuid.UUID) -> str:
     """
     key = get_auth_settings().secret_key.get_secret_value().encode()
     return hmac.new(key, f"telegram-hook:{flow_id}".encode(), hashlib.sha256).hexdigest()
+
+
+def github_hook_secret(flow_id: uuid.UUID) -> str:
+    """The secret this platform gives GitHub when it registers a webhook.
+
+    Same idea as the Telegram secret: derived from the deployment key and the
+    flow id, so it is never typed, stored in a config, or carried around by
+    an exported graph. GitHub signs every delivery with it, and the inbound
+    hook recomputes it to check the signature.
+    """
+    key = get_auth_settings().secret_key.get_secret_value().encode()
+    return hmac.new(key, f"github-hook:{flow_id}".encode(), hashlib.sha256).hexdigest()
+
+
+def authenticate_inbound(
+    flow_id: uuid.UUID,
+    config: WebhookTriggerConfig,
+    *,
+    raw_body: bytes,
+    headers: Mapping[str, str],
+) -> None:
+    """Admit a delivery with the trigger's own secret, or with the one this
+    platform registered at GitHub on the author's behalf.
+
+    A person who pressed Connect never saw a secret and should not need one:
+    a GitHub-signed delivery is checked against the derived secret whenever
+    the trigger's typed secret does not admit it (or there is none).
+    """
+    try:
+        authenticate_hook(config, raw_body=raw_body, headers=headers)
+        return
+    except HTTPException as denied:
+        if "x-hub-signature-256" not in {k.lower() for k in headers}:
+            raise
+        platform = WebhookTriggerConfig(
+            require_signature=True, secret=github_hook_secret(flow_id), methods=config.methods
+        )
+        try:
+            authenticate_hook(platform, raw_body=raw_body, headers=headers)
+        except HTTPException:
+            raise denied from None
+
+
+GITHUB_HOOK_EVENTS = ("issues", "pull_request", "push", "issue_comment")
+
+
+async def register_github_webhook(
+    http: httpx.AsyncClient,
+    *,
+    token: str,
+    repo: str,
+    hook_url: str,
+    secret: str,
+    events: list[str],
+    api_base: str = "https://api.github.com",
+) -> dict[str, Any]:
+    """Create, or update, the one webhook on `repo` that points at `hook_url`.
+
+    Idempotent on the URL: pressing Connect twice, or after changing the
+    events, edits the existing hook rather than stacking a second one that
+    would start every run twice.
+    """
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"}
+    base = api_base.rstrip("/")
+    body = {
+        "name": "web",
+        "active": True,
+        "events": events,
+        "config": {"url": hook_url, "content_type": "json", "secret": secret, "insecure_ssl": "0"},
+    }
+    listing = await http.get(f"{base}/repos/{repo}/hooks", headers=headers)
+    if listing.status_code == 404:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"GitHub could not find {repo}, or this credential cannot administer it. "
+            "The token needs the repo scope (or Webhooks: read and write on a fine-grained token).",
+        )
+    if listing.status_code in (401, 403):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "GitHub refused this credential for webhook administration. "
+            "It needs the repo scope, or Webhooks: read and write on a fine-grained token.",
+        )
+    if listing.status_code >= 400:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"GitHub answered {listing.status_code}.")
+    existing = next(
+        (h for h in listing.json() if (h.get("config") or {}).get("url") == hook_url), None
+    )
+    if existing:
+        response = await http.patch(
+            f"{base}/repos/{repo}/hooks/{existing['id']}", headers=headers, json=body
+        )
+    else:
+        response = await http.post(f"{base}/repos/{repo}/hooks", headers=headers, json=body)
+    if response.status_code >= 400:
+        detail = ""
+        try:
+            detail = str(response.json().get("message", ""))
+        except ValueError:
+            pass
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"GitHub would not save the webhook: {detail or response.status_code}. "
+            "The URL has to be https and publicly reachable.",
+        )
+    data = response.json()
+    return {
+        "hook_id": data.get("id"),
+        "events": data.get("events", events),
+        "updated": bool(existing),
+    }
