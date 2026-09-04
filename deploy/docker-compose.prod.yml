@@ -140,6 +140,11 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://basivo:${POSTGRES_PASSWORD}@postgres:5432/basivo_orch
       REDIS_URL: redis://redis:6379/0
+      # Caddy is the one proxy in front of the API, so the last X-Forwarded-For
+      # entry is the real client. Left at 0 the API keys rate limits, lockout
+      # and the audit trail on Caddy's container address: five logins a minute
+      # and three password resets an hour for every user on earth, combined.
+      TRUSTED_PROXY_COUNT: ${TRUSTED_PROXY_COUNT:-1}
     depends_on:
       postgres: {condition: service_healthy}
       redis: {condition: service_healthy}

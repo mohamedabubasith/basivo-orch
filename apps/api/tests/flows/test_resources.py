@@ -364,6 +364,7 @@ def test_every_service_built_from_our_dockerfile_names_its_stage():
     from pathlib import Path
 
     import yaml
+    from pathlib import Path
 
     root = Path(__file__).resolve().parents[4]
     compose = yaml.safe_load((root / "deploy/docker-compose.prod.yml").read_text())
@@ -604,3 +605,18 @@ def test_no_ai_dash_in_user_facing_text():
                 offenders.append(f"{path.relative_to(root)}:{number}: {line.strip()[:80]}")
 
     assert not offenders, "AI-style dashes in user-facing text:\n  " + "\n  ".join(offenders)
+
+
+def test_the_api_trusts_exactly_one_proxy_by_default():
+    """Caddy fronts the API. With TRUSTED_PROXY_COUNT at its code default of 0
+    the API reads Caddy's container address for every request, so login,
+    register and forgot-password limits are shared by every user of the site.
+    That looked, from the outside, like passwords that stopped working."""
+    import yaml
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[4]
+    compose = yaml.safe_load((root / "deploy/docker-compose.prod.yml").read_text())
+    env = compose["services"]["api"]["environment"]
+    assert env["TRUSTED_PROXY_COUNT"] == "${TRUSTED_PROXY_COUNT:-1}"
+
