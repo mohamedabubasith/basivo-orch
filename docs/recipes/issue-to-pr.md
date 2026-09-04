@@ -8,7 +8,7 @@ issue with the link. Nobody was paged, and nothing merged itself.
 ## The flow
 
 ```
-Webhook Trigger → Condition (trust gate) → Auto-fix & PR → Comment on Issue
+Webhook → If / Else (trust gate) → Fix Code and Open PR, with "Comment on the issue when done" switched on
 ```
 
 **1. Webhook Trigger** — turn **Require signature** on and set a secret. The
@@ -42,7 +42,7 @@ that field is what turns them into something the model can actually look at.
 Pick a **vision-capable model** — OpenAI, Anthropic, or Gemini. A text-only
 model will simply ignore the picture and you will not be told why.
 
-**4. Comment on Issue** — closes the loop where the reporter is looking:
+**4. Comment on the issue when done** (a switch on Fix Code and Open PR, on by default) — closes the loop where the reporter is looking:
 
 - Issue number: `{{ trigger.payload.body.issue.number }}`
 - Body: `I opened {{ nodes.fix.output.pr_url }} for this.\n\n{{ nodes.fix.output.summary }}`

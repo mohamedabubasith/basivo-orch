@@ -598,6 +598,7 @@ export function Inspector({
                 <ProblemSource
                   value={String(config.problem ?? "")}
                   onChange={(v) => set("problem", v)}
+                  onIssueNumber={(v) => set("issue_number", v)}
                   suggestions={suggestions}
                 />
               ) : usesGit && field.key === "git_provider" ? (
@@ -620,16 +621,19 @@ export function Inspector({
                   onChange={(v) => set("git_credential_id", v)}
                 />
               ) : (spec.type === "git.autofix" &&
-                  (field.key === "problem" || field.key === "instructions")) ||
+                  (field.key === "instructions" ||
+                    field.key === "issue_number")) ||
                 (spec.type === "git.comment" && field.key === "body") ? (
                 <TemplateInput
-                  multiline
-                  rows={field.key === "problem" ? 4 : 3}
+                  multiline={field.key !== "issue_number"}
+                  rows={3}
                   value={String(config[field.key] ?? "")}
                   onChange={(v) => set(field.key, v)}
                   suggestions={suggestions}
                   placeholder={
-                    field.key === "problem" ? "{{ input.error }}" : ""
+                    field.key === "issue_number"
+                      ? "{{ input.body.issue.number }}, or leave empty"
+                      : ""
                   }
                 />
               ) : isAgent &&
@@ -1031,17 +1035,25 @@ function MethodPicker({
 }
 
 /** Where the text of the problem comes from, as choices rather than a template. */
-const PROBLEM_SOURCES: { value: string; label: string; template: string }[] = [
+const PROBLEM_SOURCES: {
+  value: string;
+  label: string;
+  template: string;
+  /** Where that source keeps its issue number, so the node can report back. */
+  issueNumber?: string;
+}[] = [
   {
     value: "github_issue",
     label: "The GitHub issue that triggered the webhook",
     template: "{{ input.body.issue.title }}\n\n{{ input.body.issue.body }}",
+    issueNumber: "{{ input.body.issue.number }}",
   },
   {
     value: "gitlab_issue",
     label: "The GitLab issue that triggered the webhook",
     template:
       "{{ input.body.object_attributes.title }}\n\n{{ input.body.object_attributes.description }}",
+    issueNumber: "{{ input.body.object_attributes.iid }}",
   },
   {
     value: "webhook_body",
@@ -1058,10 +1070,12 @@ const PROBLEM_SOURCES: { value: string; label: string; template: string }[] = [
 function ProblemSource({
   value,
   onChange,
+  onIssueNumber,
   suggestions,
 }: {
   value: string;
   onChange: (value: string) => void;
+  onIssueNumber: (value: string) => void;
   suggestions: Suggestion[];
 }) {
   const preset = PROBLEM_SOURCES.find((source) => source.template === value);
@@ -1081,6 +1095,9 @@ function ProblemSource({
           setCustom(false);
           const chosen = PROBLEM_SOURCES.find((source) => source.value === next);
           onChange(chosen ? chosen.template : "");
+          // The issue number rides along, so "comment on the issue when
+          // done" works without anyone knowing where the number lives.
+          onIssueNumber(chosen?.issueNumber ?? "");
         }}
         className={INPUT}
       >

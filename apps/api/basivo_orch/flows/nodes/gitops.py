@@ -447,6 +447,8 @@ class TicketConfig(BaseModel):
 
 class TicketNode(Node):
     type = "git.ticket"
+    # Folded into Fix Code and Open PR as two switches. Kept for saved flows.
+    hidden = True
     label = "Open Issue"
     description = "Open a GitHub or GitLab issue from run data."
     when = (
@@ -536,6 +538,8 @@ class CommentNode(Node):
     """
 
     type = "git.comment"
+    # Folded into Fix Code and Open PR as two switches. Kept for saved flows.
+    hidden = True
     label = "Comment on Issue"
     description = "Post a comment on a GitHub issue or PR, or a GitLab issue."
     when = (
@@ -624,6 +628,33 @@ class AutofixConfig(BaseModel):
         default="",
         max_length=10000,
         description="House rules for the fix. Supports {{ references }}.",
+    )
+
+    # -- the issue, before and after -------------------------------------------
+    #: One node does the whole job. Filing an issue and reporting back on it
+    #: used to be two more nodes to find, place and wire; they are two
+    #: switches here, and the standalone nodes stay only for saved flows.
+    issue_number: str = Field(
+        default="",
+        max_length=200,
+        title="Issue number",
+        description=(
+            "The issue this fix is for, if one exists. Templated, e.g. "
+            "{{ input.body.issue.number }}. Filled in for you when the problem comes from an issue."
+        ),
+    )
+    open_issue: bool = Field(
+        default=False,
+        title="Open an issue first",
+        description=(
+            "When there is no issue number, file one with the problem text before fixing, so "
+            "the fix has a paper trail."
+        ),
+    )
+    comment_on_issue: bool = Field(
+        default=True,
+        title="Comment on the issue when done",
+        description="Post the pull request link back on the issue, with the agent's summary.",
     )
 
     # -- which model does the fixing -----------------------------------------
@@ -800,7 +831,10 @@ def choose_engine(config: AutofixConfig) -> tuple[str, str]:
 class AutofixNode(Node):
     type = "git.autofix"
     label = "Fix Code and Open PR"
-    description = "An agent reads the repo, makes a minimal fix and opens a pull or merge request."
+    description = (
+        "An agent reads the repo, makes a minimal fix and opens a pull request. Can file the "
+        "issue first and report back on it."
+    )
     when = (
         "A bug report or failing check should turn into a reviewed pull request without "
         "anyone opening an editor. With an Anthropic credential the fix is done by Claude "
@@ -812,15 +846,18 @@ class AutofixNode(Node):
             "An LLM credential (OpenAI, Anthropic, Gemini, Groq or another provider) saved under "
             "Credentials"
         ),
-        "A problem statement: an issue number or the text from the trigger.",
+        "A problem statement: the issue that fired the webhook, or text from the trigger.",
     )
-    example = "Webhook -> Open Issue -> Fix Code and Open PR -> Comment on Issue"
+    example = "Webhook -> Fix Code and Open PR"
     tier = 2
     category = "devops"
     config_model = AutofixConfig
     output_paths = (
         "pr_url",
         "pr_number",
+        "issue_number",
+        "issue_url",
+        "comment_url",
         "branch",
         "files_changed",
         "summary",
@@ -1102,6 +1139,16 @@ class AutofixNode(Node):
         )
         base_sha = await client.branch_sha(config.base_branch)
 
+        issue_number = (
+            str(render_value(config.issue_number, template)).strip() if config.issue_number else ""
+        )
+        issue_url = ""
+        if not issue_number and config.open_issue:
+            first_line = next((line for line in problem.splitlines() if line.strip()), "Autofix")
+            issue = await client.create_issue(first_line.strip()[:120], problem, ["autofix"])
+            issue_number, issue_url = str(issue["number"]), str(issue.get("url", ""))
+            await ctx.step("issue.opened", {**issue})
+
         staged: dict[str, str] = {}
 
         # Fetched once: every tool call that needs the tree reuses it, so a
@@ -1280,10 +1327,29 @@ class AutofixNode(Node):
         )
         await ctx.step("pr.opened", {**pr, "branch": branch})
 
+        comment_url = ""
+        if config.comment_on_issue and issue_number:
+            try:
+                number = int(issue_number)
+            except ValueError:
+                raise NodeError(
+                    f"Issue number must be a whole number; got {issue_number!r}."
+                ) from None
+            comment = await client.create_comment(
+                number,
+                f"Opened {pr['url']} to fix this.\n\n{summary}\n\n---\n*Basivo autofix run "
+                f"`{str(ctx.run_id)[:8]}`. A person reviews before anything is merged.*",
+            )
+            comment_url = str(comment.get("url", ""))
+            await ctx.step("issue.commented", {"issue": number, "url": comment_url})
+
         return NodeResult(
             output={
                 "pr_url": pr["url"],
                 "pr_number": pr["number"],
+                "issue_number": issue_number,
+                "issue_url": issue_url,
+                "comment_url": comment_url,
                 "branch": branch,
                 "files_changed": sorted(staged),
                 "summary": summary,

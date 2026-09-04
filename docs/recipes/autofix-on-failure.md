@@ -49,7 +49,7 @@ Webhook Trigger → Condition → Auto-fix & PR
    {{ input.body.issue.body }}
    ```
 
-   No Raise Ticket node here — the issue already exists; creating a second
+   "Open an issue first" stays off here — the issue already exists; creating a second
    one would be noise.
 
 Then, in the repository: **Settings → Webhooks → Add webhook**:
@@ -81,14 +81,14 @@ trail, and the merge still yours.
 2. **New flow** with four nodes:
 
    ```
-   Webhook Trigger → Condition/Router → Raise Ticket → Auto-fix & PR
+   Webhook → If / Else → Fix Code and Open PR, with "Open an issue first" switched on
    ```
 
 3. **Condition** (optional but recommended): only autofix what you trust it
    with. E.g. `{{ input.body.kind }}` equals `"test_failure"` → true branch
    continues; false branch can end at just the ticket.
 
-4. **Raise Ticket**:
+4. **Open an issue first** (a switch on Fix Code and Open PR):
    - repo: `you/your-app`
    - title: `CI failure: {{ input.body.title }}`
    - body:

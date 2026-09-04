@@ -60,7 +60,7 @@ def make_context(
         node_id="fixer",
         node_name="Fixer",
         attempt=1,
-        input={"error": "TypeError in billing"},
+        input={"error": "TypeError in billing", "number": 7},
         outputs={},
         variables={},
         trigger={"payload": {}},
@@ -182,6 +182,15 @@ def github_repo_handler(requests: list[httpx.Request]):
         if path.endswith("/pulls") and request.method == "POST":
             return httpx.Response(
                 201, json={"html_url": "https://github.com/acme/api/pull/42", "number": 42}
+            )
+        if path.endswith("/issues") and request.method == "POST":
+            return httpx.Response(
+                201, json={"html_url": "https://github.com/acme/api/issues/7", "number": 7}
+            )
+        if path.endswith("/comments") and request.method == "POST":
+            return httpx.Response(
+                201,
+                json={"html_url": "https://github.com/acme/api/issues/7#issuecomment-1", "id": 1},
             )
         return httpx.Response(404, json={"message": f"unexpected {request.method} {path}"})
 
@@ -972,3 +981,97 @@ async def test_auto_uses_builtin_when_claude_code_is_not_installed(monkeypatch):
     assert result.output["files_changed"] == ["calc.py"]
     engine = next(data for kind, data in recorder.steps if kind == "fix.engine")
     assert engine["engine"] == "builtin" and "not installed" in engine["reason"]
+
+
+async def test_one_node_files_the_issue_fixes_and_reports_back(monkeypatch):
+    """Open Issue and Comment on Issue are switches on this node now. With no
+    issue number and both switches on: file, fix, PR, then comment on the
+    issue it filed, in that order."""
+    requests: list[httpx.Request] = []
+
+    async def fake_build(ctx, **kwargs):
+        return FakeChatModel(respond=scripted_fix_model())
+
+    monkeypatch.setattr("basivo_orch.flows.nodes.gitops.build_chat_model", fake_build)
+    recorder = _Recorder()
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(github_repo_handler(requests))
+    ) as http:
+        result = await AutofixNode().run(
+            AutofixConfig(
+                git_credential_id="cred-git",
+                repo="acme/api",
+                problem="add() subtracts\n\nSteps: call add(2, 2), get 0.",
+                open_issue=True,
+                comment_on_issue=True,
+            ),
+            make_context(recorder, http),
+        )
+
+    assert result.output["issue_number"] == "7"
+    assert result.output["issue_url"] == "https://github.com/acme/api/issues/7"
+    assert result.output["comment_url"].endswith("#issuecomment-1")
+    mutating = [(r.method, r.url.path) for r in requests if r.method in ("POST", "PUT")]
+    assert mutating == [
+        ("POST", "/repos/acme/api/issues"),
+        ("POST", "/repos/acme/api/git/refs"),
+        ("PUT", "/repos/acme/api/contents/calc.py"),
+        ("POST", "/repos/acme/api/pulls"),
+        ("POST", "/repos/acme/api/issues/7/comments"),
+    ]
+    issue_body = json.loads([r for r in requests if r.url.path.endswith("/issues")][0].content)
+    assert issue_body["title"] == "add() subtracts"
+    comment = json.loads([r for r in requests if r.url.path.endswith("/comments")][0].content)
+    assert "https://github.com/acme/api/pull/42" in comment["body"]
+    kinds = [kind for kind, _ in recorder.steps if not kind.startswith("llm.")]
+    assert kinds[:3] == ["issue.opened", "fix.started", "fix.engine"]
+    assert kinds[-2:] == ["pr.opened", "issue.commented"]
+
+
+async def test_an_existing_issue_gets_the_comment_and_no_new_issue(monkeypatch):
+    requests: list[httpx.Request] = []
+
+    async def fake_build(ctx, **kwargs):
+        return FakeChatModel(respond=scripted_fix_model())
+
+    monkeypatch.setattr("basivo_orch.flows.nodes.gitops.build_chat_model", fake_build)
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(github_repo_handler(requests))
+    ) as http:
+        ctx = make_context(_Recorder(), http)
+        result = await AutofixNode().run(
+            AutofixConfig(
+                git_credential_id="cred-git",
+                repo="acme/api",
+                problem="add() subtracts: {{ input.error }}",
+                issue_number="{{ input.number }}",
+                open_issue=True,
+            ),
+            ctx,
+        )
+    paths = [r.url.path for r in requests if r.method == "POST"]
+    assert "/repos/acme/api/issues" not in paths, "an issue number was given; none should be filed"
+    assert "/repos/acme/api/issues/7/comments" in paths
+    assert result.output["issue_number"] == "7"
+
+
+async def test_a_non_numeric_issue_number_is_a_clear_error_not_a_bad_request(monkeypatch):
+    requests: list[httpx.Request] = []
+
+    async def fake_build(ctx, **kwargs):
+        return FakeChatModel(respond=scripted_fix_model())
+
+    monkeypatch.setattr("basivo_orch.flows.nodes.gitops.build_chat_model", fake_build)
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(github_repo_handler(requests))
+    ) as http:
+        with pytest.raises(NodeError, match="whole number"):
+            await AutofixNode().run(
+                AutofixConfig(
+                    git_credential_id="cred-git",
+                    repo="acme/api",
+                    problem="add() subtracts",
+                    issue_number="{{ input.error }}",
+                ),
+                make_context(_Recorder(), http),
+            )
