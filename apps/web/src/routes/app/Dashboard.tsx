@@ -1,5 +1,6 @@
 import { motion } from "motion/react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { Link, useNavigate } from "react-router-dom";
 
 import { api } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
@@ -12,7 +13,7 @@ import {
   type BarDatum,
 } from "../../components/charts";
 import { formatMs, formatPercent } from "../../lib/viz";
-import { Badge, Card, Spinner } from "../../components/ui";
+import { Badge, Button, Card, Spinner } from "../../components/ui";
 import { RunsChart } from "./RunsChart";
 
 interface NodeStat {
@@ -156,7 +157,7 @@ export function Dashboard() {
         </Card>
       )}
 
-      {data && !hasRuns && <EmptyState />}
+      {data && !hasRuns && orgId && <EmptyState orgId={orgId} />}
 
       {data && hasRuns && runs && (
         <>
@@ -337,35 +338,144 @@ export function Dashboard() {
   );
 }
 
-function EmptyState() {
+/**
+ * A workspace with no runs is not empty: it has a person in it who just made
+ * it. Show the same instrument strip at zero, so the page looks like itself
+ * from day one, and then the three things that turn zero into a number.
+ */
+function EmptyState({ orgId }: { orgId: string }) {
+  const navigate = useNavigate();
+  const [flows, setFlows] = useState<number | null>(null);
+  const [credentials, setCredentials] = useState<number | null>(null);
+  const [creating, setCreating] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    void Promise.all([
+      api.get<unknown[]>(`/api/v1/orgs/${orgId}/flows`),
+      api.get<unknown[]>(`/api/v1/orgs/${orgId}/credentials`),
+    ])
+      .then(([f, c]) => {
+        if (!live) return;
+        setFlows(f.length);
+        setCredentials(c.length);
+      })
+      .catch(() => {
+        if (!live) return;
+        setFlows(0);
+        setCredentials(0);
+      });
+    return () => {
+      live = false;
+    };
+  }, [orgId]);
+
+  async function createFlow() {
+    setCreating(true);
+    try {
+      const made = await api.post<{ id: string }>(
+        `/api/v1/orgs/${orgId}/flows`,
+        { name: "Untitled flow" },
+      );
+      navigate(`/app/flows/${made.id}?new=1`);
+    } catch {
+      setCreating(false);
+    }
+  }
+
+  const steps: {
+    title: string;
+    detail: string;
+    done: boolean;
+    action: ReactNode;
+  }[] = [
+    {
+      title: "Save a credential",
+      detail:
+        "An API key for the model you want the AI Agent to use, or a GitHub, GitLab or Telegram token.",
+      done: (credentials ?? 0) > 0,
+      action: (
+        <Link to="/app/credentials" className="text-brand-300 hover:underline">
+          Open Credentials
+        </Link>
+      ),
+    },
+    {
+      title: "Build a flow",
+      detail:
+        "Start with a trigger, add the nodes, wire them left to right. The i on each node says when to use it.",
+      done: (flows ?? 0) > 0,
+      action: (
+        <Button
+          variant="secondary"
+          onClick={() => void createFlow()}
+          loading={creating}
+        >
+          New flow
+        </Button>
+      ),
+    },
+    {
+      title: "Run it",
+      detail:
+        "Test run from the builder, or publish and let the trigger start it. Every run shows up here.",
+      done: false,
+      action: (flows ?? 0) > 0 ? (
+        <Link to="/app/flows" className="text-brand-300 hover:underline">
+          Open Flows
+        </Link>
+      ) : null,
+    },
+  ];
+
   return (
     <div className="space-y-6">
-      <Card className="p-10 text-center">
-        <div className="mx-auto mb-4 grid h-12 w-12 place-items-center rounded-2xl border border-ink-700/70 bg-ink-850">
-          <svg
-            viewBox="0 0 24 24"
-            className="h-5 w-5 text-brand-300"
-            fill="none"
-            aria-hidden="true"
-          >
-            <path
-              d="M4 7h6M14 7h6M4 17h6M14 17h6M10 7a2 2 0 002 2h0a2 2 0 012 2v2a2 2 0 002 2"
-              stroke="currentColor"
-              strokeWidth="1.6"
-              strokeLinecap="round"
-            />
-          </svg>
-        </div>
-        <h2 className="text-lg font-semibold text-ink-100">No runs yet</h2>
-        <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-ink-400">
-          Analytics appear as soon as a flow runs. Every node execution is
-          recorded (timing, retries and errors), so this page has something to
-          say from the very first run.
+      <div className="surface grid overflow-hidden rounded-xl sm:grid-cols-2 lg:grid-cols-4 [&>*+*]:border-t [&>*+*]:border-[var(--edge)] sm:[&>*]:border-t-0 sm:[&>*:nth-child(even)]:border-l sm:[&>*:nth-child(n+3)]:border-t lg:[&>*]:!border-t-0 lg:[&>*+*]:!border-l lg:[&>*+*]:border-[var(--edge)]">
+        <StatTile flat label="Runs" value="0" hint="none yet" />
+        <StatTile
+          flat
+          label="Flows"
+          value={flows === null ? "…" : String(flows)}
+          hint={flows ? "ready to run" : "none built yet"}
+        />
+        <StatTile
+          flat
+          label="Credentials"
+          value={credentials === null ? "…" : String(credentials)}
+          hint={credentials ? "saved" : "none saved yet"}
+        />
+        <StatTile flat label="Success rate" value="–" hint="appears after the first run" />
+      </div>
+
+      <Card className="p-6">
+        <h2 className="text-base font-semibold text-ink-100">Get started</h2>
+        <p className="mt-1 text-sm text-ink-400">
+          Three steps. Analytics fill in from the very first run.
         </p>
-        <p className="mx-auto mt-4 max-w-md text-xs leading-relaxed text-ink-600">
-          Flows are created through the API in this beta; the visual canvas is
-          not built yet.
-        </p>
+        <ol className="mt-5 space-y-4">
+          {steps.map((step, index) => (
+            <li key={step.title} className="flex items-start gap-4">
+              <span
+                className={
+                  "mt-0.5 grid h-7 w-7 flex-none place-items-center rounded-full border text-xs font-semibold " +
+                  (step.done
+                    ? "border-[var(--status-good)] text-[var(--status-good)]"
+                    : "border-ink-700 text-ink-400")
+                }
+                aria-label={step.done ? "done" : `step ${index + 1}`}
+              >
+                {step.done ? "✓" : index + 1}
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium text-ink-100">{step.title}</p>
+                <p className="mt-0.5 text-sm leading-relaxed text-ink-400">
+                  {step.detail}
+                </p>
+              </div>
+              <div className="flex-none text-sm">{step.action}</div>
+            </li>
+          ))}
+        </ol>
       </Card>
     </div>
   );
