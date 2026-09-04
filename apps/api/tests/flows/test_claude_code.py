@@ -113,6 +113,20 @@ async def test_a_subscription_token_travels_in_its_own_variable(use_fake, tmp_pa
     assert not claude_code.is_subscription_token("sk-ant-api03-real-key")
 
 
+async def test_a_subscription_token_runs_without_bare_but_still_isolated(use_fake, tmp_path):
+    """`--bare` only accepts an API key, so the token path drops it and states
+    the same isolation flag by flag: no repo-level settings, no MCP, no
+    session files. Found by a real run that failed with "Not logged in"."""
+    use_fake("print(json.dumps({'result': json.dumps(argv)}))")
+    result = await claude_code.run_claude_code(
+        cwd=tmp_path, prompt="x", system_prompt="", api_key="sk-ant-oat01-token-0123456789"
+    )
+    argv = json.loads(result.text)
+    assert "--bare" not in argv
+    assert argv[argv.index("--setting-sources") + 1] == "user"
+    assert "--strict-mcp-config" in argv and "--no-session-persistence" in argv
+
+
 async def test_the_key_never_appears_in_an_error(use_fake, tmp_path):
     use_fake("sys.stderr.write('auth failed for ' + os.environ['ANTHROPIC_API_KEY']); sys.exit(1)")
     with pytest.raises(NodeError) as raised:

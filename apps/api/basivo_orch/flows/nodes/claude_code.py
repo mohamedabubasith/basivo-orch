@@ -104,7 +104,16 @@ async def run_claude_code(
         "-p",
         # No hooks, skills or settings from the host: the worker's own Claude
         # Code configuration, if any, must not shape a tenant's repair.
-        "--bare",
+        # `--bare` does that in one flag, but it also limits auth to an API
+        # key. A subscription token needs the normal mode, so isolation is
+        # spelled out instead: settings only from the (empty, throwaway) user
+        # dir, never from the checked-out repo's .claude folder, no MCP
+        # servers, no session files.
+        *(
+            ["--setting-sources", "user", "--strict-mcp-config", "--no-session-persistence"]
+            if is_subscription_token(api_key)
+            else ["--bare"]
+        ),
         "--output-format",
         "json",
         "--permission-mode",
@@ -181,9 +190,15 @@ async def run_claude_code(
         # Exit 2 is "partial": the cost ceiling or an auth failure stopped it
         # mid-run. Edits may exist on disk; pushing half a fix is worse than
         # none, so this is a failure with the agent's own words attached.
+        # The JSON result is the agent's one-line verdict; stderr is where the
+        # CLI explains itself (which binary, which auth path, what it could not
+        # reach). Both, or the person reading the run log has nothing to act on.
+        detail = str(payload.get("result") or "").strip()[-600:]
+        tail = err.strip()[-500:]
         raise NodeError(
-            f"Claude Code stopped early (exit {process.returncode}): "
-            f"{str(payload.get('result') or err.strip())[-600:]}"
+            f"Claude Code stopped early (exit {process.returncode}): {detail or 'no result'}"
+            + (f"\nstderr: {tail}" if tail else "")
+            + f"\nbinary: {executable}"
         )
 
     result = ClaudeCodeResult(
