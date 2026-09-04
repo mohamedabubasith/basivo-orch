@@ -37,6 +37,7 @@ import {
   useNodesState,
   useReactFlow,
   type Connection,
+  type IsValidConnection,
   type Edge,
   type NodeChange,
   MarkerType,
@@ -50,6 +51,7 @@ import { WorkspaceProvider, useWorkspace } from "../../lib/workspace";
 import { ThemeToggle } from "../../components/ThemeToggle";
 import { Alert, Button, PageLoader, Spinner } from "../../components/ui";
 import { FlowNodeCard } from "../../builder/FlowNodeCard";
+import { connectionProblem } from "../../builder/connections";
 import { NodeIconChip, nodeAccent } from "../../builder/nodeIcons";
 import { Inspector } from "../../builder/Inspector";
 import { TestRunPanel } from "../../builder/TestRunPanel";
@@ -319,8 +321,39 @@ function BuilderInner() {
     [onNodesChange, markDirty],
   );
 
+  /**
+   * The canvas refuses a connection the engine would reject, while the user
+   * is still dragging: the handle will not take it. `isValidConnection` runs
+   * on every hover during a drag, so it must not touch state; the reason is
+   * parked in a ref and shown once, when the drag ends without connecting.
+   */
+  const refusal = useRef<string | null>(null);
+  const isValidConnection: IsValidConnection<Edge> = useCallback(
+    (candidate) => {
+      const problem = connectionProblem(candidate, nodes, edges);
+      refusal.current = problem;
+      return problem === null;
+    },
+    [nodes, edges],
+  );
+  const onConnectEnd = useCallback(() => {
+    if (refusal.current) {
+      setBanner({ tone: "bad", text: refusal.current });
+      refusal.current = null;
+    }
+  }, []);
+
   const onConnect = useCallback(
     (connection: Connection) => {
+      // Belt and braces: `isValidConnection` already refused anything wrong,
+      // but the rule set lives in one function and this is the last gate
+      // before an edge exists.
+      const problem = connectionProblem(connection, nodes, edges);
+      if (problem) {
+        setBanner({ tone: "bad", text: problem });
+        return;
+      }
+      refusal.current = null;
       setEdges((current) =>
         addEdge(
           {
@@ -339,7 +372,7 @@ function BuilderInner() {
       );
       markDirty();
     },
-    [setEdges, markDirty],
+    [nodes, edges, setEdges, markDirty],
   );
 
   /**
@@ -860,6 +893,8 @@ function BuilderInner() {
                 markDirty();
               }}
               onConnect={onConnect}
+              onConnectEnd={onConnectEnd}
+              isValidConnection={isValidConnection}
               onNodeClick={(_, node) => setSelected(node.id)}
               onPaneClick={() => setSelected(null)}
               fitView

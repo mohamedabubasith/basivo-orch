@@ -127,6 +127,19 @@ def validate_graph(graph: Graph, *, known_types: dict[str, Any]) -> None:
         if graph.incoming(trigger.id):
             problems.append(f"Trigger {trigger.id!r} cannot have inputs.")
 
+    # An edge leaving a port the node does not have would draw fine and never
+    # fire: the engine only follows ports the node reports as fired.
+    for edge in graph.edges:
+        spec = known_types.get(graph.node(edge.source).type) if graph.node(edge.source) else None
+        if spec is None:
+            continue
+        port = edge.source_handle or "out"
+        ports = tuple(getattr(spec, "ports", ()) or ("out",))
+        if port not in ports:
+            problems.append(
+                f"Node {edge.source!r} has no output port {port!r}; it has {', '.join(ports)}."
+            )
+
     # A handover edge means "another agent takes the conversation", so the thing
     # on the other end has to be an agent. Wired to a render or a post it would
     # look connected on the canvas and simply never fire, because the agent is
@@ -151,6 +164,20 @@ def validate_graph(graph: Graph, *, known_types: dict[str, Any]) -> None:
     # usually a symptom of a cycle, and reporting both is confusing.
     if cycle := find_cycle(graph):
         raise GraphError([f"The flow contains a loop: {' → '.join(cycle)}."])
+
+    # One input, one connection. The engine can merge several upstreams into a
+    # dict, but a node fed by two things is a node whose input nobody can
+    # predict from the canvas, and the editor refuses the second connection as
+    # it is dragged. This is the same rule at save time, for graphs that did
+    # not come through the editor. Checked after cycles: a loop back into a
+    # chain always gives some node two inputs, and the loop is the real news.
+    for node in graph.nodes:
+        sources = [edge.source for edge in graph.incoming(node.id)]
+        if len(sources) > 1:
+            problems.append(
+                f"Node {node.id!r} has {len(sources)} inputs ({', '.join(sorted(sources))}). "
+                "A node takes its input from one connection."
+            )
 
     trigger_id = triggers[0].id
     reachable = reachable_from(graph, trigger_id)

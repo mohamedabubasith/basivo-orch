@@ -145,3 +145,69 @@ def test_the_palette_exposes_a_config_schema_for_every_node() -> None:
     for entry in registry.palette():
         assert entry["config_schema"]["type"] == "object"
         assert entry["ports"]
+
+
+def test_a_node_takes_its_input_from_one_connection() -> None:
+    """Two upstreams would make 'what does this node run on' a guess. The
+    canvas refuses the second connection; this is the same rule at save."""
+    graph = build(
+        [TRIGGER, set_node("a"), set_node("b")],
+        [
+            {"source": "t", "target": "a"},
+            {"source": "t", "target": "b"},
+            {"source": "a", "target": "b"},
+        ],
+    )
+    with pytest.raises(GraphError) as caught:
+        check(graph)
+    assert any("'b' has 2 inputs (a, t)" in problem for problem in caught.value.problems)
+
+
+def test_the_same_source_cannot_feed_a_node_through_two_ports() -> None:
+    condition = {
+        "id": "c",
+        "type": "logic.condition",
+        "config": {"comparisons": [{"left": "1", "operator": "equals", "right": "1"}]},
+    }
+    graph = build(
+        [TRIGGER, condition, set_node("a")],
+        [
+            {"source": "t", "target": "c"},
+            {"source": "c", "target": "a", "source_handle": "true"},
+            {"source": "c", "target": "a", "source_handle": "false"},
+        ],
+    )
+    with pytest.raises(GraphError) as caught:
+        check(graph)
+    assert any("'a' has 2 inputs" in problem for problem in caught.value.problems)
+
+
+def test_an_edge_must_leave_a_port_the_node_has() -> None:
+    graph = build(
+        [TRIGGER, set_node("a"), set_node("b")],
+        [
+            {"source": "t", "target": "a"},
+            {"source": "a", "target": "b", "source_handle": "true"},
+        ],
+    )
+    with pytest.raises(GraphError) as caught:
+        check(graph)
+    assert any("no output port 'true'" in problem for problem in caught.value.problems)
+
+
+def test_condition_ports_are_real_ports() -> None:
+    condition = {
+        "id": "c",
+        "type": "logic.condition",
+        "config": {"comparisons": [{"left": "1", "operator": "equals", "right": "1"}]},
+    }
+    check(
+        build(
+            [TRIGGER, condition, set_node("a"), set_node("b")],
+            [
+                {"source": "t", "target": "c"},
+                {"source": "c", "target": "a", "source_handle": "true"},
+                {"source": "c", "target": "b", "source_handle": "false"},
+            ],
+        )
+    )
