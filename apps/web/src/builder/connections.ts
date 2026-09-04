@@ -11,6 +11,7 @@
 import type { Edge } from "@xyflow/react";
 
 import type { FlowNode } from "./graph";
+import type { NodeSpec } from "./specs";
 
 export const HANDOVER_PORT = "handover";
 export const AGENT_TYPE = "agent.llm";
@@ -79,4 +80,59 @@ function reaches(edges: readonly Edge[], from: string, to: string): boolean {
     }
   }
   return false;
+}
+
+/**
+ * What is wrong with the graph right now, before anyone presses Validate.
+ *
+ * The server's `validate_graph` is the authority; this is the subset that can
+ * be judged from the canvas alone and is cheap enough to run on every change:
+ * a missing trigger, nodes the trigger cannot reach, and required fields left
+ * empty. Each is pinned to its node, and the summary lines go in the banner.
+ */
+export function liveProblems(
+  nodes: readonly FlowNode[],
+  edges: readonly Edge[],
+  specs: ReadonlyMap<string, NodeSpec>,
+): { byNode: Map<string, string>; summary: string[] } {
+  const byNode = new Map<string, string>();
+  const summary: string[] = [];
+  if (nodes.length === 0) return { byNode, summary };
+
+  const trigger = nodes.find((node) => node.data.isTrigger);
+  if (!trigger) {
+    summary.push("Add a trigger. Nothing starts this flow yet.");
+  }
+
+  for (const node of nodes) {
+    if (node.data.isTrigger || !trigger) continue;
+    if (!reaches(edges, trigger.id, node.id)) {
+      byNode.set(node.id, "Not connected to the trigger, so it would never run.");
+      summary.push(`${node.data.label} is not connected to the trigger.`);
+    }
+  }
+
+  for (const node of nodes) {
+    const spec = specs.get(node.data.nodeType);
+    const required = (spec?.config_schema.required as string[] | undefined) ?? [];
+    const properties = (spec?.config_schema.properties ?? {}) as Record<
+      string,
+      { title?: string }
+    >;
+    for (const key of required) {
+      const value = node.data.config[key];
+      const empty =
+        value === undefined ||
+        value === null ||
+        (typeof value === "string" && value.trim() === "") ||
+        (Array.isArray(value) && value.length === 0);
+      if (!empty) continue;
+      const title =
+        properties[key]?.title ??
+        key.charAt(0).toUpperCase() + key.slice(1).replace(/_/g, " ");
+      if (!byNode.has(node.id)) byNode.set(node.id, `${title} is required.`);
+      summary.push(`${node.data.label}: ${title} is required.`);
+    }
+  }
+  return { byNode, summary };
 }

@@ -153,15 +153,24 @@ export function attachProblems(
   nodes: FlowNode[],
   problems: string[],
 ): FlowNode[] {
-  const byNode = new Map<string, string>();
-  for (const problem of problems) {
-    const match =
-      /Node '([^']+)'/.exec(problem) ?? /node '([^']+)'/.exec(problem);
-    if (match) byNode.set(match[1], problem);
-  }
-  return nodes.map((node) =>
-    node.data.problem === byNode.get(node.id)
+  // The server names nodes the way the author did (the node's name, which
+  // defaults to its label). A problem belongs to the node whose name it opens
+  // with. Two nodes with the same name both get it, which is the right
+  // answer to "which Render Poster" when nobody renamed either.
+  const owned = (node: FlowNode) =>
+    problems.find((problem) => {
+      const name = node.data.label;
+      return (
+        problem.startsWith(name + ":") ||
+        problem.startsWith(name + " ") ||
+        problem.includes(" " + name + ",") ||
+        problem.endsWith(" " + name + ".")
+      );
+    });
+  return nodes.map((node) => {
+    const problem = problems.length ? owned(node) : undefined;
+    return node.data.problem === problem
       ? node
-      : { ...node, data: { ...node.data, problem: byNode.get(node.id) } },
-  );
+      : { ...node, data: { ...node.data, problem } };
+  });
 }

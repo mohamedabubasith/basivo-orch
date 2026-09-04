@@ -178,7 +178,9 @@ export function FlowNodeCard({ data, selected }: NodeProps<FlowNode>) {
               style={{ color: "var(--status-bad)" }}
               title={data.problem}
             >
-              {data.problem.replace(/^Node '[^']+' \([^)]*\) (is )?/, "")}
+              {data.problem.startsWith(data.label + ": ")
+                ? data.problem.slice(data.label.length + 2)
+                : data.problem}
             </p>
           )}
         </div>

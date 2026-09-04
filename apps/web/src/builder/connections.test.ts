@@ -93,3 +93,41 @@ test("a longer loop is caught too", () => {
   );
   assert.match(problem!, /loop/);
 });
+
+import { liveProblems } from "./connections.ts";
+import type { NodeSpec } from "./specs.ts";
+
+const spec = (type: string, required: string[] = []): NodeSpec => ({
+  type, label: type, description: "", tier: 1, category: "x", is_trigger: type.startsWith("trigger."),
+  hidden: false, when: "", needs: [], example: "", ports: ["out"], output_paths: [],
+  config_schema: { required, properties: Object.fromEntries(required.map((k) => [k, { title: k === "html" ? "Html" : undefined }])) },
+});
+const specs = new Map<string, NodeSpec>([
+  ["trigger.manual", spec("trigger.manual")],
+  ["design.render", spec("design.render", ["html"])],
+  ["data.set", spec("data.set")],
+]);
+
+test("no trigger is the first thing said", () => {
+  const poster = node("p", { nodeType: "design.render", label: "Render Poster" });
+  const { summary, byNode } = liveProblems([poster], [], specs);
+  assert.equal(summary[0], "Add a trigger. Nothing starts this flow yet.");
+  assert.match(byNode.get("p")!, /Html is required/);
+});
+
+test("a node the trigger cannot reach is flagged on the node and in the summary", () => {
+  const t = node("t", { isTrigger: true, nodeType: "trigger.manual" });
+  const a = node("a", { label: "Tidy" }), b = node("b", { label: "Stranded" });
+  const { summary, byNode } = liveProblems([t, a, b], [edge("t", "a")], specs);
+  assert.match(byNode.get("b")!, /Not connected/);
+  assert.equal(byNode.has("a"), false);
+  assert.deepEqual(summary, ["Stranded is not connected to the trigger."]);
+});
+
+test("a wired, filled-in flow has nothing to say", () => {
+  const t = node("t", { isTrigger: true, nodeType: "trigger.manual" });
+  const p = node("p", { nodeType: "design.render", label: "Render Poster", config: { html: "<div/>" } });
+  const { summary, byNode } = liveProblems([t, p], [edge("t", "p")], specs);
+  assert.equal(summary.length, 0);
+  assert.equal(byNode.size, 0);
+});

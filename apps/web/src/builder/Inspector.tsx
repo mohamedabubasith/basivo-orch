@@ -423,6 +423,9 @@ export function Inspector({
                 <CodeArea
                   value={String(config.html ?? "")}
                   onChange={(v) => set("html", v)}
+                  placeholder={
+                    '<div style="width:1080px;height:1080px;display:grid;place-items:center;background:#111;color:#fff;font:700 72px Inter">\n  {{ nodes.copy.output.headline }}\n</div>'
+                  }
                 />
               ) : spec.type === "social.post" &&
                 field.key === "credential_id" ? (
@@ -907,9 +910,11 @@ function JsonInput({
 function CodeArea({
   value,
   onChange,
+  placeholder = 'def main(data):\n    # data has: input, nodes, vars, trigger\n    return {"ok": True}',
 }: {
   value: string;
   onChange: (value: string) => void;
+  placeholder?: string;
 }) {
   return (
     <textarea
@@ -918,9 +923,7 @@ function CodeArea({
       spellCheck={false}
       autoCorrect="off"
       autoCapitalize="off"
-      placeholder={
-        'def main(data):\n    # data has: input, nodes, vars, trigger\n    return {"ok": True}'
-      }
+      placeholder={placeholder}
       onChange={(event) => onChange(event.target.value)}
       onKeyDown={(event) => {
         if (event.key !== "Tab") return;

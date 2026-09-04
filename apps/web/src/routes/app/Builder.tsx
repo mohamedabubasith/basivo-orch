@@ -51,7 +51,7 @@ import { WorkspaceProvider, useWorkspace } from "../../lib/workspace";
 import { ThemeToggle } from "../../components/ThemeToggle";
 import { Alert, Button, PageLoader, Spinner } from "../../components/ui";
 import { FlowNodeCard } from "../../builder/FlowNodeCard";
-import { connectionProblem } from "../../builder/connections";
+import { connectionProblem, liveProblems } from "../../builder/connections";
 import { NodeGuide } from "../../builder/NodeGuide";
 import { ExpandDialog } from "../../builder/ExpandField";
 import { NodeIconChip, nodeAccent } from "../../builder/nodeIcons";
@@ -414,6 +414,24 @@ function BuilderInner() {
   }
 
   const hasTrigger = nodes.some((node) => node.data.isTrigger);
+
+  // Judged on every change, so a node that cannot run says so the moment it
+  // is dropped, not after Validate. Server problems from the last Validate,
+  // when present, win: they are the authority and they are more specific.
+  const live = useMemo(
+    () => liveProblems(nodes, edges, specMap),
+    [nodes, edges, specMap],
+  );
+  const shownNodes = useMemo(
+    () =>
+      nodes.map((node) => {
+        const hint = live.byNode.get(node.id);
+        return hint && !node.data.problem
+          ? { ...node, data: { ...node.data, problem: hint } }
+          : node;
+      }),
+    [nodes, live],
+  );
 
   function addNode(spec: NodeSpec, position: { x: number; y: number }) {
     // The engine rejects a graph with more than one trigger — see
@@ -856,6 +874,19 @@ function BuilderInner() {
         </motion.div>
       )}
 
+      {!banner && problems.length === 0 && live.summary.length > 0 && (
+        <div className="flex-none px-4 pt-3">
+          <Alert>
+            Not ready to run yet.
+            <ul className="mt-2 list-disc space-y-1 pl-4 text-xs">
+              {live.summary.slice(0, 6).map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
+          </Alert>
+        </div>
+      )}
+
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <Palette
           specs={specs}
@@ -886,7 +917,7 @@ function BuilderInner() {
         >
           <div className="relative min-h-0 flex-1">
             <ReactFlow
-              nodes={nodes}
+              nodes={shownNodes}
               edges={edges}
               nodeTypes={NODE_TYPES}
               onNodesChange={handleNodesChange}

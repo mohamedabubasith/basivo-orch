@@ -70,6 +70,43 @@ class GraphError(Exception):
         self.problems = problems
 
 
+def _who(node: GraphNode | None, fallback: str = "") -> str:
+    """How a problem refers to a node: by the name the author gave it.
+
+    The editor always saves a name (it defaults to the node's label), so a
+    person reads "Render Poster: Html is required", not a generated id. Graphs
+    built by hand fall back to the id, which is then the only name there is.
+    """
+    if node is None:
+        return fallback
+    return node.name or node.id
+
+
+def _config_problems(node: GraphNode, spec: Any, exc: Exception) -> list[str]:
+    """Pydantic's report, in the words of the form the author is looking at."""
+    errors = getattr(exc, "errors", None)
+    if not callable(errors):
+        return [f"{_who(node)}: {exc}"]
+    fields = getattr(spec.config_model, "model_fields", {})
+    out: list[str] = []
+    for error in errors():
+        loc = [str(part) for part in error.get("loc", ())]
+        key = loc[0] if loc else ""
+        field = fields.get(key)
+        title = (
+            field.title if field is not None and field.title else key.replace("_", " ").capitalize()
+        ) or "Configuration"
+        msg = str(error.get("msg", "invalid"))
+        if msg == "Field required":
+            msg = "is required"
+        elif msg.startswith("Input should be "):
+            msg = "should be " + msg[len("Input should be ") :]
+        else:
+            msg = msg[0].lower() + msg[1:] if msg else msg
+        out.append(f"{_who(node)}: {title} {msg}.")
+    return out or [f"{_who(node)}: the configuration is not valid."]
+
+
 def validate_graph(graph: Graph, *, known_types: dict[str, Any]) -> None:
     """Reject anything the engine could not run.
 
@@ -97,16 +134,14 @@ def validate_graph(graph: Graph, *, known_types: dict[str, Any]) -> None:
     for node in graph.nodes:
         spec = known_types.get(node.type)
         if spec is None:
-            problems.append(f"Node {node.id!r} has unknown type {node.type!r}.")
+            problems.append(f"{_who(node)} has unknown type {node.type!r}.")
             continue
         if spec.is_trigger:
             triggers.append(node)
         try:
             spec.config_model.model_validate(node.config)
         except Exception as exc:  # pydantic ValidationError, kept readable
-            first = str(exc).splitlines()
-            detail = first[1].strip() if len(first) > 1 else str(exc)
-            problems.append(f"Node {node.id!r} ({node.type}) is misconfigured: {detail}")
+            problems.extend(_config_problems(node, spec, exc))
 
     if not triggers:
         problems.append("A flow needs exactly one trigger node; found none.")
@@ -121,11 +156,13 @@ def validate_graph(graph: Graph, *, known_types: dict[str, Any]) -> None:
         if edge.target not in id_set:
             problems.append(f"Edge to unknown node {edge.target!r}.")
         if edge.source == edge.target:
-            problems.append(f"Node {edge.source!r} cannot connect to itself.")
+            problems.append(
+                f"{_who(graph.node(edge.source), edge.source)} cannot connect to itself."
+            )
 
     for trigger in triggers:
         if graph.incoming(trigger.id):
-            problems.append(f"Trigger {trigger.id!r} cannot have inputs.")
+            problems.append(f"{_who(trigger)} is the trigger; nothing can connect into it.")
 
     # An edge leaving a port the node does not have would draw fine and never
     # fire: the engine only follows ports the node reports as fired.
@@ -137,7 +174,8 @@ def validate_graph(graph: Graph, *, known_types: dict[str, Any]) -> None:
         ports = tuple(getattr(spec, "ports", ()) or ("out",))
         if port not in ports:
             problems.append(
-                f"Node {edge.source!r} has no output port {port!r}; it has {', '.join(ports)}."
+                f"{_who(graph.node(edge.source))} has no output port {port!r}; "
+                f"it has {', '.join(ports)}."
             )
 
     # A handover edge means "another agent takes the conversation", so the thing
@@ -151,7 +189,8 @@ def validate_graph(graph: Graph, *, known_types: dict[str, Any]) -> None:
         target = by_id.get(edge.target)
         if target is not None and target.type != AGENT_TYPE:
             problems.append(
-                f"The handover from {edge.source!r} goes to {edge.target!r}, which is a "
+                f"The handover from {_who(by_id.get(edge.source), edge.source)} goes to "
+                f"{_who(target)}, which is a "
                 f"{target.type}. Handover passes a conversation to another agent, so it "
                 "can only connect to an AI Agent."
             )
@@ -163,7 +202,8 @@ def validate_graph(graph: Graph, *, known_types: dict[str, Any]) -> None:
     # Cycles are checked before reachability: an unreachable-looking node is
     # usually a symptom of a cycle, and reporting both is confusing.
     if cycle := find_cycle(graph):
-        raise GraphError([f"The flow contains a loop: {' → '.join(cycle)}."])
+        names = [_who(graph.node(node_id), node_id) for node_id in cycle]
+        raise GraphError([f"The flow contains a loop: {' → '.join(names)}."])
 
     # One input, one connection. The engine can merge several upstreams into a
     # dict, but a node fed by two things is a node whose input nobody can
@@ -175,7 +215,8 @@ def validate_graph(graph: Graph, *, known_types: dict[str, Any]) -> None:
         sources = [edge.source for edge in graph.incoming(node.id)]
         if len(sources) > 1:
             problems.append(
-                f"Node {node.id!r} has {len(sources)} inputs ({', '.join(sorted(sources))}). "
+                f"{_who(node)} has {len(sources)} inputs "
+                f"({', '.join(sorted(_who(graph.node(s), s) for s in sources))}). "
                 "A node takes its input from one connection."
             )
 
@@ -185,7 +226,7 @@ def validate_graph(graph: Graph, *, known_types: dict[str, Any]) -> None:
     if orphans:
         problems.append(
             "These nodes are not connected to the trigger and would never run: "
-            + ", ".join(orphans)
+            + ", ".join(_who(graph.node(o), o) for o in orphans)
             + "."
         )
 

@@ -88,7 +88,9 @@ def test_bad_node_config_is_rejected_at_save_time() -> None:
     )
     with pytest.raises(GraphError) as caught:
         check(graph)
-    assert any("misconfigured" in problem for problem in caught.value.problems)
+    assert any(
+        "Method should be" in problem or "h: " in problem for problem in caught.value.problems
+    )
 
 
 def test_every_problem_is_reported_at_once() -> None:
@@ -160,7 +162,7 @@ def test_a_node_takes_its_input_from_one_connection() -> None:
     )
     with pytest.raises(GraphError) as caught:
         check(graph)
-    assert any("'b' has 2 inputs (a, t)" in problem for problem in caught.value.problems)
+    assert any("b has 2 inputs (a, t)" in problem for problem in caught.value.problems)
 
 
 def test_the_same_source_cannot_feed_a_node_through_two_ports() -> None:
@@ -179,7 +181,7 @@ def test_the_same_source_cannot_feed_a_node_through_two_ports() -> None:
     )
     with pytest.raises(GraphError) as caught:
         check(graph)
-    assert any("'a' has 2 inputs" in problem for problem in caught.value.problems)
+    assert any("a has 2 inputs" in problem for problem in caught.value.problems)
 
 
 def test_an_edge_must_leave_a_port_the_node_has() -> None:
@@ -211,3 +213,38 @@ def test_condition_ports_are_real_ports() -> None:
             ],
         )
     )
+
+
+def test_problems_speak_in_the_authors_names_not_ids() -> None:
+    """The editor saves a name on every node. Problems use it, so the banner
+    reads "Render Poster: Html is required", never a generated identifier."""
+    graph = build(
+        [
+            {
+                "id": "trigger_manual",
+                "type": "trigger.manual",
+                "name": "Run Manually",
+                "config": {},
+            },
+            {"id": "design_render", "type": "design.render", "name": "Render Poster", "config": {}},
+            {
+                "id": "data_set",
+                "type": "data.set",
+                "name": "Tidy up",
+                "config": {"assignments": [{"name": "x", "value": 1}]},
+            },
+        ],
+        [{"source": "trigger_manual", "target": "design_render"}],
+    )
+    with pytest.raises(GraphError) as caught:
+        check(graph)
+    joined = " | ".join(caught.value.problems)
+    assert "Render Poster: Html is required." in joined
+    assert "design_render" not in joined
+
+    # Shape problems are reported once the configuration is clean.
+    graph.node("design_render").config["html"] = "<div>hi</div>"
+    with pytest.raises(GraphError) as caught:
+        check(graph)
+    joined = " | ".join(caught.value.problems)
+    assert "Tidy up" in joined and "data_set" not in joined
