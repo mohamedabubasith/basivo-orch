@@ -65,6 +65,11 @@ async def fetch_models(
         return await _fetch_google(api_key=api_key, base_url=base_url)
 
     if provider_name == "anthropic":
+        if api_key.startswith("sk-ant-oat"):
+            # A `claude setup-token` subscription token. It signs Claude Code in
+            # and nothing else: the Messages API, and this catalog, want a real
+            # API key. Not an error; there is simply no list to fetch.
+            raise ModelFetchNotSupported("anthropic subscription token")
         return await _fetch_anthropic(api_key=api_key, base_url=base_url)
 
     return await _fetch_openai_compatible(provider_name, api_key=api_key, base_url=base_url)

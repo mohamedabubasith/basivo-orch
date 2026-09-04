@@ -269,6 +269,17 @@ function NewCredential({
             invalidateTest();
           }}
         />
+        {provider === "anthropic" && (
+          <p className="-mt-2 text-xs leading-relaxed text-ink-500">
+            On a Claude Pro or Max plan with no API key? Run{" "}
+            <code className="rounded bg-ink-850 px-1 py-0.5 font-mono text-[0.7rem] text-ink-200">
+              claude setup-token
+            </code>{" "}
+            on your own computer and paste the token it prints, which starts
+            with sk-ant-oat01. It signs in Claude Code for Fix Code and Open PR.
+            The AI Agent node still needs a real API key.
+          </p>
+        )}
         <Field
           label="Base URL"
           name="base_url"
@@ -279,7 +290,14 @@ function NewCredential({
             invalidateTest();
           }}
         />
-        {tested && !tested.supported && (
+        {tested && !tested.supported && apiKey.startsWith("sk-ant-oat") && (
+          <Alert tone="info">
+            Subscription token recognised. It signs in Claude Code for the Fix
+            Code and Open PR node on your own plan. It cannot list models or
+            run the AI Agent node; those need an API key.
+          </Alert>
+        )}
+        {tested && !tested.supported && !apiKey.startsWith("sk-ant-oat") && (
           <Alert tone="info">
             This provider has no model-list endpoint to test against. The key
             will be verified on the Agent node&rsquo;s first real call instead.

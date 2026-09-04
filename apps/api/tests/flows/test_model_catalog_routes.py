@@ -139,3 +139,12 @@ async def test_credential_models_404s_for_another_workspaces_credential(
     with pytest.raises(HTTPException) as raised:
         await credential_models(record.id, context=make_context(other), session=session)
     assert raised.value.status_code == 404
+
+
+async def test_a_subscription_token_has_no_catalog_and_is_not_an_error() -> None:
+    """`claude setup-token` output only signs in Claude Code. Asking Anthropic's
+    model list with it would fail; saying "no catalog" keeps the save clean."""
+    from basivo_orch.credentials.model_catalog import fetch_models
+
+    with pytest.raises(ModelFetchNotSupported):
+        await fetch_models("anthropic", api_key="sk-ant-oat01-token", base_url="", options={})
