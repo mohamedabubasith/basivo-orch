@@ -572,12 +572,30 @@ function BuilderInner() {
     if (dirty && !(await save())) return;
     setBusy("publish");
     try {
-      await api.post(`${base}/publish`);
+      const published = await api.post<{
+        version: number;
+        github?: { repo: string; events?: string[]; error?: string };
+      }>(`${base}/publish`);
       const detail = await api.get<FlowDetail>(base);
       setFlow(detail);
       setProblems([]);
       setNodes((current) => attachProblems(current, []));
-      setBanner({ tone: "ok", text: `Published version ${detail.version}.` });
+      // The trigger may have asked to listen to a repository. Publishing is
+      // when that happens, so the outcome belongs in the same sentence.
+      const github = published.github;
+      if (github?.error) {
+        setBanner({
+          tone: "bad",
+          text: `Published version ${detail.version}, but GitHub could not be connected: ${github.error}`,
+        });
+      } else if (github?.repo) {
+        setBanner({
+          tone: "ok",
+          text: `Published version ${detail.version}. GitHub connected: ${github.repo} now starts this flow.`,
+        });
+      } else {
+        setBanner({ tone: "ok", text: `Published version ${detail.version}.` });
+      }
     } catch (err) {
       const list = extractProblems(err);
       setProblems(list);

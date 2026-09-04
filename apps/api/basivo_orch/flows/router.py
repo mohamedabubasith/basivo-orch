@@ -270,40 +270,7 @@ async def connect_github_repository(
     stored and the inbound hook can check every delivery's signature.
     """
     flow = await _load_flow(session, context.organization_id, flow_id)
-
-    from basivo_orch.auth.settings import get_settings as get_auth_settings
-    from basivo_orch.credentials.crypto import decrypt
-    from basivo_orch.credentials.models import Credential
-
-    try:
-        credential = await session.get(Credential, uuid.UUID(payload.credential_id))
-    except ValueError:
-        credential = None
-    if (
-        credential is None
-        or credential.organization_id != context.organization_id
-        or credential.provider != "github"
-    ):
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Pick a GitHub credential first.")
-    events = [e for e in payload.events if e in GITHUB_HOOK_EVENTS] or ["issues"]
-    hook_url = f"{str(get_auth_settings().public_base_url).rstrip('/')}/hooks/{flow.id}"
-    async with httpx.AsyncClient(timeout=20) as http:
-        result = await register_github_webhook(
-            http,
-            token=decrypt(credential.secret_encrypted),
-            repo=payload.repo.strip(),
-            hook_url=hook_url,
-            secret=github_hook_secret(flow.id),
-            events=events,
-            api_base=credential.base_url or "https://api.github.com",
-        )
-    return {
-        "repo": payload.repo.strip(),
-        "events": result["events"],
-        "webhook": hook_url,
-        "updated": result["updated"],
-        "published": flow.published_version_id is not None,
-    }
+    return await _connect_github(session, context, flow, payload)
 
 
 @management_router.post("/orgs/{organization_id}/flows/{flow_id}/telegram/connect")
@@ -501,12 +468,86 @@ async def publish_flow(
         version = await service.publish(session, flow=flow, user_id=context.user.id)
     except GraphError as exc:
         raise _graph_error(exc) from exc
-    return {
+    result: dict[str, Any] = {
         "flow_id": str(flow.id),
         "version": version.version,
         "published_at": version.published_at,
         "run_url": f"/flows/{flow.id}/run",
         "stream_url": f"/flows/{flow.id}/run/stream",
+    }
+    # Publishing is the moment the flow gets its stable address, so it is the
+    # moment a "listen to this repository" choice can be honoured. Done here,
+    # the person never presses a second button; a failure is reported next to
+    # the published version rather than failing the publish, because the flow
+    # itself is fine and the fix is on the GitHub side.
+    github = await _register_listen(session, context, flow, Graph.model_validate(version.graph))
+    if github is not None:
+        result["github"] = github
+    return result
+
+
+async def _register_listen(
+    session: AsyncSession, context: OrgContext, flow: Flow, graph: Graph
+) -> dict[str, Any] | None:
+    """Register the webhook the trigger asked for, if it asked for one."""
+    trigger = next((n for n in graph.nodes if n.type == "trigger.webhook"), None)
+    if trigger is None:
+        return None
+    config = WebhookTriggerConfig.model_validate(trigger.config)
+    if config.listen_provider != "github" or not (
+        config.listen_credential_id and config.listen_repo
+    ):
+        return None
+    try:
+        return await _connect_github(
+            session,
+            context,
+            flow,
+            GitHubConnect(
+                credential_id=config.listen_credential_id,
+                repo=config.listen_repo,
+                events=config.listen_events or ["issues"],
+            ),
+        )
+    except HTTPException as exc:
+        return {"repo": config.listen_repo, "error": str(exc.detail)}
+
+
+async def _connect_github(
+    session: AsyncSession, context: OrgContext, flow: Flow, payload: GitHubConnect
+) -> dict[str, Any]:
+    from basivo_orch.auth.settings import get_settings as get_auth_settings
+    from basivo_orch.credentials.crypto import decrypt
+    from basivo_orch.credentials.models import Credential
+
+    try:
+        credential = await session.get(Credential, uuid.UUID(payload.credential_id))
+    except ValueError:
+        credential = None
+    if (
+        credential is None
+        or credential.organization_id != context.organization_id
+        or credential.provider != "github"
+    ):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Pick a GitHub credential first.")
+    events = [e for e in payload.events if e in GITHUB_HOOK_EVENTS] or ["issues"]
+    hook_url = f"{str(get_auth_settings().public_base_url).rstrip('/')}/hooks/{flow.id}"
+    async with httpx.AsyncClient(timeout=20) as http:
+        result = await register_github_webhook(
+            http,
+            token=decrypt(credential.secret_encrypted),
+            repo=payload.repo.strip(),
+            hook_url=hook_url,
+            secret=github_hook_secret(flow.id),
+            events=events,
+            api_base=credential.base_url or "https://api.github.com",
+        )
+    return {
+        "repo": payload.repo.strip(),
+        "events": result["events"],
+        "webhook": hook_url,
+        "updated": result["updated"],
+        "published": flow.published_version_id is not None,
     }
 
 

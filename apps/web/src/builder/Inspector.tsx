@@ -1229,20 +1229,19 @@ function WebhookSource({
               ))}
             </div>
           </Labelled>
-          {isPublished ? (
+          <p className="text-[0.68rem] leading-relaxed text-ink-500">
+            Nothing to do on GitHub. When you publish, the webhook is registered
+            on the repository for you, and re-registered on every publish.
+          </p>
+          {isPublished && (
             <button
               type="button"
               onClick={() => void connect()}
               disabled={busy || !credential || !repo || events.length === 0}
-              className="w-full rounded-xl bg-brand-500 px-3 py-2 text-sm font-medium text-white transition-opacity disabled:opacity-40"
+              className="w-full rounded-xl border border-ink-600 px-3 py-2 text-xs font-medium text-ink-200 transition-colors hover:border-brand-400 disabled:opacity-40"
             >
-              {busy ? "Connecting…" : "Connect GitHub"}
+              {busy ? "Connecting…" : "Reconnect now"}
             </button>
-          ) : (
-            <p className="text-[0.68rem] leading-relaxed text-ink-500">
-              Publish the flow, then press Connect here. Publishing gives the
-              flow the stable address GitHub will call.
-            </p>
           )}
           {note && (
             <p

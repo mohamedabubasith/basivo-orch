@@ -120,3 +120,129 @@ def test_a_typed_secret_still_works_as_before():
     authenticate_inbound(flow_id, config, raw_body=body, headers=signed("typed", body))
     with pytest.raises(HTTPException):
         authenticate_inbound(flow_id, config, raw_body=body, headers={"x-webhook-secret": "nope"})
+
+
+# ---------------------------------------------------------------------------
+# Publishing connects the repository by itself
+# ---------------------------------------------------------------------------
+
+from basivo_orch.auth.authz import OrgContext, Permission, Role  # noqa: E402
+from basivo_orch.auth.models import Organization, User  # noqa: E402
+from basivo_orch.credentials.crypto import encrypt  # noqa: E402
+from basivo_orch.credentials.models import Credential  # noqa: E402
+from basivo_orch.flows import service  # noqa: E402
+from basivo_orch.flows.graph import Graph  # noqa: E402
+from basivo_orch.flows.router import publish_flow  # noqa: E402
+
+
+def make_context(organization: Organization) -> OrgContext:
+    user = User(id=uuid.uuid4(), email="owner@example.com", hashed_password="x", is_active=True)  # noqa: S106
+    return OrgContext(
+        user=user, organization=organization, role=Role.OWNER, permissions=frozenset(Permission)
+    )
+
+
+async def listening_flow(session, organization, credential_id: str):
+    graph = Graph.model_validate(
+        {
+            "nodes": [
+                {
+                    "id": "hook",
+                    "type": "trigger.webhook",
+                    "name": "Webhook",
+                    "config": {
+                        "listen_provider": "github",
+                        "listen_credential_id": credential_id,
+                        "listen_repo": "acme/site",
+                        "listen_events": ["issues"],
+                    },
+                },
+                {
+                    "id": "tidy",
+                    "type": "data.set",
+                    "name": "Tidy",
+                    "config": {"assignments": [{"name": "x", "value": 1}]},
+                },
+            ],
+            "edges": [{"source": "hook", "target": "tidy"}],
+        }
+    )
+    flow, _ = await service.create_flow(
+        session,
+        organization_id=organization.id,
+        user_id=None,
+        name="Issue to PR",
+        slug=None,
+        description=None,
+        graph=graph,
+    )
+    return flow
+
+
+async def a_github_credential(session, organization) -> Credential:
+    record = Credential(
+        organization_id=organization.id,
+        name="gh",
+        provider="github",
+        secret_encrypted=encrypt("ghp_saved"),
+        base_url=None,
+        options={},
+    )
+    session.add(record)
+    await session.commit()
+    return record
+
+
+async def test_publishing_registers_the_webhook_the_trigger_asked_for(
+    monkeypatch, session, organization
+):
+    """The person chose a repo on the trigger. Publish is the one action they
+    take; the webhook appears at GitHub without a second step."""
+    cred = await a_github_credential(session, organization)
+    flow = await listening_flow(session, organization, str(cred.id))
+    calls = []
+
+    async def fake_register(http, *, token, repo, hook_url, secret, events, api_base):
+        calls.append({"token": token, "repo": repo, "hook_url": hook_url, "events": events})
+        return {"hook_id": 9, "events": events, "updated": False}
+
+    monkeypatch.setattr("basivo_orch.flows.router.register_github_webhook", fake_register)
+    result = await publish_flow(flow.id, context=make_context(organization), session=session)
+
+    assert result["version"] == 1
+    assert result["github"]["repo"] == "acme/site" and result["github"]["events"] == ["issues"]
+    assert calls[0]["token"] == "ghp_saved" and calls[0]["hook_url"].endswith(f"/hooks/{flow.id}")
+    assert calls[0]["repo"] == "acme/site"
+
+
+async def test_a_github_refusal_does_not_unpublish_the_flow(monkeypatch, session, organization):
+    cred = await a_github_credential(session, organization)
+    flow = await listening_flow(session, organization, str(cred.id))
+
+    async def refusing(http, **kwargs):
+        raise HTTPException(400, "GitHub refused this credential for webhook administration.")
+
+    monkeypatch.setattr("basivo_orch.flows.router.register_github_webhook", refusing)
+    result = await publish_flow(flow.id, context=make_context(organization), session=session)
+
+    assert result["version"] == 1, "the flow is fine; only the GitHub side failed"
+    assert "refused" in result["github"]["error"]
+
+
+async def test_a_plain_webhook_flow_publishes_without_touching_github(
+    monkeypatch, session, organization
+):
+    cred = await a_github_credential(session, organization)
+    flow = await listening_flow(session, organization, str(cred.id))
+    # Same flow, but the trigger is not listening to anything.
+    version = await service.latest_version(session, flow.id)
+    graph = Graph.model_validate(version.graph)
+    graph.nodes[0].config = {}
+    await service.save_version(session, flow=flow, graph=graph, user_id=None)
+
+    async def must_not_be_called(http, **kwargs):
+        raise AssertionError("no repository was chosen")
+
+    monkeypatch.setattr("basivo_orch.flows.router.register_github_webhook", must_not_be_called)
+    result = await publish_flow(flow.id, context=make_context(organization), session=session)
+    assert "github" not in result
