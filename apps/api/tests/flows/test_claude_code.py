@@ -96,6 +96,23 @@ async def test_the_key_arrives_in_the_environment_and_the_prompt_on_stdin(use_fa
     assert telemetry == "1"
 
 
+async def test_a_subscription_token_travels_in_its_own_variable(use_fake, tmp_path):
+    """`claude setup-token` output is not an API key. Handed to Claude Code as
+    one it would be rejected; in CLAUDE_CODE_OAUTH_TOKEN it signs in."""
+    use_fake(
+        "print(json.dumps({'result': os.environ.get('CLAUDE_CODE_OAUTH_TOKEN','-') + '|' "
+        "+ os.environ.get('ANTHROPIC_API_KEY','-')}))"
+    )
+    token = "sk-ant-oat01-subscription-token-0123456789"
+    result = await claude_code.run_claude_code(
+        cwd=tmp_path, prompt="x", system_prompt="", api_key=token
+    )
+    oauth, api = result.text.split("|")
+    assert oauth == "[redacted]" and api == "-"
+    assert claude_code.is_subscription_token(token)
+    assert not claude_code.is_subscription_token("sk-ant-api03-real-key")
+
+
 async def test_the_key_never_appears_in_an_error(use_fake, tmp_path):
     use_fake("sys.stderr.write('auth failed for ' + os.environ['ANTHROPIC_API_KEY']); sys.exit(1)")
     with pytest.raises(NodeError) as raised:

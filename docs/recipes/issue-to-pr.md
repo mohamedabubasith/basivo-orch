@@ -115,3 +115,22 @@ The Auto-fix node has a **Repair engine** setting.
 
 `cost_limit_usd` becomes Claude Code's `--max-budget-usd`; `max_tool_calls` is its
 turn limit. A run stopped by either is a failed run, never a half-pushed branch.
+
+
+### On a Claude Pro or Max subscription, without an API key
+
+A subscription has no API key, but Claude Code can sign in with it. On your
+own computer, with Claude Code installed and signed in, run:
+
+```
+claude setup-token
+```
+
+It prints a long-lived token beginning with `sk-ant-oat01-`. Save it under
+Credentials as provider Anthropic, with the token in the API key field. The
+Fix Code and Open PR node then runs Claude Code on your subscription.
+
+Two limits. The token is personal to your subscription and its usage limits
+apply, so keep it in your own workspace. And only Claude Code accepts it: the
+AI Agent node talks to the Messages API, which needs a real API key, so a
+flow that also uses an AI Agent needs a second, API-key credential for that.

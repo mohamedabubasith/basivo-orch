@@ -60,6 +60,15 @@ def binary() -> str | None:
     return os.environ.get("BASIVO_CLAUDE_CODE_BIN") or shutil.which("claude")
 
 
+def is_subscription_token(secret: str) -> bool:
+    """Tokens from `claude setup-token` carry this prefix; API keys do not.
+
+    Only Claude Code accepts them. The Messages API behind the AI Agent node
+    does not, so a credential holding one drives repairs and nothing else.
+    """
+    return secret.startswith("sk-ant-oat")
+
+
 def redact(text: str, secret: str) -> str:
     """The key must never land in a log line or an error message."""
     return text.replace(secret, "[redacted]") if secret else text
@@ -121,7 +130,12 @@ async def run_claude_code(
             "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"),
             "HOME": home,
             "CLAUDE_CONFIG_DIR": home,
-            "ANTHROPIC_API_KEY": api_key,
+            # A Pro or Max subscription has no API key. `claude setup-token`
+            # on the person's own machine mints a long-lived token for exactly
+            # this headless use; Claude Code reads it from a different variable.
+            (
+                "CLAUDE_CODE_OAUTH_TOKEN" if is_subscription_token(api_key) else "ANTHROPIC_API_KEY"
+            ): api_key,
             "DISABLE_AUTOUPDATER": "1",
             "DISABLE_TELEMETRY": "1",
             "DISABLE_ERROR_REPORTING": "1",
