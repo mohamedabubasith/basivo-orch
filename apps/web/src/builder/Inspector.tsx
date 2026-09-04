@@ -33,6 +33,8 @@ interface SchemaField {
   description?: string;
   type: string;
   enum?: string[];
+  /** What a person reads for each enum value; from the schema's x-enum-labels. */
+  enumLabels?: Record<string, string>;
   required: boolean;
   itemDef?: JsonSchema;
   default?: unknown;
@@ -41,6 +43,7 @@ interface SchemaField {
 }
 
 export interface JsonSchema {
+  "x-enum-labels"?: Record<string, string>;
   type?: string;
   title?: string;
   description?: string;
@@ -89,6 +92,14 @@ function resolve(schema: JsonSchema, root: JsonSchema): JsonSchema {
   return schema;
 }
 
+/** `instagram_square` is an identifier; "Instagram square" is a label. Values
+ * without underscores (mp4, 9:16, high) are already words and stay as they are. */
+function readable(value: string): string {
+  if (!value.includes("_")) return value;
+  const words = value.replace(/_/g, " ");
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
 function fields(root: JsonSchema): SchemaField[] {
   const required = new Set(root.required ?? []);
   return Object.entries(root.properties ?? {}).map(([key, raw]) => {
@@ -99,6 +110,7 @@ function fields(root: JsonSchema): SchemaField[] {
       description: schema.description,
       type: schema.type ?? "string",
       enum: schema.enum,
+      enumLabels: schema["x-enum-labels"],
       required: required.has(key),
       itemDef: schema.items ? resolve(schema.items, root) : undefined,
       default: schema.default,
@@ -738,7 +750,7 @@ function FieldInput({
       >
         {field.enum.map((option) => (
           <option key={option} value={option}>
-            {option}
+            {field.enumLabels?.[option] ?? readable(option)}
           </option>
         ))}
       </select>

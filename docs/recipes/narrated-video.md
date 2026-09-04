@@ -56,7 +56,7 @@ downloading the MP4.
 
 ## Narration on its own
 
-The **Speak** node (`audio.speak`) is the same engine without the video: text
+Voice-over is an option on the Describe a Video node; turn on **Add a voice-over**. The standalone Speak node (`audio.speak`) is no longer in the palette but keeps working in flows that have it: text
 in, an audio artifact out, plus `words` — the per-word timings. Useful for a
 Telegram voice note, an accessibility read-out, or feeding a composition you
 wrote by hand (`video.render` takes the artifact).

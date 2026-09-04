@@ -201,6 +201,10 @@ class Node(ABC):
     when: ClassVar[str] = ""
     needs: ClassVar[tuple[str, ...]] = ()
     example: ClassVar[str] = ""
+    #: Kept out of the palette. Existing flows that use it keep running and
+    #: the inspector still edits it; new flows are steered to the node that
+    #: offers the same thing as an option.
+    hidden: ClassVar[bool] = False
     #: Ports other than the default, for branching nodes.
     ports: ClassVar[tuple[str, ...]] = (DEFAULT_PORT,)
     #: Dotted paths into this node's output that are stable enough to suggest
@@ -253,6 +257,7 @@ class Node(ABC):
             "tier": cls.tier,
             "category": cls.category,
             "is_trigger": cls.is_trigger,
+            "hidden": cls.hidden,
             "when": cls.when,
             "needs": list(cls.needs),
             "example": cls.example,

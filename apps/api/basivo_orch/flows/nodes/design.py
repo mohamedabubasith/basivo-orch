@@ -73,7 +73,22 @@ class RenderConfig(BaseModel):
         "a4_portrait",
         "a4_landscape",
         "custom",
-    ] = "instagram_square"
+    ] = Field(
+        default="instagram_square",
+        title="Size",
+        json_schema_extra={
+            "x-enum-labels": {
+                "instagram_square": "Instagram post, square (1080 x 1080)",
+                "instagram_portrait": "Instagram post, portrait (1080 x 1350)",
+                "story": "Story or Reel (1080 x 1920)",
+                "twitter_landscape": "X / Twitter (1600 x 900)",
+                "linkedin": "LinkedIn (1200 x 627)",
+                "a4_portrait": "A4 portrait, print (1240 x 1754)",
+                "a4_landscape": "A4 landscape, print (1754 x 1240)",
+                "custom": "Custom width and height",
+            }
+        },
+    )
     width: int = Field(default=0, ge=0, le=4000, description="Only used when size is custom.")
     height: int = Field(default=0, ge=0, le=4000, description="Only used when size is custom.")
     #: 2 is a retina render — the same layout at twice the pixels. Print wants

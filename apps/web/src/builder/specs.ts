@@ -17,6 +17,8 @@ export interface NodeSpec {
   tier: number;
   category: string;
   is_trigger: boolean;
+  /** Not offered in the palette; still editable where a saved flow uses it. */
+  hidden: boolean;
   /** The guide behind the palette's info button: when to use it, what it needs, a typical chain. */
   when: string;
   needs: string[];
@@ -51,8 +53,9 @@ export function initialConfig(spec: NodeSpec): Record<string, unknown> {
 export function groupSpecs(
   specs: NodeSpec[],
 ): { heading: string; specs: NodeSpec[] }[] {
-  const triggers = specs.filter((spec) => spec.is_trigger);
-  const rest = specs.filter((spec) => !spec.is_trigger);
+  const offered = specs.filter((spec) => !spec.hidden);
+  const triggers = offered.filter((spec) => spec.is_trigger);
+  const rest = offered.filter((spec) => !spec.is_trigger);
   const byCategory = new Map<string, NodeSpec[]>();
   for (const spec of rest) {
     const heading = title(spec.category);

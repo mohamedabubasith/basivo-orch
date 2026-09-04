@@ -605,7 +605,17 @@ class VideoGeneratorConfig(BaseModel):
         description="Art direction: colours, mood, brand. Optional.",
     )
     duration_seconds: int = Field(default=6, ge=2, le=60)
-    size: Literal["landscape", "square", "story"] = "landscape"
+    size: Literal["landscape", "square", "story"] = Field(
+        default="landscape",
+        title="Size",
+        json_schema_extra={
+            "x-enum-labels": {
+                "landscape": "Landscape, YouTube (1920 x 1080)",
+                "square": "Square, Instagram post (1080 x 1080)",
+                "story": "Vertical, Story or Reel (1080 x 1920)",
+            }
+        },
+    )
 
     #: Photographs the composition may use, as artifact ids or a reference —
     #: usually {{ input.photo_ids }} from a conversation. Without these an
@@ -632,13 +642,26 @@ class VideoGeneratorConfig(BaseModel):
     #: Narrate the video. The agent writes a script first, it is spoken, and
     #: the animation is then authored to the length the voice actually took —
     #: the other order cuts the tail off every line.
-    narration: bool = False
+    narration: bool = Field(
+        default=False,
+        title="Add a voice-over",
+        description=(
+            "The agent writes a short script from the brief, a voice reads it, and the "
+            "animation is timed to the speech. No speech API or key needed."
+        ),
+    )
     voice: str = Field(default="af_heart", max_length=40, title="Voice")
     voice_speed: float = Field(default=1.0, ge=0.5, le=2.0, title="Voice speed")
     #: Word-level captions, timed from the model's own phoneme durations.
     #: On by default when narrating: short-form video is mostly watched muted,
     #: so a narrated video without captions says nothing to half its audience.
-    captions: bool = True
+    captions: bool = Field(
+        default=True,
+        title="Captions",
+        description=(
+            "Word-timed captions when a voice-over is on. Most short video is watched muted."
+        ),
+    )
 
     def dimensions(self) -> tuple[int, int]:
         return {"landscape": (1920, 1080), "square": (1080, 1080), "story": (1080, 1920)}[self.size]

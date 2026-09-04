@@ -57,4 +57,22 @@ def test_the_response_schema_carries_the_guide() -> None:
 
     for cls in registry.REGISTRY.values():
         read = NodeTypeRead.model_validate(cls.describe())
-        assert read.when == cls.when and read.needs == list(cls.needs) and read.example == cls.example
+        assert (
+            read.when == cls.when and read.needs == list(cls.needs) and read.example == cls.example
+        )
+
+
+def test_speak_is_hidden_but_still_runs() -> None:
+    """Voice belongs inside the video node people already found. The type stays
+    registered so saved flows keep executing."""
+    assert registry.REGISTRY["audio.speak"].hidden is True
+    assert registry.REGISTRY["audio.speak"].describe()["hidden"] is True
+    assert registry.REGISTRY["video.generate"].config_model.model_fields["narration"].title
+
+
+def test_every_poster_size_has_a_label_a_person_reads() -> None:
+    from basivo_orch.flows.nodes.design import SIZES, RenderConfig
+
+    labels = RenderConfig.model_json_schema()["properties"]["size"]["x-enum-labels"]
+    for key in [*SIZES, "custom"]:
+        assert key in labels and "_" not in labels[key], key

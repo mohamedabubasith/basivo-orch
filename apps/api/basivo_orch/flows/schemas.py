@@ -195,6 +195,7 @@ class NodeTypeRead(BaseModel):
     tier: int
     category: str
     is_trigger: bool
+    hidden: bool = False
     #: The guide behind the palette's info button. Same warning as
     #: output_paths: absent here, FastAPI strips them and the guide is blank.
     when: str

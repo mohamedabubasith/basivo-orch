@@ -296,6 +296,10 @@ class SpeakConfig(BaseModel):
 
 class SpeakNode(Node):
     type = "audio.speak"
+    # Voice lives inside Describe a Video as its narration option, which is
+    # where people look for it. This node stays for flows that already use
+    # it and for the rare case of wanting audio alone.
+    hidden = True
     label = "Text to Speech"
     description = "Turn text into narration with a real voice, on this machine."
     when = "A video or message needs a spoken voice track and you do not want to pay a speech API."
