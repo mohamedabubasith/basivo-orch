@@ -80,7 +80,6 @@ const NODE_TYPES = { basivo: FlowNodeCard };
 const EDGE_TYPES = { basivo: FlowEdge };
 
 /** Kept in one place: the layout maths and the components must agree. */
-const INSPECTOR_WIDTH = 340;
 const NODE_WIDTH = 248;
 
 interface FlowDetail {
@@ -408,9 +407,8 @@ function BuilderInner() {
 
     const rect = canvasRef.current?.getBoundingClientRect();
     if (!rect) return { x: 140, y: 160 };
-    const usableWidth = rect.width - (selected ? INSPECTOR_WIDTH : 0);
     return screenToFlowPosition({
-      x: rect.left + usableWidth / 2 - NODE_WIDTH / 2,
+      x: rect.left + rect.width / 2 - NODE_WIDTH / 2,
       y: rect.top + rect.height / 2 - 40,
     });
   }
@@ -1097,6 +1095,7 @@ function BuilderInner() {
         </div>
 
         {selectedNode && selectedSpec && (
+          <NodeDialog onClose={() => setSelected(null)}>
           <Inspector
             spec={selectedSpec}
             name={selectedNode.data.label}
@@ -1123,6 +1122,7 @@ function BuilderInner() {
             onDelete={deleteSelected}
             onClose={() => setSelected(null)}
           />
+          </NodeDialog>
         )}
       </div>
     </div>
@@ -1672,5 +1672,49 @@ function FlowTitle({
       aria-label="Flow name"
       className="min-w-0 max-w-xs rounded-lg border border-brand-400 bg-ink-950/70 px-2 py-0.5 text-lg font-semibold text-ink-100 outline-none"
     />
+  );
+}
+
+
+/**
+ * Node settings as a centred dialog over the canvas.
+ *
+ * They were a 356px rail on the right. That rail covered a third of a laptop
+ * screen while it was open, hid the handles of any node that sat under it,
+ * and gave a system prompt or an HTML template a column to be typed into but
+ * not read. A dialog gets the width the settings need and leaves the canvas
+ * exactly as it was when it closes. Escape and the backdrop close it; the
+ * values are applied as they are typed, so closing loses nothing.
+ */
+function NodeDialog({
+  onClose,
+  children,
+}: {
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-40 flex items-center justify-center bg-black/55 p-4 backdrop-blur-[2px]"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div
+        role="dialog"
+        aria-label="Node settings"
+        className="surface flex h-[86vh] w-full max-w-3xl flex-col overflow-hidden rounded-3xl shadow-2xl shadow-black/60"
+      >
+        {children}
+      </div>
+    </div>
   );
 }

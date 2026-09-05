@@ -95,7 +95,7 @@ export function CredentialPicker({
         className={INPUT}
       >
         <option value="">
-          {provider === "github" || provider === "gitlab"
+          {provider === "github" || provider === "gitlab" || provider === "jira"
             ? "Pick a credential…"
             : "Use the server's own key (no credential)"}
         </option>

@@ -280,10 +280,25 @@ function NewCredential({
             The AI Agent node still needs a real API key.
           </p>
         )}
+        {provider === "jira" && (
+          <p className="-mt-2 text-xs leading-relaxed text-ink-500">
+            Write the key as{" "}
+            <code className="rounded bg-ink-850 px-1 py-0.5 font-mono text-[0.7rem] text-ink-200">
+              you@company.com:API-token
+            </code>
+            , the email of a Jira administrator and a token from
+            id.atlassian.com (Security, API tokens). Put the site, for example
+            https://your-team.atlassian.net, in Base URL below.
+          </p>
+        )}
         <Field
           label="Base URL"
           name="base_url"
-          placeholder="Optional, for a proxy, gateway or self-hosted endpoint"
+          placeholder={
+            provider === "jira"
+              ? "https://your-team.atlassian.net"
+              : "Optional, for a proxy, gateway or self-hosted endpoint"
+          }
           value={baseUrl}
           onChange={(event) => {
             setBaseUrl(event.target.value);

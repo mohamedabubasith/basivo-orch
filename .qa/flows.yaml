@@ -1,0 +1,95 @@
+# Console smoke flows for basivo-qa. Run against the local stack:
+#   values live in .qa/secrets.env; then: /qa http://localhost:5173
+base_url: http://localhost:5173
+
+watch:
+  - apps/web/src/**
+
+auth:
+  login_path: /login
+  user_secret: QA_USER
+  password_secret: QA_PASSWORD
+
+flows:
+  - id: login-wrong-password
+    watch:
+      - apps/web/src/routes/auth/Login.tsx
+    steps:
+      - open /login
+      - enter qa-nobody@example.com as the email and Wrong-Password-123 as the password
+      - submit
+      - expect an error message saying the email and password do not match, and the URL to stay on /login
+
+  - id: login
+    steps:
+      - open /login
+      - log in
+      - expect to land inside the app, not on /login
+
+  - id: overview-get-started
+    depends_on: login
+    steps:
+      - open /app
+      - expect the overview to show a Runs number and a Get started list, or run analytics if runs exist
+
+  - id: builder-palette-and-guide
+    depends_on: login
+    steps:
+      - open /app/flows
+      - click the New flow button
+      - expect the builder to open with a Triggers group in the left palette and a hint to start with a trigger
+      - click the small i button next to Fix Code and Open PR in the palette
+      - expect a dialog with the headings When to use it, What it needs, and A typical flow
+      - press Escape
+
+  - id: builder-connections
+    depends_on: login
+    steps:
+      - open /app/flows and click New flow
+      - click Run Manually in the palette, then click Set Variables, then click If / Else
+      - expect a notice that nodes are not connected to the trigger
+      - drag from the right handle of Run Manually to the left handle of Set Variables
+      - drag from the right handle of Set Variables to the left handle of If / Else
+      - drag from the right handle of Run Manually to the left handle of If / Else
+      - expect the third connection to be refused with a message that the node already takes its input from another node
+      - click the small cross on the connection between Set Variables and If / Else
+      - expect that connection to be gone and the flow to show Unsaved changes
+
+  - id: webhook-source-panel
+    depends_on: login
+    steps:
+      - open /app/flows and click New flow
+      - click Webhook in the palette, then click the Webhook node on the canvas
+      - expect a centred Node settings dialog, not a side panel, asking Where do calls come from
+      - expect the dropdown to offer a GitHub repository option and a Jira site option
+      - choose the Jira site option
+      - expect a Jira credential picker, a Which tickets filter box with placeholder project = OPS, and checkboxes A ticket is created, A ticket is updated
+      - choose the GitHub repository option
+      - expect a GitHub credential picker, a Repository picker, and event checkboxes
+      - press Escape
+      - expect the dialog to be gone and the canvas still to show the Webhook node
+
+  - id: fix-code-settings
+    depends_on: login
+    steps:
+      - open /app/flows and click New flow
+      - click Webhook in the palette, then click Fix Code and Open PR in the palette
+      - click the Fix Code and Open PR node on the canvas
+      - expect a Node settings dialog with a field The ticket offering a dropdown Where is the problem described
+      - choose The Jira ticket that triggered the webhook
+      - expect a Jira credential picker to appear under it
+      - expect a Coding agent dropdown with options Automatic, Claude Code (Anthropic only) and Built-in agent (any provider)
+      - expect a Skills section and an MCP servers section with a button + Add an MCP server
+      - click + Add an MCP server
+      - expect Name and URL boxes and a credential picker for the server
+      - click Done
+      - expect the dialog to be gone
+
+  - id: agent-mcp-settings
+    depends_on: login
+    steps:
+      - open /app/flows and click New flow
+      - click Run Manually in the palette, then click AI Agent in the palette
+      - click the AI Agent node on the canvas
+      - expect a Node settings dialog with Skills and MCP servers sections
+      - click Done

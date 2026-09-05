@@ -24,6 +24,10 @@ export function Login() {
   async function onSubmit(event: FormEvent) {
     event.preventDefault();
     setError(null);
+    if (!email.trim() || !password) {
+      setError("Enter your email and password.");
+      return;
+    }
     setBusy(true);
     try {
       await signIn(email, password);

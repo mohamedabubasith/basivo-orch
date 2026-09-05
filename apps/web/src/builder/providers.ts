@@ -32,14 +32,18 @@ export const PROVIDER_LABEL: Record<string, string> = {
   alibaba: "Alibaba Cloud",
   github: "GitHub (repos & issues)",
   gitlab: "GitLab (repos & issues)",
+  jira: "Jira (tickets)",
 };
+
+/** Credentials that are not model providers: git hosts and ticket trackers. */
+export const NON_MODEL_PROVIDERS = new Set(["github", "gitlab", "jira"]);
 
 /** Model providers only — what the Agent node's LLM picker offers. The VCS
  *  hosts are credentials, not places to run a model. */
 export const MODEL_PROVIDERS = PROVIDERS_INTERNAL();
 function PROVIDERS_INTERNAL() {
   return Object.entries(PROVIDER_LABEL)
-    .filter(([value]) => value !== "github" && value !== "gitlab")
+    .filter(([value]) => !NON_MODEL_PROVIDERS.has(value))
     .map(([value, label]) => ({ value, label }));
 }
 

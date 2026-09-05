@@ -25,6 +25,7 @@ import { ApiError, api } from "../lib/api";
 import { SubAgentEditor } from "./SubAgentEditor";
 import { MODEL_PROVIDERS, VCS_PROVIDERS, VOICES } from "./providers";
 import { ToolEditor } from "./ToolEditor";
+import { McpServerEditor } from "./McpServerEditor";
 import type { NodeSpec } from "./specs";
 import { NodeGuide } from "./NodeGuide";
 
@@ -201,20 +202,23 @@ export function Inspector({
   }
 
   return (
-    <aside className="flex h-full w-[356px] flex-none flex-col border-l border-ink-800/70 bg-ink-900/60">
-      <div className="flex items-center gap-3 border-b border-ink-800/70 p-4">
+    <aside
+      data-testid="node-settings"
+      className="flex h-full w-full flex-col bg-ink-900/60"
+    >
+      <div className="flex items-center gap-3 border-b border-ink-800/70 px-5 py-4">
         <NodeIconChip type={spec.type} size={8} />
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-medium text-ink-100">
             {spec.label}
           </p>
-          <p className="truncate font-mono text-[0.68rem] text-ink-500">
-            {spec.type}
+          <p className="truncate text-[0.68rem] text-ink-500">
+            {spec.description}
           </p>
         </div>
         <button
           onClick={onClose}
-          aria-label="Close inspector"
+          aria-label="Close node settings"
           className="rounded-lg p-1.5 text-ink-500 transition-colors hover:bg-ink-800 hover:text-ink-200"
         >
           <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none">
@@ -227,7 +231,7 @@ export function Inspector({
         </button>
       </div>
 
-      <div className="flex-1 space-y-4 overflow-y-auto p-4">
+      <div className="flex-1 space-y-4 overflow-y-auto px-5 py-4">
         <details className="group rounded-xl border border-ink-800/70 bg-ink-900/40 px-3 py-2">
           <summary className="cursor-pointer list-none text-xs text-ink-400 transition-colors hover:text-ink-200">
             <span className="mr-1.5 inline-block transition-transform group-open:rotate-90">
@@ -334,7 +338,6 @@ export function Inspector({
               ) &&
               // A budget for skills nobody selected is a number about nothing.
               !(
-                isAgent &&
                 field.key === "skill_budget_chars" &&
                 !(Array.isArray(config.skills) && config.skills.length > 0)
               ) &&
@@ -478,7 +481,7 @@ export function Inspector({
                     </option>
                   ))}
                 </select>
-              ) : isAgent && field.key === "skills" ? (
+              ) : field.key === "skills" ? (
                 <SkillPicker
                   orgId={orgId}
                   value={
@@ -559,6 +562,12 @@ export function Inspector({
                   onChange={(tools) => set("tools", tools)}
                   suggestions={suggestions}
                 />
+              ) : field.key === "mcp_servers" ? (
+                <McpServerEditor
+                  value={config.mcp_servers}
+                  onChange={(servers) => set("mcp_servers", servers)}
+                  orgId={orgId}
+                />
               ) : usesLlm && field.key === "vision_provider" ? (
                 <select
                   value={String(config.vision_provider ?? "")}
@@ -582,12 +591,28 @@ export function Inspector({
                   onChange={(v) => set("repo", v)}
                 />
               ) : spec.type === "git.autofix" && field.key === "problem" ? (
-                <ProblemSource
-                  value={String(config.problem ?? "")}
-                  onChange={(v) => set("problem", v)}
-                  onIssueNumber={(v) => set("issue_number", v)}
-                  suggestions={suggestions}
-                />
+                <div className="space-y-2">
+                  <ProblemSource
+                    value={String(config.problem ?? "")}
+                    onChange={(v) => set("problem", v)}
+                    onIssueNumber={(v) => set("issue_number", v)}
+                    onTicketProvider={(v) => set("ticket_provider", v)}
+                    suggestions={suggestions}
+                  />
+                  {config.ticket_provider === "jira" && (
+                    <Labelled
+                      label="Jira credential"
+                      hint="Used to post the pull request link back on the ticket."
+                    >
+                      <CredentialPicker
+                        orgId={orgId}
+                        provider="jira"
+                        value={String(config.ticket_credential_id ?? "")}
+                        onChange={(v) => set("ticket_credential_id", v)}
+                      />
+                    </Labelled>
+                  )}
+                </div>
               ) : usesGit && field.key === "git_provider" ? (
                 <select
                   value={String(config.git_provider ?? "github")}
@@ -661,13 +686,20 @@ export function Inspector({
           ))}
       </div>
 
-      <div className="border-t border-ink-800/70 p-4">
+      <div className="flex items-center justify-between gap-3 border-t border-ink-800/70 px-5 py-3">
         <button
           onClick={onDelete}
-          className="w-full rounded-lg border border-ink-700 px-3 py-2 text-sm transition-colors hover:border-[var(--status-bad)]"
+          className="rounded-lg border border-ink-700 px-3 py-2 text-sm transition-colors hover:border-[var(--status-bad)]"
           style={{ color: "var(--status-bad)" }}
         >
           Delete node
+        </button>
+        {/* Changes are applied as they are typed, so one button: Done. */}
+        <button
+          onClick={onClose}
+          className="rounded-lg bg-brand-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-400"
+        >
+          Done
         </button>
       </div>
     </aside>
@@ -1028,6 +1060,8 @@ const PROBLEM_SOURCES: {
   template: string;
   /** Where that source keeps its issue number, so the node can report back. */
   issueNumber?: string;
+  /** Set when the ticket lives outside the git host, so the report goes there. */
+  ticketProvider?: string;
 }[] = [
   {
     value: "github_issue",
@@ -1041,6 +1075,13 @@ const PROBLEM_SOURCES: {
     template:
       "{{ input.body.object_attributes.title }}\n\n{{ input.body.object_attributes.description }}",
     issueNumber: "{{ input.body.object_attributes.iid }}",
+  },
+  {
+    value: "jira_issue",
+    label: "The Jira ticket that triggered the webhook",
+    template: "{{ trigger.ticket.title }}\n\n{{ trigger.ticket.description }}",
+    issueNumber: "{{ trigger.ticket.key }}",
+    ticketProvider: "jira",
   },
   {
     value: "webhook_body",
@@ -1058,11 +1099,13 @@ function ProblemSource({
   value,
   onChange,
   onIssueNumber,
+  onTicketProvider,
   suggestions,
 }: {
   value: string;
   onChange: (value: string) => void;
   onIssueNumber: (value: string) => void;
+  onTicketProvider: (value: string) => void;
   suggestions: Suggestion[];
 }) {
   const preset = PROBLEM_SOURCES.find((source) => source.template === value);
@@ -1085,6 +1128,7 @@ function ProblemSource({
           // The issue number rides along, so "comment on the issue when
           // done" works without anyone knowing where the number lives.
           onIssueNumber(chosen?.issueNumber ?? "");
+          onTicketProvider(chosen?.ticketProvider ?? "");
         }}
         className={INPUT}
       >
@@ -1123,6 +1167,13 @@ const GITHUB_EVENTS: { value: string; label: string }[] = [
   { value: "push", label: "Code is pushed" },
 ];
 
+/** Mirrors `JIRA_HOOK_EVENTS` in `nodes/jira.py`. */
+const JIRA_EVENTS: { value: string; label: string }[] = [
+  { value: "jira:issue_created", label: "A ticket is created" },
+  { value: "jira:issue_updated", label: "A ticket is updated" },
+  { value: "comment_created", label: "Someone comments on a ticket" },
+];
+
 /**
  * Where a webhook's calls come from. Two answers: "a GitHub repository", in
  * which case this platform registers the webhook at GitHub itself when the
@@ -1148,29 +1199,54 @@ function WebhookSource({
   const provider = String(config.listen_provider ?? "");
   const credential = String(config.listen_credential_id ?? "");
   const repo = String(config.listen_repo ?? "");
+  const filter = String(config.listen_filter ?? "");
   const events = Array.isArray(config.listen_events)
     ? (config.listen_events as string[])
-    : ["issues"];
+    : provider === "jira"
+      ? ["jira:issue_created"]
+      : ["issues"];
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
+
+  function choose(next: string) {
+    set("listen_provider", next);
+    // Event names belong to one system; a GitHub list left behind on a Jira
+    // choice would register nothing Jira understands.
+    set("listen_events", next === "jira" ? ["jira:issue_created"] : ["issues"]);
+    set("listen_credential_id", "");
+  }
 
   async function connect() {
     if (!orgId || !flowId) return;
     setBusy(true);
     setNote(null);
     try {
-      const result = await api.post<{ repo: string; events: string[]; updated: boolean }>(
-        `/api/v1/orgs/${orgId}/flows/${flowId}/github/connect`,
-        { credential_id: credential, repo, events },
-      );
-      setNote({
-        ok: true,
-        text: `${result.updated ? "Updated" : "Connected"}. GitHub now calls this flow when ${describe(result.events)} in ${result.repo}.`,
-      });
+      if (provider === "jira") {
+        const result = await api.post<{ site: string; events: string[]; updated: boolean }>(
+          `/api/v1/orgs/${orgId}/flows/${flowId}/jira/connect`,
+          { credential_id: credential, filter, events },
+        );
+        setNote({
+          ok: true,
+          text: `${result.updated ? "Updated" : "Connected"}. ${result.site} now calls this flow when ${describe(result.events, JIRA_EVENTS)}.`,
+        });
+      } else {
+        const result = await api.post<{ repo: string; events: string[]; updated: boolean }>(
+          `/api/v1/orgs/${orgId}/flows/${flowId}/github/connect`,
+          { credential_id: credential, repo, events },
+        );
+        setNote({
+          ok: true,
+          text: `${result.updated ? "Updated" : "Connected"}. GitHub now calls this flow when ${describe(result.events)} in ${result.repo}.`,
+        });
+      }
     } catch (err) {
       setNote({
         ok: false,
-        text: err instanceof ApiError ? err.message : "Could not connect to GitHub.",
+        text:
+          err instanceof ApiError
+            ? err.message
+            : `Could not connect to ${provider === "jira" ? "Jira" : "GitHub"}.`,
       });
     } finally {
       setBusy(false);
@@ -1182,15 +1258,89 @@ function WebhookSource({
       <Labelled label="Where do calls come from?">
         <select
           value={provider}
-          onChange={(event) => set("listen_provider", event.target.value)}
+          onChange={(event) => choose(event.target.value)}
           className={INPUT}
         >
           <option value="">Anything that can POST. I will paste the URL myself.</option>
           <option value="github">A GitHub repository. Set it up for me.</option>
+          <option value="jira">A Jira site. Set it up for me.</option>
         </select>
       </Labelled>
 
-      {provider === "github" ? (
+      {provider === "jira" ? (
+        <>
+          <Labelled label="Jira credential">
+            <CredentialPicker
+              orgId={orgId}
+              provider="jira"
+              value={credential}
+              onChange={(v) => set("listen_credential_id", v)}
+            />
+          </Labelled>
+          <Labelled
+            label="Which tickets"
+            hint="A JQL filter. Leave empty for every project the account can see."
+          >
+            <input
+              value={filter}
+              onChange={(event) => set("listen_filter", event.target.value)}
+              placeholder="project = OPS"
+              className={INPUT}
+            />
+          </Labelled>
+          <Labelled label="Start this flow when">
+            <div className="space-y-1.5">
+              {JIRA_EVENTS.map((event) => (
+                <label key={event.value} className="flex items-center gap-2 text-xs text-ink-200">
+                  <input
+                    type="checkbox"
+                    checked={events.includes(event.value)}
+                    onChange={(e) =>
+                      set(
+                        "listen_events",
+                        e.target.checked
+                          ? [...events, event.value]
+                          : events.filter((v) => v !== event.value),
+                      )
+                    }
+                  />
+                  {event.label}
+                </label>
+              ))}
+            </div>
+          </Labelled>
+          <p className="text-[0.68rem] leading-relaxed text-ink-500">
+            Nothing to do in Jira. When you publish, the webhook is registered on
+            the site for you (the credential has to be a Jira administrator), and
+            re-registered on every publish.
+          </p>
+          {isPublished && (
+            <button
+              type="button"
+              onClick={() => void connect()}
+              disabled={busy || !credential || events.length === 0}
+              className="w-full rounded-xl border border-ink-600 px-3 py-2 text-xs font-medium text-ink-200 transition-colors hover:border-brand-400 disabled:opacity-40"
+            >
+              {busy ? "Connecting…" : "Reconnect now"}
+            </button>
+          )}
+          {note && (
+            <p
+              className="text-[0.72rem] leading-relaxed"
+              style={{ color: note.ok ? "var(--status-good)" : "var(--status-bad)" }}
+            >
+              {note.text}
+            </p>
+          )}
+          <p className="text-[0.68rem] leading-relaxed text-ink-500">
+            The ticket arrives flattened as{" "}
+            <code className="text-ink-400">{"{{ input.ticket.title }}"}</code>,{" "}
+            <code className="text-ink-400">{"{{ input.ticket.description }}"}</code> and{" "}
+            <code className="text-ink-400">{"{{ input.ticket.key }}"}</code>. On Fix Code
+            and Open PR, choose “The Jira ticket that triggered the webhook”.
+          </p>
+        </>
+      ) : provider === "github" ? (
         <>
           <Labelled label="GitHub credential">
             <CredentialPicker
@@ -1282,9 +1432,9 @@ function WebhookSource({
   );
 }
 
-function describe(events: string[]): string {
+function describe(events: string[], known = GITHUB_EVENTS): string {
   const names = events.map(
-    (value) => GITHUB_EVENTS.find((e) => e.value === value)?.label.toLowerCase() ?? value,
+    (value) => known.find((e) => e.value === value)?.label.toLowerCase() ?? value,
   );
   return names.length <= 1 ? names[0] ?? "something happens" : names.slice(0, -1).join(", ") + " or " + names[names.length - 1];
 }
