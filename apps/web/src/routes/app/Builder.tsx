@@ -447,12 +447,16 @@ function BuilderInner() {
       return;
     }
     const id = makeNodeId(spec.type, new Set(nodes.map((node) => node.id)));
+    // Highlighted on the canvas, not opened: settings are a dialog now, and a
+    // dialog that appears on every palette click would sit between the person
+    // and the next node they meant to add. A click on the node opens it.
     setNodes((current) => [
-      ...current,
+      ...current.map((node) => ({ ...node, selected: false })),
       {
         id,
         type: "basivo",
         position,
+        selected: true,
         data: {
           label: spec.label,
           nodeType: spec.type,
@@ -462,7 +466,6 @@ function BuilderInner() {
         },
       },
     ]);
-    setSelected(id);
     markDirty();
   }
 

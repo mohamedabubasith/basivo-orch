@@ -119,7 +119,10 @@ export function FlowNodeCard({ data, selected }: NodeProps<FlowNode>) {
         <Handle
           type="target"
           position={Position.Left}
-          className="!h-3.5 !w-3.5 !border-2 !border-[var(--color-ink-900)] !bg-ink-400 transition-all hover:!scale-125 hover:!bg-brand-400"
+          // Above the header, which is a positioned sibling rendered after it
+          // and was painting over the handle's inner half: a drop that landed
+          // there hit the header, not the port. Found by the QA plugin.
+          className="!z-10 !h-3.5 !w-3.5 !border-2 !border-[var(--color-ink-900)] !bg-ink-400 transition-all hover:!scale-125 hover:!bg-brand-400"
         />
       )}
 

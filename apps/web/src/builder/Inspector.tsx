@@ -13,7 +13,7 @@
  * the floor rather than the ceiling.
  */
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { cx } from "../lib/cx";
 import { NodeIconChip } from "./nodeIcons";
@@ -192,12 +192,19 @@ export function Inspector({
     spec.type === "git.autofix" ||
     spec.type === "git.comment";
 
+  // Several set() calls in one handler must compose. Spreading the `config`
+  // prop gave each call the snapshot from before the handler ran, so choosing
+  // a ticket source (template, issue number, ticket provider: three writes)
+  // kept only the last one. Found by the QA plugin, not by eye.
+  const latest = useRef(config);
+  latest.current = config;
   function set(key: string, value: unknown) {
-    const next = { ...config };
+    const next = { ...latest.current };
     // Deleting rather than storing undefined: the API applies its own defaults,
     // and an explicit null would override one.
     if (value === undefined || value === "") delete next[key];
     else next[key] = value;
+    latest.current = next;
     onChange(next);
   }
 
