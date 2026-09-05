@@ -1100,9 +1100,12 @@ async def test_two_agent_nodes_hand_over_on_the_canvas(session, make_run, monkey
     prompt = " ".join(seen["desk"])
     assert "I want a refund" in prompt
 
-    # Refunds ran and received the reason as its input.
+    # Refunds ran and received the request itself, so it answers the person's
+    # question rather than the desk's parting words. The reason travels
+    # separately, as handover_note, for a prompt that wants it.
     assert "refunds" in seen, "the chosen colleague never ran"
-    assert "they want money back" in " ".join(seen["refunds"])
+    assert "I want a refund" in " ".join(seen["refunds"])
+    assert "they want money back" not in " ".join(seen["refunds"])
 
     # The two paths not taken did not run.
     executions = await nodes_for(session, run.id)

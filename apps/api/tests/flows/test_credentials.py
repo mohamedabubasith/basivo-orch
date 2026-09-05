@@ -21,8 +21,13 @@ from basivo_orch.auth.authz import OrgContext, Permission, Role
 from basivo_orch.auth.models import Organization, User
 from basivo_orch.credentials.crypto import DecryptionError, decrypt, encrypt
 from basivo_orch.credentials.models import Credential
-from basivo_orch.credentials.router import create_credential, delete_credential, list_credentials
-from basivo_orch.credentials.schemas import CredentialCreate, CredentialRead
+from basivo_orch.credentials.router import (
+    create_credential,
+    delete_credential,
+    list_credentials,
+    update_credential,
+)
+from basivo_orch.credentials.schemas import CredentialCreate, CredentialRead, CredentialUpdate
 
 
 def make_context(organization: Organization, *, permissions: frozenset[Permission]) -> OrgContext:
@@ -140,3 +145,71 @@ async def test_deleting_another_workspaces_credential_404s(
     # Untouched: the failed cross-tenant attempt did not delete it.
     still_there = await session.get(Credential, created.id)
     assert still_there is not None
+
+
+async def test_a_credential_can_be_renamed_and_repointed_without_its_key(
+    session: AsyncSession, organization: Organization
+):
+    context = make_context(organization, permissions=ALL)
+    created = await create_credential(
+        CredentialCreate(name="Prod key", provider="openai", api_key=FAKE_SECRET),
+        context=context,
+        session=session,
+    )
+    updated = await update_credential(
+        created.id,
+        CredentialUpdate(name="Production OpenAI", base_url="https://gw.example/v1"),
+        context=context,
+        session=session,
+    )
+    assert updated.id == created.id
+    assert updated.name == "Production OpenAI"
+    assert updated.base_url == "https://gw.example/v1"
+    assert decrypt(updated.secret_encrypted) == FAKE_SECRET, "the key is untouched"
+    assert updated.hint == FAKE_SECRET[-4:]
+
+
+async def test_rotating_the_key_replaces_the_secret_and_the_hint(
+    session: AsyncSession, organization: Organization
+):
+    context = make_context(organization, permissions=ALL)
+    created = await create_credential(
+        CredentialCreate(name="Rotating", provider="openai", api_key=FAKE_SECRET),
+        context=context,
+        session=session,
+    )
+    updated = await update_credential(
+        created.id,
+        CredentialUpdate(api_key="sk-live-new-key-9876"),
+        context=context,
+        session=session,
+    )
+    assert decrypt(updated.secret_encrypted) == "sk-live-new-key-9876"
+    assert updated.hint == "9876"
+    # An empty key in the form means "keep it", not "erase it".
+    kept = await update_credential(
+        created.id, CredentialUpdate(api_key=""), context=context, session=session
+    )
+    assert decrypt(kept.secret_encrypted) == "sk-live-new-key-9876"
+
+
+async def test_another_workspace_cannot_update_a_credential(
+    session: AsyncSession, organization: Organization
+):
+    context = make_context(organization, permissions=ALL)
+    created = await create_credential(
+        CredentialCreate(name="Mine", provider="openai", api_key=FAKE_SECRET),
+        context=context,
+        session=session,
+    )
+    other = Organization(id=uuid.uuid4(), name="Other", slug=f"other-{uuid.uuid4().hex[:6]}")
+    session.add(other)
+    await session.commit()
+    with pytest.raises(HTTPException) as denied:
+        await update_credential(
+            created.id,
+            CredentialUpdate(name="Stolen"),
+            context=make_context(other, permissions=ALL),
+            session=session,
+        )
+    assert denied.value.status_code == 404

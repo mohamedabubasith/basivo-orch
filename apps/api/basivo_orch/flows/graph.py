@@ -205,20 +205,21 @@ def validate_graph(graph: Graph, *, known_types: dict[str, Any]) -> None:
         names = [_who(graph.node(node_id), node_id) for node_id in cycle]
         raise GraphError([f"The flow contains a loop: {' → '.join(names)}."])
 
-    # One input, one connection. The engine can merge several upstreams into a
-    # dict, but a node fed by two things is a node whose input nobody can
-    # predict from the canvas, and the editor refuses the second connection as
-    # it is dragged. This is the same rule at save time, for graphs that did
-    # not come through the editor. Checked after cycles: a loop back into a
-    # chain always gives some node two inputs, and the loop is the real news.
+    # Several connections into one node are allowed: the branches of an If /
+    # Else, or the agents on a hand over, are alternatives, and the node after
+    # them runs on whichever one fired (see `Engine._input_for`). What is
+    # refused is the same source wired to the same node twice, which can only
+    # be a slip of the mouse.
     for node in graph.nodes:
-        sources = [edge.source for edge in graph.incoming(node.id)]
-        if len(sources) > 1:
-            problems.append(
-                f"{_who(node)} has {len(sources)} inputs "
-                f"({', '.join(sorted(_who(graph.node(s), s) for s in sources))}). "
-                "A node takes its input from one connection."
-            )
+        seen: set[tuple[str, str]] = set()
+        for edge in graph.incoming(node.id):
+            key = (edge.source, edge.source_handle or "out")
+            if key in seen:
+                problems.append(
+                    f"{_who(graph.node(edge.source), edge.source)} is connected to "
+                    f"{_who(node)} twice from the same output."
+                )
+            seen.add(key)
 
     trigger_id = triggers[0].id
     reachable = reachable_from(graph, trigger_id)

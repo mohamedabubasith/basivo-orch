@@ -242,7 +242,11 @@ async def logout(
 
 
 @router.post("/refresh", response_model=TokenResponse)
-@limiter.limit("30/minute")
+# Per client IP. Every open tab refreshes once per access-token lifetime, and
+# an office behind one NAT address is many clients; 30/minute signed a whole
+# team out whenever a few of them were working. Reuse detection, not this
+# limit, is what stops a stolen token.
+@limiter.limit("120/minute")
 async def refresh(
     request: Request,
     response: Response,

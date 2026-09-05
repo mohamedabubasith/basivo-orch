@@ -57,6 +57,17 @@ class CredentialCreate(BaseModel):
     options: dict[str, Any] = Field(default_factory=dict)
 
 
+class CredentialUpdate(BaseModel):
+    """What may change after creation. Every field optional; an omitted or
+    empty `api_key` keeps the stored secret, so renaming never means
+    re-pasting a key."""
+
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    api_key: str | None = Field(default=None, max_length=4000)
+    base_url: str | None = Field(default=None, max_length=300)
+    options: dict[str, Any] | None = None
+
+
 class CredentialRead(BaseModel):
     """Never carries the secret. `hint` is the last four characters, for
     telling two credentials apart without exposing either."""

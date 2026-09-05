@@ -36,6 +36,7 @@ from basivo_orch.credentials.schemas import (
     CredentialCreate,
     CredentialRead,
     CredentialTestRequest,
+    CredentialUpdate,
     ModelListResponse,
     RepoListResponse,
 )
@@ -84,6 +85,56 @@ async def create_credential(
         created_by=context.user.id,
     )
     session.add(record)
+    try:
+        await session.flush()
+    except IntegrityError:
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A credential with that name already exists in this workspace.",
+        ) from None
+    await session.commit()
+    await session.refresh(record)
+    return record
+
+
+@router.patch(
+    "/orgs/{organization_id}/credentials/{credential_id}",
+    response_model=CredentialRead,
+)
+async def update_credential(
+    credential_id: uuid.UUID,
+    payload: CredentialUpdate,
+    context: OrgContext = Depends(require(Permission.CREDENTIAL_CREATE)),
+    session: AsyncSession = Depends(get_async_session),
+) -> Credential:
+    """Rename, repoint or rotate a credential without recreating it.
+
+    Recreating meant every node referencing the old id had to be re-picked.
+    The id stays; the name, base URL and options change in place, and a new
+    key replaces the stored secret (and its hint). Gated on create rather
+    than a separate permission: whoever may add a key may rotate one.
+    """
+    result = await session.execute(
+        select(Credential).where(
+            Credential.id == credential_id,
+            Credential.organization_id == context.organization_id,
+        )
+    )
+    record = result.scalar_one_or_none()
+    if record is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No such credential.")
+
+    fields = payload.model_dump(exclude_unset=True)
+    if "name" in fields and fields["name"] is not None:
+        record.name = fields["name"]
+    if "base_url" in fields:
+        record.base_url = fields["base_url"] or None
+    if "options" in fields and fields["options"] is not None:
+        record.options = fields["options"]
+    if fields.get("api_key"):
+        record.secret_encrypted = encrypt(fields["api_key"])
+        record.hint = fields["api_key"][-4:] if len(fields["api_key"]) >= 4 else ""
     try:
         await session.flush()
     except IntegrityError:

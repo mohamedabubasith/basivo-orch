@@ -220,7 +220,9 @@ class AgentConfig(BaseModel):
         max_length=20000,
         description=(
             "The user message. Supports {{ references }}. Chain agents by "
-            "using {{ input.text }}, the upstream agent's reply."
+            "using {{ input.text }}, the upstream agent's reply. After a hand over, "
+            "{{ input.text }} is the request the previous agent received and "
+            "{{ input.handover_note }} says why it passed it on."
         ),
     )
 
@@ -548,6 +550,7 @@ class AgentNode(Node):
         "stop_reason",
         "handover_to",
         "handover_reason",
+        "handover_note",
         "tool_calls",
         "usage.input_tokens",
         "usage.output_tokens",
@@ -846,16 +849,22 @@ class AgentNode(Node):
         return NodeResult(
             output={
                 # The receiving agent reads `{{ input.text }}` like any other
-                # downstream node, so a handover carries the conversation
-                # rather than starting a new one. When nothing was said before
-                # transferring, the reason is what travels.
-                "text": text or handover.get("reason", ""),
+                # downstream node. After a handover that is the request this
+                # agent was given, so the colleague answers the person's
+                # question rather than this agent's parting words; what this
+                # agent said, or why it transferred, travels as handover_note.
+                "text": prompt if handed_to else text,
                 "json": json_output,
                 "stop_reason": "handover" if handed_to else totals.stop_reason,
                 "tool_calls": totals.tool_calls,
                 "delegations": totals.delegations,
                 "handover_to": handed_to or "",
                 "handover_reason": handover.get("reason", ""),
+                "handover_note": (
+                    (f"Handed over by {ctx.node_name}: " + (handover.get("reason") or text))
+                    if handed_to
+                    else ""
+                ),
                 "usage": {
                     "input_tokens": totals.input_tokens,
                     "output_tokens": totals.output_tokens,

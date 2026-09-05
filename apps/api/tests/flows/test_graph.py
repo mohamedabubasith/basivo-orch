@@ -149,9 +149,10 @@ def test_the_palette_exposes_a_config_schema_for_every_node() -> None:
         assert entry["ports"]
 
 
-def test_a_node_takes_its_input_from_one_connection() -> None:
-    """Two upstreams would make 'what does this node run on' a guess. The
-    canvas refuses the second connection; this is the same rule at save."""
+def test_a_node_may_take_input_from_several_connections() -> None:
+    """The node after an If / Else, or after the agents on a hand over, is fed
+    by alternatives and runs on whichever fired. Refusing that made every
+    branch-and-rejoin flow impossible to draw."""
     graph = build(
         [TRIGGER, set_node("a"), set_node("b")],
         [
@@ -160,12 +161,10 @@ def test_a_node_takes_its_input_from_one_connection() -> None:
             {"source": "a", "target": "b"},
         ],
     )
-    with pytest.raises(GraphError) as caught:
-        check(graph)
-    assert any("b has 2 inputs (a, t)" in problem for problem in caught.value.problems)
+    check(graph)
 
 
-def test_the_same_source_cannot_feed_a_node_through_two_ports() -> None:
+def test_both_branches_of_a_condition_may_rejoin() -> None:
     condition = {
         "id": "c",
         "type": "logic.condition",
@@ -179,9 +178,20 @@ def test_the_same_source_cannot_feed_a_node_through_two_ports() -> None:
             {"source": "c", "target": "a", "source_handle": "false"},
         ],
     )
+    check(graph)
+
+
+def test_the_same_output_wired_twice_to_one_node_is_refused() -> None:
+    graph = build(
+        [TRIGGER, set_node("a")],
+        [
+            {"source": "t", "target": "a"},
+            {"source": "t", "target": "a"},
+        ],
+    )
     with pytest.raises(GraphError) as caught:
         check(graph)
-    assert any("a has 2 inputs" in problem for problem in caught.value.problems)
+    assert any("twice from the same output" in problem for problem in caught.value.problems)
 
 
 def test_an_edge_must_leave_a_port_the_node_has() -> None:
