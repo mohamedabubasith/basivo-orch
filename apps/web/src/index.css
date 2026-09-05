@@ -254,6 +254,18 @@
    * a blur behind it, a light inner top edge and a real drop shadow, so a card
    * sits *above* the page instead of being drawn onto it. That is the whole
    * difference between a document and an interface. */
+  /* Dialogs are opaque. `.surface` is translucent with a backdrop blur, which
+     is right for a card on the page and wrong for a dialog over another
+     dialog: the layer underneath bled through and the expanded editor read
+     as a grey slab with ghost fields in it. */
+  .dialog-surface {
+    background: var(--color-ink-850);
+    border: 1px solid var(--edge-strong);
+    box-shadow:
+      inset 0 1px 0 color-mix(in oklab, var(--color-ink-100) 8%, transparent),
+      0 24px 64px -24px rgba(0, 0, 0, 0.55);
+  }
+
   .surface {
     background: color-mix(in oklab, var(--color-ink-850) 72%, transparent);
     backdrop-filter: blur(16px) saturate(140%);

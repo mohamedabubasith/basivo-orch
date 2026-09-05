@@ -72,12 +72,14 @@ export function FlowEdge({
           // Always visible, quietly: the label layer renders outside the edge
           // element, so a hover rule on the edge cannot reach this button, and
           // a control that only appears when you already know to select the
-          // line is a control nobody finds. Full strength on hover or select.
-          // `nodrag nopan` keeps the click from starting a pan.
+          // line is a control nobody finds. Quiet means a dim glyph, not a
+          // translucent button: at 60% opacity the dashed line showed through
+          // the disc and the cross looked broken. `nodrag nopan` keeps the
+          // click from starting a pan.
           className={
-            "nodrag nopan pointer-events-auto absolute grid h-5 w-5 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border text-[0.7rem] leading-none shadow transition-opacity " +
-            "border-ink-600 bg-ink-900 text-ink-300 hover:border-[var(--status-bad)] hover:text-[var(--status-bad)] hover:opacity-100 " +
-            (selected ? "opacity-100" : "opacity-60")
+            "nodrag nopan pointer-events-auto absolute grid h-5 w-5 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border text-[0.7rem] leading-none shadow transition-colors " +
+            "border-ink-600 bg-ink-850 hover:border-[var(--status-bad)] hover:text-[var(--status-bad)] " +
+            (selected ? "text-ink-100" : "text-ink-400")
           }
           style={{ left: labelX, top: labelY }}
         >

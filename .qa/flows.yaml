@@ -124,3 +124,29 @@ flows:
       - expect sections for Email address, Two-factor authentication with a Set up or Turn off button, and Password with Current password and New password fields
       - do not click Set up, Turn off or Change password
 
+  - id: runs-page
+    depends_on: login
+    steps:
+      - open /app/runs
+      - expect a table of runs with a status pill on each row, or an empty state saying there are no runs yet
+      - click the first run in the list if there is one
+      - expect a run detail with a status pill, the trigger, the duration, and a list of node steps that can be expanded
+
+  - id: skills-page
+    depends_on: login
+    steps:
+      - open /app/skills
+      - expect either skill cards or an empty state, and a New skill button
+      - click New skill
+      - expect a dialog with a Name field and a large body editor
+      - press Escape
+
+  - id: api-keys-page
+    depends_on: login
+    steps:
+      - open /app/api-keys
+      - expect either a table of keys or an empty state, a New API key button, and a curl example showing how to call a flow
+      - click New API key
+      - expect a dialog with a Name field
+      - press Escape without creating anything
+

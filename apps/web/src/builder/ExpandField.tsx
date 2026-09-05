@@ -79,7 +79,7 @@ export function ExpandDialog({
       <div
         role="dialog"
         aria-label={title}
-        className="surface flex max-h-[88vh] w-full max-w-3xl flex-col overflow-hidden rounded-3xl shadow-2xl shadow-black/60"
+        className="dialog-surface flex max-h-[88vh] w-full max-w-3xl flex-col overflow-hidden rounded-3xl"
       >
         <div className="flex items-start justify-between gap-4 border-b border-ink-800/70 px-6 py-4">
           <div className="min-w-0">

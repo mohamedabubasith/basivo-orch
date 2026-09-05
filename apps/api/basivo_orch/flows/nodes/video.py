@@ -625,7 +625,9 @@ class VideoGeneratorConfig(BaseModel):
 
     provider: str = Field(default="openai", max_length=48)
     model: str = Field(default="", max_length=160)
-    credential_id: str = Field(default="", description="A saved model credential.")
+    credential_id: str = Field(
+        default="", title="Model credential", description="The saved key the model is called with."
+    )
 
     #: How many times the agent may revise before this gives up. Each round is
     #: one model call plus about a second of checking — cheap next to a render.

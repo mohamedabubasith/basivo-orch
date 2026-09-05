@@ -442,7 +442,9 @@ class TicketConfig(BaseModel):
     model_config = {"extra": "forbid"}
 
     git_provider: VcsProvider = "github"
-    git_credential_id: str = Field(default="", description="A saved GitHub/GitLab credential.")
+    git_credential_id: str = Field(
+        default="", title="Git credential", description="A saved GitHub or GitLab credential."
+    )
     repo: str = Field(
         min_length=1,
         max_length=200,
@@ -517,7 +519,9 @@ class CommentConfig(BaseModel):
     model_config = {"extra": "forbid"}
 
     git_provider: VcsProvider = "github"
-    git_credential_id: str = Field(default="", description="A saved GitHub/GitLab credential.")
+    git_credential_id: str = Field(
+        default="", title="Git credential", description="A saved GitHub or GitLab credential."
+    )
     repo: str = Field(
         min_length=1,
         max_length=200,
@@ -610,7 +614,9 @@ class AutofixConfig(BaseModel):
 
     # -- where the code lives ------------------------------------------------
     git_provider: VcsProvider = "github"
-    git_credential_id: str = Field(default="", description="A saved GitHub/GitLab credential.")
+    git_credential_id: str = Field(
+        default="", title="Git credential", description="A saved GitHub or GitLab credential."
+    )
     repo: str = Field(
         min_length=1,
         max_length=200,
@@ -713,7 +719,9 @@ class AutofixConfig(BaseModel):
     # -- which model does the fixing -----------------------------------------
     provider: str = Field(default="anthropic", max_length=48)
     model: str = Field(default="claude-sonnet-5", max_length=160)
-    credential_id: str = Field(default="", description="A saved model credential.")
+    credential_id: str = Field(
+        default="", title="Model credential", description="The saved key the coding agent uses."
+    )
     #: Claude Code is a far stronger repair agent than the builtin loop, and it
     #: only runs Claude models. `auto` uses it whenever the credential is
     #: Anthropic and the worker has it installed; every other provider gets the
@@ -787,6 +795,7 @@ class AutofixConfig(BaseModel):
     )
     vision_credential_id: str = Field(
         default="",
+        title="Vision credential",
         description="Only needed if the vision model uses a different key.",
         json_schema_extra={"x-advanced": True},
     )

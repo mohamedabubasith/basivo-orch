@@ -196,7 +196,9 @@ class SubAgentDefinition(BaseModel):
     system: str = Field(default="", max_length=20000, description="Its own instructions.")
     provider: str = Field(default="openai", max_length=48)
     model: str = Field(default="", max_length=160, description="Blank uses the parent's model.")
-    credential_id: str = Field(default="", description="Blank uses the parent's credential.")
+    credential_id: str = Field(
+        default="", title="Credential", description="Blank uses the parent's credential."
+    )
     temperature: float | None = Field(default=None, ge=0, le=2)
     max_tokens: int = Field(default=2048, ge=1, le=64000)
     max_iterations: int = Field(default=4, ge=1, le=15)
@@ -212,7 +214,9 @@ class AgentConfig(BaseModel):
     model: str = Field(default="claude-sonnet-5", max_length=160)
     #: A saved credential's id (see `basivo_orch/credentials/`). Leave empty to
     #: fall back to that provider SDK's own environment-variable lookup.
-    credential_id: str = Field(default="", description="A saved credential's id.")
+    credential_id: str = Field(
+        default="", title="Credential", description="The saved key this agent calls the model with."
+    )
 
     system: str = Field(default="", max_length=20000, description="Supports {{ references }}.")
     prompt: str = Field(

@@ -506,7 +506,7 @@ export function Modal({
         animate={{ opacity: 1, y: 0, scale: 1 }}
         transition={{ duration: 0.18 }}
         className={cx(
-          "surface flex max-h-[88vh] w-full flex-col overflow-hidden rounded-3xl shadow-2xl shadow-black/60",
+          "dialog-surface flex max-h-[88vh] w-full flex-col overflow-hidden rounded-3xl",
           widths[size],
         )}
       >

@@ -1432,7 +1432,7 @@ function Palette({
         )}
         {groups.map((group) => (
           <div key={group.heading} className="mb-4">
-            <p className="mb-1.5 px-1 text-[0.66rem] font-medium tracking-[0.12em] text-ink-500 uppercase">
+            <p className="mb-1.5 px-1 text-[0.7rem] font-medium tracking-[0.12em] text-ink-400 uppercase">
               {group.heading}
             </p>
             <ul className="space-y-1">
@@ -1462,7 +1462,7 @@ function Palette({
                       className={cx(
                         "flex w-full items-center gap-2.5 rounded-xl border border-ink-700/60 bg-ink-850/60 px-2.5 py-2 pr-9 text-left transition-all",
                         blocked
-                          ? "cursor-not-allowed opacity-40"
+                          ? "cursor-not-allowed opacity-60 saturate-50"
                           : "cursor-grab hover:-translate-y-px hover:border-ink-500 hover:shadow-md active:cursor-grabbing",
                       )}
                     >
@@ -1772,7 +1772,7 @@ function NodeDialog({
       <div
         role="dialog"
         aria-label="Node settings"
-        className="surface flex h-[86vh] w-full max-w-3xl flex-col overflow-hidden rounded-3xl shadow-2xl shadow-black/60"
+        className="dialog-surface flex h-[86vh] w-full max-w-3xl flex-col overflow-hidden rounded-3xl"
       >
         {children}
       </div>

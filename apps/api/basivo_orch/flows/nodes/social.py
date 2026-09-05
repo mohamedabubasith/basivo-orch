@@ -55,7 +55,9 @@ class SocialPostConfig(BaseModel):
     model_config = {"extra": "forbid"}
 
     platform: Platform = "telegram"
-    credential_id: str = Field(default="", description="A saved credential for this platform.")
+    credential_id: str = Field(
+        default="", title="Credential", description="A saved credential for this platform."
+    )
     text: str = Field(
         default="",
         max_length=20_000,
