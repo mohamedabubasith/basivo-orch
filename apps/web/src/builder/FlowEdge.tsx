@@ -55,7 +55,7 @@ export function FlowEdge({
       <EdgeLabelRenderer>
         {handover && (
           <span
-            className="pointer-events-none absolute -translate-x-1/2 rounded-full border border-ink-700/70 bg-ink-900 px-2 py-0.5 text-[0.62rem] whitespace-nowrap"
+            className="pointer-events-none absolute -translate-x-1/2 rounded-full border border-ink-700/70 bg-ink-900 px-2 py-0.5 text-[0.7rem] whitespace-nowrap"
             style={{ left: labelX, top: labelY - 24, color: "var(--series)" }}
           >
             hands the conversation over

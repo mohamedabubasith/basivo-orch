@@ -33,7 +33,7 @@ export interface SubAgentValue {
 
 const INPUT =
   "w-full rounded-xl border border-ink-700 bg-ink-950/60 px-3 py-2.5 text-sm text-ink-100 outline-none focus:border-brand-400";
-const LABEL = "mb-1 block text-[0.68rem] font-medium text-ink-400";
+const LABEL = "mb-1 block text-xs font-medium text-ink-400";
 
 export function SubAgentEditor({
   value,
@@ -104,7 +104,7 @@ export function SubAgentEditor({
                 {prefix}
                 {agent.name || "unnamed"}
               </span>
-              <span className="flex-none text-[0.62rem] text-ink-500 uppercase">
+              <span className="flex-none text-[0.7rem] text-ink-500 uppercase">
                 {agent.model ? "own model" : "inherits"}
               </span>
               <svg
@@ -164,7 +164,7 @@ export function SubAgentEditor({
                     }
                     className={`${INPUT} font-mono`}
                   />
-                  <p className="mt-1 text-[0.68rem] text-ink-500">
+                  <p className="mt-1 text-xs text-ink-500">
                     The parent calls it as{" "}
                     <code className="text-ink-400">
                       {prefix}
@@ -187,7 +187,7 @@ export function SubAgentEditor({
                     placeholder="Researches facts and returns short answers."
                     className={INPUT}
                   />
-                  <p className="mt-1 text-[0.68rem] text-ink-500">
+                  <p className="mt-1 text-xs text-ink-500">
                     The parent reads this to decide when to involve it. Vague
                     here means it never does.
                   </p>
@@ -207,7 +207,7 @@ export function SubAgentEditor({
                 </div>
 
                 <details className="rounded-lg border border-ink-700/70 p-2.5">
-                  <summary className="cursor-pointer text-[0.68rem] text-ink-400">
+                  <summary className="cursor-pointer text-xs text-ink-400">
                     Use a different model (defaults to the parent's)
                   </summary>
                   <div className="mt-3 space-y-3">

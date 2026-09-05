@@ -65,7 +65,7 @@ export function McpServerEditor({
             <span className="min-w-0 flex-1 truncate font-mono text-xs text-ink-200">
               {server.name || "unnamed"}
             </span>
-            <span className="max-w-[45%] truncate text-[0.62rem] text-ink-500">
+            <span className="max-w-[45%] truncate text-[0.7rem] text-ink-500">
               {server.url || "no URL yet"}
             </span>
           </button>
@@ -88,7 +88,7 @@ export function McpServerEditor({
           {open === index && (
             <div className="space-y-2.5 border-t border-ink-800/70 p-3">
               <label className="block">
-                <span className="mb-1 block text-[0.68rem] text-ink-400">
+                <span className="mb-1 block text-xs text-ink-400">
                   Name
                 </span>
                 <input
@@ -103,7 +103,7 @@ export function McpServerEditor({
                 />
               </label>
               <label className="block">
-                <span className="mb-1 block text-[0.68rem] text-ink-400">
+                <span className="mb-1 block text-xs text-ink-400">
                   URL
                 </span>
                 <input
@@ -114,7 +114,7 @@ export function McpServerEditor({
                 />
               </label>
               <div>
-                <span className="mb-1 block text-[0.68rem] text-ink-400">
+                <span className="mb-1 block text-xs text-ink-400">
                   Credential (optional, sent as a bearer token)
                 </span>
                 <CredentialPicker
@@ -125,7 +125,7 @@ export function McpServerEditor({
                 />
               </div>
               <label className="block">
-                <span className="mb-1 block text-[0.68rem] text-ink-400">
+                <span className="mb-1 block text-xs text-ink-400">
                   Only these tools (comma separated, empty means all)
                 </span>
                 <input
@@ -157,7 +157,7 @@ export function McpServerEditor({
       >
         + Add an MCP server
       </button>
-      <p className="text-[0.68rem] leading-relaxed text-ink-500">
+      <p className="text-xs leading-relaxed text-ink-500">
         Servers are reached over HTTP. Save the server's token as a credential
         with provider MCP server, and pick it here; it never sits in the flow.
       </p>

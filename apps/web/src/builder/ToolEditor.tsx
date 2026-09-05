@@ -158,7 +158,7 @@ export function ToolEditor({
               <span className="min-w-0 flex-1 truncate font-mono text-xs text-ink-200">
                 {tool.name || "unnamed"}
               </span>
-              <span className="flex-none text-[0.62rem] text-ink-500 uppercase">
+              <span className="flex-none text-[0.7rem] text-ink-500 uppercase">
                 {tool.kind === "constant"
                   ? "stub"
                   : tool.kind === "code"
@@ -411,7 +411,7 @@ function ParameterTable({
 
   return (
     <div>
-      <p className="mb-1 text-[0.68rem] font-medium text-ink-300">
+      <p className="mb-1 text-xs font-medium text-ink-300">
         Parameters{" "}
         <span className="font-normal text-ink-500">
           (what the model may pass)
@@ -471,7 +471,7 @@ function ParameterTable({
               className={SMALL_INPUT}
             />
             <label
-              className="flex flex-none cursor-pointer items-center gap-1 text-[0.62rem] text-ink-400"
+              className="flex flex-none cursor-pointer items-center gap-1 text-[0.7rem] text-ink-400"
               title="Required"
             >
               <input
@@ -509,7 +509,7 @@ function ParameterTable({
             { name: "", type: "string", description: "", required: false },
           ])
         }
-        className="mt-1.5 text-[0.68rem] text-ink-400 underline decoration-dotted underline-offset-2 hover:text-ink-200"
+        className="mt-1.5 text-xs text-ink-400 underline decoration-dotted underline-offset-2 hover:text-ink-200"
       >
         + Add parameter
       </button>
@@ -528,7 +528,7 @@ function LabelledSmall({
 }) {
   return (
     <div>
-      <label className="mb-1 block text-[0.68rem] font-medium text-ink-300">
+      <label className="mb-1 block text-xs font-medium text-ink-300">
         {label}
       </label>
       {children}

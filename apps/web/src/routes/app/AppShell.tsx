@@ -368,7 +368,7 @@ function SidebarContent({
         {NAV.map((group) => (
           <div key={group.heading} className="mb-3.5">
             {!collapsed && (
-              <p className="mb-1 px-3 text-[0.62rem] font-medium tracking-[0.14em] text-ink-600 uppercase">
+              <p className="mb-1 px-3 text-[0.7rem] font-medium tracking-[0.14em] text-ink-400 uppercase">
                 {group.heading}
               </p>
             )}
@@ -387,7 +387,7 @@ function SidebarContent({
                           collapsed ? "justify-center px-2" : "gap-3 px-3",
                           isActive
                             ? "text-ink-100"
-                            : "text-ink-400 hover:text-ink-100",
+                            : "text-ink-300 hover:text-ink-100",
                         )}
                       >
                         {/* One element that travels between items, rather than
@@ -401,7 +401,7 @@ function SidebarContent({
                         {isActive && (
                           <motion.span
                             layoutId="nav-active"
-                            className="absolute inset-0 rounded-lg bg-ink-100/[0.07]"
+                            className="absolute inset-0 rounded-lg bg-brand-500/[0.14] ring-1 ring-brand-400/25"
                             transition={{
                               type: "spring",
                               stiffness: 400,
@@ -479,7 +479,7 @@ function WorkspaceSwitcher() {
         aria-expanded={open}
         className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-ink-850"
       >
-        <span className="grid h-6 w-6 flex-none place-items-center rounded-md bg-gradient-to-br from-brand-500 to-accent-500 text-[0.68rem] font-semibold text-white">
+        <span className="grid h-6 w-6 flex-none place-items-center rounded-md bg-gradient-to-br from-brand-500 to-accent-500 text-xs font-semibold text-white">
           {(current?.name ?? "?").charAt(0).toUpperCase()}
         </span>
         <span className="min-w-0 flex-1">

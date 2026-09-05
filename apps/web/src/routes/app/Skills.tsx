@@ -170,11 +170,11 @@ export function Skills() {
                     <p className="truncate font-mono text-sm font-medium text-ink-100">
                       {skill.name}
                     </p>
-                    <span className="rounded-md border border-ink-700 px-1.5 py-0.5 text-[0.68rem] text-ink-400">
+                    <span className="rounded-md border border-ink-700 px-1.5 py-0.5 text-xs text-ink-400">
                       {words(skill.instruction_chars)}
                     </span>
                     {skill.resource_count > 0 && (
-                      <span className="rounded-md border border-ink-700 px-1.5 py-0.5 text-[0.68rem] text-ink-400">
+                      <span className="rounded-md border border-ink-700 px-1.5 py-0.5 text-xs text-ink-400">
                         {skill.resource_count} file
                         {skill.resource_count > 1 ? "s" : ""}
                       </span>
@@ -312,7 +312,7 @@ function WriteSkill({
               className={INPUT}
               required
             />
-            <p className="mt-1.5 text-[0.68rem] leading-relaxed text-ink-500">
+            <p className="mt-1.5 text-xs leading-relaxed text-ink-500">
               The only part the agent reads before choosing. Describe the
               situation, not the document, “refund policy” tells it far less
               than “use when a customer asks for money back”.
@@ -334,7 +334,7 @@ function WriteSkill({
             }
             className={`${INPUT} resize-y font-mono text-[0.78rem] leading-relaxed`}
           />
-          <p className="mt-1.5 text-[0.68rem] leading-relaxed text-ink-500">
+          <p className="mt-1.5 text-xs leading-relaxed text-ink-500">
             Markdown. This is loaded whole when the agent opens the skill, so
             keep it a procedure. A long reference belongs in a bundled file.
           </p>
@@ -392,7 +392,7 @@ function ImportSkill({ orgId, onDone }: { orgId: string; onDone: () => void }) {
             }
             className={`${INPUT} resize-y font-mono text-[0.78rem] leading-relaxed`}
           />
-          <p className="mt-1.5 text-[0.68rem] leading-relaxed text-ink-500">
+          <p className="mt-1.5 text-xs leading-relaxed text-ink-500">
             Paste a skill file, the same format Claude uses, frontmatter and
             all. Name and description come from the frontmatter; everything
             after it becomes the instructions.

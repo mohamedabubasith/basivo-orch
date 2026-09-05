@@ -52,7 +52,7 @@ export function NodeGuide({ spec }: { spec: NodeSpec }) {
         </ol>
       </section>
 
-      <p className="font-mono text-[0.62rem] text-ink-600">{spec.type}</p>
+      <p className="font-mono text-[0.7rem] text-ink-600">{spec.type}</p>
     </div>
   );
 }

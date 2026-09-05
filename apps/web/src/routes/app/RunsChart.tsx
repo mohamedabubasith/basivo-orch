@@ -142,7 +142,7 @@ export function RunsChart({ daily }: { daily: Day[] }) {
 
               {active && total > 0 && (
                 <div className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-2 -translate-x-1/2 rounded-lg border border-ink-700 bg-ink-900 px-2.5 py-1.5 whitespace-nowrap shadow-lg">
-                  <p className="text-[0.68rem] font-medium text-ink-100">
+                  <p className="text-xs font-medium text-ink-100">
                     {new Date(day.date).toLocaleDateString(undefined, {
                       day: "numeric",
                       month: "short",

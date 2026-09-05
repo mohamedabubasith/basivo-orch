@@ -1202,7 +1202,7 @@ function EndpointsPanel({
         {hasWebhookTrigger && (
           <div>
             <CopyRow label="Inbound hook (no API key)" value={hookUrl} />
-            <p className="mt-1 text-[0.68rem] leading-relaxed text-ink-500">
+            <p className="mt-1 text-xs leading-relaxed text-ink-500">
               For senders that can't add headers of their own. Paste it into
               GitHub or GitLab webhook settings with the trigger's secret. The
               secret authenticates each delivery, so it only answers when the
@@ -1211,7 +1211,7 @@ function EndpointsPanel({
           </div>
         )}
         <div>
-          <p className="mb-1 text-[0.68rem] font-medium text-ink-400">
+          <p className="mb-1 text-xs font-medium text-ink-400">
             Example
           </p>
           <div className="relative">
@@ -1229,9 +1229,9 @@ function EndpointsPanel({
 function CopyRow({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <p className="mb-1 text-[0.68rem] font-medium text-ink-400">{label}</p>
+      <p className="mb-1 text-xs font-medium text-ink-400">{label}</p>
       <div className="flex items-center gap-1.5">
-        <code className="min-w-0 flex-1 truncate rounded-lg border border-ink-700/70 bg-ink-950/60 px-2.5 py-2 font-mono text-[0.72rem] text-ink-200">
+        <code className="min-w-0 flex-1 truncate rounded-lg border border-ink-700/70 bg-ink-950/60 px-2.5 py-2 font-mono text-xs text-ink-200">
           {value}
         </code>
         <CopyButton value={value} />
@@ -1430,7 +1430,7 @@ function Palette({
                       onClick={() => setGuide(spec)}
                       aria-label={`What is ${spec.label}?`}
                       title={`What is ${spec.label}?`}
-                      className="absolute top-1/2 right-2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-full border border-ink-600/70 text-[0.62rem] font-semibold text-ink-400 transition-colors hover:border-brand-400 hover:text-brand-300"
+                      className="absolute top-1/2 right-2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-full border border-ink-600/70 text-[0.7rem] font-semibold text-ink-400 transition-colors hover:border-brand-400 hover:text-brand-300"
                     >
                       i
                     </button>

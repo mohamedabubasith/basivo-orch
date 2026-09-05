@@ -143,7 +143,7 @@ async function ensureCsrf(): Promise<string | null> {
  * So refresh happens at most once at a time, and everyone waits on the same
  * promise.
  */
-let inFlightRefresh: Promise<boolean> | null = null;
+let inFlightRefresh: Promise<RefreshOutcome> | null = null;
 
 /**
  * The promise above serialises refreshes within one tab — and that is not
@@ -160,20 +160,33 @@ let inFlightRefresh: Promise<boolean> | null = null;
  * ordinary rotation rather than a replay. Browsers without `navigator.locks`
  * fall back to the old per-tab behaviour — degraded, not broken.
  */
-function refreshOnce(): Promise<boolean> {
+/**
+ * What a refresh attempt found out.
+ *
+ * "ended" is the server saying the session is over (401: expired, revoked, or
+ * reuse detected). "unavailable" is everything else, a rate limit, a 5xx, a
+ * dropped connection, and none of those mean the person is signed out. The
+ * first version treated all of them as "ended", so a 429 on this one endpoint
+ * (every tab of every user behind one office address shared a bucket) signed
+ * people out while they were typing.
+ */
+export type RefreshOutcome = "ok" | "ended" | "unavailable";
+
+function refreshOnce(): Promise<RefreshOutcome> {
   return fetch(`${API_BASE}/auth/refresh`, {
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
   })
-    .then((r) => {
+    .then((r): RefreshOutcome => {
       captureCsrf(r);
-      return r.ok;
+      if (r.ok) return "ok";
+      return r.status === 401 ? "ended" : "unavailable";
     })
-    .catch(() => false);
+    .catch((): RefreshOutcome => "unavailable");
 }
 
-export function refresh(): Promise<boolean> {
+export function refresh(): Promise<RefreshOutcome> {
   if (!inFlightRefresh) {
     inFlightRefresh = (
       typeof navigator !== "undefined" && navigator.locks
@@ -328,11 +341,20 @@ export async function request<T>(
     !NO_REFRESH_RETRY.includes(path);
 
   if (retryable) {
-    if (await refresh()) {
+    const outcome = await refresh();
+    if (outcome === "ok") {
       response = await send();
       captureCsrf(response);
-    } else {
+    } else if (outcome === "ended") {
       onSessionEnded();
+    } else {
+      // The server could not be asked. The session may well be fine, so the
+      // person stays signed in and this one request fails with a message
+      // they can act on.
+      throw new ApiError(
+        503,
+        "The server could not be reached to renew your session. Try again in a moment.",
+      );
     }
   }
 

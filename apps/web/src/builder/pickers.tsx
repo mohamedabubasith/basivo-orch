@@ -113,7 +113,7 @@ export function CredentialPicker({
         <option value={ADD_CREDENTIAL}>+ Add a credential…</option>
       </select>
       {credentials !== null && matching.length === 0 && (
-        <p className="mt-1.5 text-[0.68rem] leading-relaxed text-ink-500">
+        <p className="mt-1.5 text-xs leading-relaxed text-ink-500">
           No saved credential for this provider yet. Add one from the list
           above, or leave this on the server's key if one is configured.
         </p>
@@ -193,7 +193,7 @@ export function ModelPicker({
             </option>
           ))}
         </select>
-        <p className="mt-1 text-[0.68rem] leading-relaxed text-ink-500">
+        <p className="mt-1 text-xs leading-relaxed text-ink-500">
           {models.length} models available to this credential.
         </p>
       </div>
@@ -209,18 +209,18 @@ export function ModelPicker({
         className={cx(INPUT, "font-mono text-[0.8rem]")}
       />
       {loading && (
-        <p className="mt-1 text-[0.68rem] text-ink-500">Fetching model list…</p>
+        <p className="mt-1 text-xs text-ink-500">Fetching model list…</p>
       )}
       {fetchError && (
         <p
-          className="mt-1 text-[0.68rem]"
+          className="mt-1 text-xs"
           style={{ color: "var(--status-warn)" }}
         >
           Model list unavailable: {fetchError.slice(0, 120)}
         </p>
       )}
       {!loading && !fetchError && !credentialId && (
-        <p className="mt-1 text-[0.68rem] text-ink-500">
+        <p className="mt-1 text-xs text-ink-500">
           Pick a credential above to load its live model list.
         </p>
       )}
@@ -334,10 +334,10 @@ export function SkillPicker({
                   className="mt-0.5 h-3.5 w-3.5 flex-none accent-[var(--color-brand-400)]"
                 />
                 <span className="min-w-0">
-                  <span className="block font-mono text-[0.72rem] text-ink-100">
+                  <span className="block font-mono text-xs text-ink-100">
                     {skill.name}
                   </span>
-                  <span className="mt-0.5 block text-[0.68rem] leading-relaxed text-ink-500">
+                  <span className="mt-0.5 block text-xs leading-relaxed text-ink-500">
                     {skill.description}
                   </span>
                 </span>
@@ -346,7 +346,7 @@ export function SkillPicker({
           );
         })}
       </ul>
-      <p className="mt-1.5 text-[0.68rem] leading-relaxed text-ink-500">
+      <p className="mt-1.5 text-xs leading-relaxed text-ink-500">
         {lines === 0
           ? "None selected. The agent is not told the library exists."
           : `${lines} skill${lines > 1 ? "s" : ""} offered: ${lines} line${
@@ -425,12 +425,12 @@ export function RepoPicker({
           placeholder="owner/name, for example acme/website"
           className={INPUT}
         />
-        {note && <p className="mt-1.5 text-[0.68rem] text-ink-500">{note}</p>}
+        {note && <p className="mt-1.5 text-xs text-ink-500">{note}</p>}
         {listed.length > 0 && (
           <button
             type="button"
             onClick={() => setTyping(false)}
-            className="mt-1.5 text-[0.68rem] text-brand-300 hover:underline"
+            className="mt-1.5 text-xs text-brand-300 hover:underline"
           >
             Choose from the list instead
           </button>
@@ -459,7 +459,7 @@ export function RepoPicker({
       <button
         type="button"
         onClick={() => setTyping(true)}
-        className="mt-1.5 text-[0.68rem] text-ink-500 hover:text-ink-200"
+        className="mt-1.5 text-xs text-ink-500 hover:text-ink-200"
       >
         Not in the list? Type it
       </button>

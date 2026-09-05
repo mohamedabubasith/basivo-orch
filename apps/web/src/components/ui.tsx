@@ -1,6 +1,7 @@
 import { motion } from "motion/react";
 import {
   forwardRef,
+  useEffect,
   useId,
   useState,
   type ButtonHTMLAttributes,
@@ -369,5 +370,251 @@ export function Logo({ className }: { className?: string }) {
         Basivo
       </span>
     </span>
+  );
+}
+
+/* ---------------------------------------------------------------- pills --- */
+
+export type Tone = "good" | "bad" | "warn" | "info" | "neutral";
+
+const PILL_TONES: Record<Tone, string> = {
+  good: "border-[color-mix(in_oklab,var(--status-good)_45%,transparent)] bg-[color-mix(in_oklab,var(--status-good)_14%,transparent)] text-[var(--status-good)]",
+  bad: "border-[color-mix(in_oklab,var(--status-bad)_45%,transparent)] bg-[color-mix(in_oklab,var(--status-bad)_14%,transparent)] text-[var(--status-bad)]",
+  warn: "border-[color-mix(in_oklab,var(--status-warn)_45%,transparent)] bg-[color-mix(in_oklab,var(--status-warn)_14%,transparent)] text-[var(--status-warn)]",
+  info: "border-brand-400/40 bg-brand-500/15 text-brand-300",
+  neutral: "border-ink-600/70 bg-ink-800/60 text-ink-300",
+};
+
+/**
+ * A status word with a tinted background, not a 6px dot beside grey text.
+ * The fill is what makes "failed" visible from across a room, which is the
+ * whole job of a status indicator.
+ */
+export function Pill({
+  tone = "neutral",
+  dot = false,
+  className,
+  children,
+}: {
+  tone?: Tone;
+  /** A leading dot, for lists where the word alone would be too quiet. */
+  dot?: boolean;
+  className?: string;
+  children: ReactNode;
+}) {
+  return (
+    <span
+      className={cx(
+        "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium whitespace-nowrap",
+        PILL_TONES[tone],
+        className,
+      )}
+    >
+      {dot && (
+        <span
+          className="h-1.5 w-1.5 flex-none rounded-full bg-current"
+          aria-hidden="true"
+        />
+      )}
+      {children}
+    </span>
+  );
+}
+
+/* ------------------------------------------------------------ icon chip --- */
+
+/**
+ * A rounded, tinted square holding an icon or an initial. The device the
+ * whole app uses to give a row an identity before its text is read: the same
+ * hue for the same kind of thing, everywhere.
+ */
+export function IconChip({
+  children,
+  hue = "var(--color-brand-400)",
+  size = "md",
+  className,
+}: {
+  children: ReactNode;
+  /** Any CSS colour; the chip is a wash of it with the glyph in full. */
+  hue?: string;
+  size?: "sm" | "md" | "lg";
+  className?: string;
+}) {
+  const sizes = { sm: "h-8 w-8 rounded-lg", md: "h-10 w-10 rounded-xl", lg: "h-12 w-12 rounded-2xl" };
+  return (
+    <span
+      className={cx(
+        "grid flex-none place-items-center font-semibold [&>svg]:h-[55%] [&>svg]:w-[55%]",
+        sizes[size],
+        className,
+      )}
+      style={{
+        color: hue,
+        background: `color-mix(in oklab, ${hue} 16%, var(--color-ink-850))`,
+        boxShadow: `inset 0 0 0 1px color-mix(in oklab, ${hue} 28%, transparent)`,
+      }}
+      aria-hidden="true"
+    >
+      {children}
+    </span>
+  );
+}
+
+/* ---------------------------------------------------------------- modal --- */
+
+/**
+ * A centred dialog over the page. Escape and the backdrop close it; the body
+ * scrolls, the header and footer do not. Every form that used to unfold
+ * inline above a list (and push the list down the page) opens here instead.
+ */
+export function Modal({
+  title,
+  description,
+  onClose,
+  footer,
+  size = "md",
+  children,
+}: {
+  title: ReactNode;
+  description?: ReactNode;
+  onClose: () => void;
+  footer?: ReactNode;
+  size?: "sm" | "md" | "lg";
+  children: ReactNode;
+}) {
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const widths = { sm: "max-w-md", md: "max-w-xl", lg: "max-w-3xl" };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4 backdrop-blur-[2px]"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <motion.div
+        role="dialog"
+        aria-modal="true"
+        initial={{ opacity: 0, y: 10, scale: 0.98 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        transition={{ duration: 0.18 }}
+        className={cx(
+          "surface flex max-h-[88vh] w-full flex-col overflow-hidden rounded-3xl shadow-2xl shadow-black/60",
+          widths[size],
+        )}
+      >
+        <div className="flex items-start justify-between gap-4 border-b border-[var(--edge)] px-6 py-4">
+          <div className="min-w-0">
+            <h2 className="text-base font-semibold text-ink-100">{title}</h2>
+            {description && (
+              <p className="mt-1 text-sm leading-relaxed text-ink-400">
+                {description}
+              </p>
+            )}
+          </div>
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            className="rounded-lg p-1.5 text-ink-400 transition-colors hover:bg-ink-800 hover:text-ink-100"
+          >
+            <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none">
+              <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="1.8" />
+            </svg>
+          </button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">{children}</div>
+        {footer && (
+          <div className="flex items-center justify-end gap-2 border-t border-[var(--edge)] px-6 py-3.5">
+            {footer}
+          </div>
+        )}
+      </motion.div>
+    </div>
+  );
+}
+
+/* --------------------------------------------------------- empty state --- */
+
+export function EmptyState({
+  icon,
+  title,
+  children,
+  action,
+}: {
+  icon?: ReactNode;
+  title: string;
+  children?: ReactNode;
+  action?: ReactNode;
+}) {
+  return (
+    <Card className="relative overflow-hidden p-10 text-center">
+      <span
+        aria-hidden="true"
+        className="pointer-events-none absolute -top-24 left-1/2 h-48 w-96 -translate-x-1/2 rounded-full bg-brand-500/20 blur-3xl"
+      />
+      {icon && (
+        <div className="relative mx-auto mb-4 w-fit">
+          <IconChip size="lg">{icon}</IconChip>
+        </div>
+      )}
+      <p className="relative text-lg font-semibold text-ink-100">{title}</p>
+      {children && (
+        <div className="relative mx-auto mt-2 max-w-md text-sm leading-relaxed text-ink-400">
+          {children}
+        </div>
+      )}
+      {action && <div className="relative mt-6">{action}</div>}
+    </Card>
+  );
+}
+
+/* --------------------------------------------------------- section card --- */
+
+/**
+ * A titled card: icon, title, one line of what it is for, and a control on
+ * the right. Settings pages are lists of these.
+ */
+export function Section({
+  icon,
+  hue,
+  title,
+  description,
+  action,
+  children,
+  className,
+}: {
+  icon?: ReactNode;
+  hue?: string;
+  title: ReactNode;
+  description?: ReactNode;
+  action?: ReactNode;
+  children?: ReactNode;
+  className?: string;
+}) {
+  return (
+    <Card className={cx("p-6", className)}>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="flex min-w-0 items-start gap-4">
+          {icon && <IconChip hue={hue}>{icon}</IconChip>}
+          <div className="min-w-0">
+            <h2 className="text-base font-semibold text-ink-100">{title}</h2>
+            {description && (
+              <div className="mt-1 text-sm leading-relaxed text-ink-400">
+                {description}
+              </div>
+            )}
+          </div>
+        </div>
+        {action && <div className="flex-none">{action}</div>}
+      </div>
+      {children}
+    </Card>
   );
 }

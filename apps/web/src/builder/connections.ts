@@ -45,14 +45,18 @@ export function connectionProblem(
     return `${from.data.label} has no "${port}" output.`;
   }
 
-  // One input, one connection. Two things feeding a node would leave it
-  // unclear which one it runs on, so the canvas refuses rather than merging.
-  const taken = edges.find((edge) => edge.target === target);
-  if (taken) {
-    const other = nodes.find((node) => node.id === taken.source);
-    return `${to.data.label} already takes its input from ${
-      other?.data.label ?? taken.source
-    }. Delete that connection first.`;
+  // Several connections into one node are fine: the two branches of an If /
+  // Else, or the agents on a hand over, are alternatives, and the node after
+  // them runs on whichever fired. The same output wired to the same node
+  // twice is the only slip worth refusing.
+  const duplicate = edges.find(
+    (edge) =>
+      edge.source === source &&
+      edge.target === target &&
+      (edge.sourceHandle ?? "out") === port,
+  );
+  if (duplicate) {
+    return `${from.data.label} is already connected to ${to.data.label}.`;
   }
 
   if (port === HANDOVER_PORT && to.data.nodeType !== AGENT_TYPE) {

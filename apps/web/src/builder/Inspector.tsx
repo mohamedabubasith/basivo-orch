@@ -219,7 +219,7 @@ export function Inspector({
           <p className="truncate text-sm font-medium text-ink-100">
             {spec.label}
           </p>
-          <p className="truncate text-[0.68rem] text-ink-500">
+          <p className="truncate text-xs text-ink-500">
             {spec.description}
           </p>
         </div>
@@ -266,22 +266,22 @@ export function Inspector({
 
         {spec.type === "trigger.schedule" && (
           <div className="rounded-lg border border-ink-700/70 bg-ink-950/40 p-3">
-            <p className="text-[0.68rem] font-medium text-ink-300">
+            <p className="text-xs font-medium text-ink-300">
               This schedule
             </p>
             {nextRunAt ? (
               <>
-                <p className="mt-1.5 font-mono text-[0.72rem] text-ink-100">
+                <p className="mt-1.5 font-mono text-xs text-ink-100">
                   Next run {new Date(nextRunAt).toLocaleString()}
                 </p>
-                <p className="mt-1.5 text-[0.68rem] leading-relaxed text-ink-500">
+                <p className="mt-1.5 text-xs leading-relaxed text-ink-500">
                   Armed. The run worker fires it. Nothing needs to call this
                   flow. Cron is read in the timezone below, so 6am stays 6am
                   across daylight saving.
                 </p>
               </>
             ) : (
-              <p className="mt-1 text-[0.68rem] leading-relaxed text-ink-500">
+              <p className="mt-1 text-xs leading-relaxed text-ink-500">
                 {isPublished
                   ? "Not armed yet. Publish again after setting the schedule, and the next run time appears here."
                   : "A schedule only runs once the flow is published. Publish, and the next run time appears here."}
@@ -433,7 +433,7 @@ export function Inspector({
                     suggestions={suggestions}
                     placeholder={'{"headline": "{{ nodes.copy.output.text }}"}'}
                   />
-                  <p className="mt-1.5 text-[0.68rem] leading-relaxed text-ink-500">
+                  <p className="mt-1.5 text-xs leading-relaxed text-ink-500">
                     JSON, filled into the template. An upstream agent usually
                     writes these. That is the division of labour: it writes
                     words, the template does layout.
@@ -510,7 +510,7 @@ export function Inspector({
                       Remember the conversation
                     </option>
                   </select>
-                  <p className="mt-1.5 text-[0.68rem] leading-relaxed text-ink-500">
+                  <p className="mt-1.5 text-xs leading-relaxed text-ink-500">
                     {config.memory === "conversation"
                       ? "Past requests and replies are sent again before the new one, so you can say “that didn’t work” and be understood. Tool calls are never stored."
                       : "Right for one-shot work: classifying or summarising whatever arrives. Remembering would only bias it."}
@@ -524,7 +524,7 @@ export function Inspector({
                     suggestions={suggestions}
                     placeholder="{{ input.body.issue.number }}"
                   />
-                  <p className="mt-1.5 text-[0.68rem] leading-relaxed text-ink-500">
+                  <p className="mt-1.5 text-xs leading-relaxed text-ink-500">
                     One separate thread per value, usually an issue number or a
                     chat id.{" "}
                     {config.memory_key
@@ -546,7 +546,7 @@ export function Inspector({
                       Handover: it transfers, they answer you
                     </option>
                   </select>
-                  <p className="mt-1.5 text-[0.68rem] leading-relaxed text-ink-500">
+                  <p className="mt-1.5 text-xs leading-relaxed text-ink-500">
                     {config.team_mode === "handover"
                       ? "Control moves. The agent it transfers to replies directly and can transfer on again. Right for triage."
                       : "This agent stays in charge: it asks, gets an answer back, and writes the reply itself. Right for combining several answers."}
@@ -737,7 +737,7 @@ function Labelled({
       </div>
       {children}
       {hint && (
-        <p className="mt-1 text-[0.68rem] leading-relaxed text-ink-500">
+        <p className="mt-1 text-xs leading-relaxed text-ink-500">
           {hint}
         </p>
       )}
@@ -966,7 +966,7 @@ function JsonInput({
       />
       {invalid && (
         <p
-          className="mt-1 text-[0.68rem]"
+          className="mt-1 text-xs"
           style={{ color: "var(--status-bad)" }}
         >
           Not valid JSON. The last valid value is still saved.
@@ -1158,7 +1158,7 @@ function ProblemSource({
         />
       )}
       {!custom && preset && (
-        <p className="text-[0.68rem] leading-relaxed text-ink-500">
+        <p className="text-xs leading-relaxed text-ink-500">
           The agent receives:{" "}
           <code className="font-mono">{preset.template.replace(/\n\n/g, " ")}</code>
         </p>
@@ -1316,7 +1316,7 @@ function WebhookSource({
               ))}
             </div>
           </Labelled>
-          <p className="text-[0.68rem] leading-relaxed text-ink-500">
+          <p className="text-xs leading-relaxed text-ink-500">
             Nothing to do in Jira. When you publish, the webhook is registered on
             the site for you (the credential has to be a Jira administrator), and
             re-registered on every publish.
@@ -1333,13 +1333,13 @@ function WebhookSource({
           )}
           {note && (
             <p
-              className="text-[0.72rem] leading-relaxed"
+              className="text-xs leading-relaxed"
               style={{ color: note.ok ? "var(--status-good)" : "var(--status-bad)" }}
             >
               {note.text}
             </p>
           )}
-          <p className="text-[0.68rem] leading-relaxed text-ink-500">
+          <p className="text-xs leading-relaxed text-ink-500">
             The ticket arrives flattened as{" "}
             <code className="text-ink-400">{"{{ input.ticket.title }}"}</code>,{" "}
             <code className="text-ink-400">{"{{ input.ticket.description }}"}</code> and{" "}
@@ -1386,7 +1386,7 @@ function WebhookSource({
               ))}
             </div>
           </Labelled>
-          <p className="text-[0.68rem] leading-relaxed text-ink-500">
+          <p className="text-xs leading-relaxed text-ink-500">
             Nothing to do on GitHub. When you publish, the webhook is registered
             on the repository for you, and re-registered on every publish.
           </p>
@@ -1402,13 +1402,13 @@ function WebhookSource({
           )}
           {note && (
             <p
-              className="text-[0.72rem] leading-relaxed"
+              className="text-xs leading-relaxed"
               style={{ color: note.ok ? "var(--status-good)" : "var(--status-bad)" }}
             >
               {note.text}
             </p>
           )}
-          <p className="text-[0.68rem] leading-relaxed text-ink-500">
+          <p className="text-xs leading-relaxed text-ink-500">
             The delivery arrives as <code className="text-ink-400">{"{{ input.body }}"}</code>.
             For an issue, the title is{" "}
             <code className="text-ink-400">{"{{ input.body.issue.title }}"}</code>.
@@ -1416,18 +1416,18 @@ function WebhookSource({
         </>
       ) : (
         <>
-          <p className="text-[0.68rem] font-medium text-ink-300">This webhook's URL</p>
+          <p className="text-xs font-medium text-ink-300">This webhook's URL</p>
           {isPublished ? (
-            <code className="block truncate rounded-md bg-ink-950/60 px-2 py-1.5 font-mono text-[0.68rem] text-ink-200">
+            <code className="block truncate rounded-md bg-ink-950/60 px-2 py-1.5 font-mono text-xs text-ink-200">
               {publicBase}/hooks/{flowId}
             </code>
           ) : (
-            <p className="text-[0.68rem] leading-relaxed text-ink-500">
+            <p className="text-xs leading-relaxed text-ink-500">
               Appears after you publish. An unpublished flow has no stable URL
               for callers to depend on.
             </p>
           )}
-          <p className="text-[0.68rem] leading-relaxed text-ink-500">
+          <p className="text-xs leading-relaxed text-ink-500">
             Turn on Require signature and set a secret; callers send it as{" "}
             <code className="text-ink-400">X-Webhook-Secret</code> (GitLab:{" "}
             <code className="text-ink-400">X-Gitlab-Token</code>). The delivery

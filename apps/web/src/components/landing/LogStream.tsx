@@ -332,7 +332,7 @@ export function LogStream() {
       {/* log body */}
       <div
         ref={scrollRef}
-        className="h-[248px] overflow-hidden bg-ink-950/60 px-4 py-3 font-mono text-[0.72rem] leading-relaxed"
+        className="h-[248px] overflow-hidden bg-ink-950/60 px-4 py-3 font-mono text-xs leading-relaxed"
       >
         <AnimatePresence initial={false}>
           {lines.map((line) => {

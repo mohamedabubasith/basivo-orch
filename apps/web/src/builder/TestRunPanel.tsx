@@ -195,7 +195,7 @@ export function TestRunPanel({
 
       <div className="space-y-4 px-5 py-4">
         <div>
-          <p className="mb-2 text-[0.68rem] font-medium tracking-wide text-ink-400 uppercase">
+          <p className="mb-2 text-xs font-medium tracking-wide text-ink-400 uppercase">
             Start from
           </p>
           <div className="flex flex-wrap gap-1.5">
@@ -248,7 +248,7 @@ export function TestRunPanel({
                     setRows(next);
                   }}
                   placeholder="body.issue.number"
-                  className="w-2/5 rounded-xl border border-ink-700 bg-ink-950/60 px-3 py-2 font-mono text-[0.72rem] text-ink-100 outline-none focus:border-brand-400"
+                  className="w-2/5 rounded-xl border border-ink-700 bg-ink-950/60 px-3 py-2 font-mono text-xs text-ink-100 outline-none focus:border-brand-400"
                 />
                 <input
                   value={row.value}
@@ -295,7 +295,7 @@ export function TestRunPanel({
 
         {problem ? (
           <p
-            className="rounded-xl border p-2.5 text-[0.72rem] leading-relaxed"
+            className="rounded-xl border p-2.5 text-xs leading-relaxed"
             style={{
               borderColor:
                 "color-mix(in oklab, var(--status-bad) 45%, transparent)",
@@ -307,7 +307,7 @@ export function TestRunPanel({
         ) : (
           references.length > 0 && (
             <div>
-              <p className="mb-1.5 text-[0.68rem] font-medium tracking-wide text-ink-400 uppercase">
+              <p className="mb-1.5 text-xs font-medium tracking-wide text-ink-400 uppercase">
                 Your nodes can read
               </p>
               <div className="flex flex-wrap gap-1.5">
@@ -318,7 +318,7 @@ export function TestRunPanel({
                       void navigator.clipboard?.writeText(reference)
                     }
                     title="Copy"
-                    className="rounded-lg bg-ink-900/80 px-2 py-1 font-mono text-[0.68rem] text-ink-300 transition-colors hover:text-ink-100"
+                    className="rounded-lg bg-ink-900/80 px-2 py-1 font-mono text-xs text-ink-300 transition-colors hover:text-ink-100"
                   >
                     {reference}
                   </button>
@@ -330,7 +330,7 @@ export function TestRunPanel({
       </div>
 
       <div className="flex items-center justify-between gap-2 border-t border-ink-800/70 px-5 py-3.5">
-        <span className="text-[0.68rem] text-ink-500">
+        <span className="text-xs text-ink-500">
           {rows.length} field{rows.length === 1 ? "" : "s"}
         </span>
         <div className="flex gap-2">

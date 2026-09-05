@@ -176,7 +176,7 @@ export function TemplateInput({
                   index === active ? "bg-ink-800" : "",
                 )}
               >
-                <code className="min-w-0 flex-1 truncate font-mono text-[0.72rem] text-ink-100">
+                <code className="min-w-0 flex-1 truncate font-mono text-xs text-ink-100">
                   {"{{ "}
                   {suggestion.token}
                   {" }}"}

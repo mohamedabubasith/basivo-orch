@@ -48,22 +48,25 @@ test("nothing connects into a trigger", () => {
   assert.match(connectionProblem({ source: "r", target: "t", sourceHandle: null }, [trigger, reply], [])!, /trigger/);
 });
 
-test("an input that is already connected refuses a second connection", () => {
-  const problem = connectionProblem(
-    { source: "o", target: "r", sourceHandle: null },
-    [trigger, reply, other],
-    [edge("t", "r")],
+test("a node may take input from several connections", () => {
+  // The node after an If / Else or a hand over is fed by alternatives.
+  assert.equal(
+    connectionProblem({ source: "o", target: "r", sourceHandle: null }, [trigger, reply, other], [edge("t", "r")]),
+    null,
   );
-  assert.match(problem!, /already takes its input from t/);
+  assert.equal(
+    connectionProblem({ source: "c", target: "r", sourceHandle: "false" }, [condition, reply], [edge("c", "r", "true")]),
+    null,
+  );
 });
 
-test("the same source cannot connect twice to the same target through another port", () => {
+test("the same output wired twice to the same node is refused", () => {
   const problem = connectionProblem(
-    { source: "c", target: "r", sourceHandle: "false" },
-    [condition, reply],
-    [edge("c", "r", "true")],
+    { source: "t", target: "r", sourceHandle: null },
+    [trigger, reply],
+    [edge("t", "r")],
   );
-  assert.match(problem!, /already takes its input/);
+  assert.match(problem!, /already connected to/);
 });
 
 test("a port the source does not have is refused", () => {

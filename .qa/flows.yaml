@@ -50,8 +50,10 @@ flows:
       - expect a notice that nodes are not connected to the trigger
       - drag from the right handle of Run Manually to the left handle of Set Variables
       - drag from the right handle of Set Variables to the left handle of If / Else
-      - drag from the right handle of Run Manually to the left handle of If / Else
-      - expect the third connection to be refused with a message that the node already takes its input from another node
+      - drag from the right handle of Set Variables to the left handle of If / Else a second time
+      - expect the repeated connection to be refused with a message that Set Variables is already connected to If / Else
+      - drag from the true handle of If / Else to the left handle of Run Manually
+      - expect that to be refused with a message that a trigger starts the flow so nothing can connect into it
       - click the small cross on the connection between Set Variables and If / Else
       - expect that connection to be gone and the flow to show Unsaved changes
 
@@ -93,3 +95,32 @@ flows:
       - click the AI Agent node on the canvas
       - expect a Node settings dialog with Skills and MCP servers sections
       - click Done
+
+  - id: flows-page
+    depends_on: login
+    steps:
+      - open /app/flows
+      - expect a table with column headings Flow, Trigger, Nodes, Last run and Updated, or an empty state inviting you to build your first flow
+      - expect every listed flow to show a Published or Draft pill
+      - expect the text to be readable, meaning no grey-on-grey labels smaller than 12px
+
+  - id: credentials-page
+    depends_on: login
+    steps:
+      - open /app/credentials
+      - expect credential cards, each with a provider label, a masked key ending in four characters, and an Edit button
+      - click New credential
+      - expect a dialog with Name, Provider, API key and Base URL fields and a Test connection button
+      - press Escape
+      - click Edit on the first credential
+      - expect a dialog titled Edit credential with the name filled in, a Base URL field and a Replace key field whose hint says an empty key keeps the current one
+      - press Escape without saving
+
+  - id: security-page
+    depends_on: login
+    steps:
+      - open /app/security
+      - expect three status tiles for Email, Two-factor and Password, with Email showing Confirmed
+      - expect sections for Email address, Two-factor authentication with a Set up or Turn off button, and Password with Current password and New password fields
+      - do not click Set up, Turn off or Change password
+

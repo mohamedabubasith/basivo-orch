@@ -459,7 +459,7 @@ function JsonBlock({
           {title}
         </p>
         {badge && (
-          <span className="font-mono text-[0.62rem] text-ink-500">{badge}</span>
+          <span className="font-mono text-[0.7rem] text-ink-500">{badge}</span>
         )}
         {!isEmpty && (
           <button
@@ -469,7 +469,7 @@ function JsonBlock({
               setCopied(true);
               setTimeout(() => setCopied(false), 1200);
             }}
-            className="ml-auto text-[0.62rem] text-ink-500 underline decoration-dotted underline-offset-2 hover:text-ink-200"
+            className="ml-auto text-[0.7rem] text-ink-500 underline decoration-dotted underline-offset-2 hover:text-ink-200"
           >
             {copied ? "Copied" : "Copy"}
           </button>
@@ -485,7 +485,7 @@ function JsonBlock({
         </pre>
       )}
       {footnote && (
-        <p className="mt-1 text-[0.62rem] text-ink-500">{footnote}</p>
+        <p className="mt-1 text-[0.7rem] text-ink-500">{footnote}</p>
       )}
     </div>
   );

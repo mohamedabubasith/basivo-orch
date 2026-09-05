@@ -148,7 +148,7 @@ export function FlowNodeCard({ data, selected }: NodeProps<FlowNode>) {
               which channel. Without it a canvas of four agents is four
               identical cards and every question means opening one. */}
           <p
-            className="mt-1 truncate text-[0.68rem] leading-tight text-ink-400"
+            className="mt-1 truncate text-xs leading-tight text-ink-400"
             title={summary}
           >
             {summary || data.nodeType}
@@ -160,7 +160,7 @@ export function FlowNodeCard({ data, selected }: NodeProps<FlowNode>) {
         <div className="relative border-t border-ink-700/60 px-3.5 py-2">
           {status && (
             <p
-              className="flex items-center gap-1.5 text-[0.68rem]"
+              className="flex items-center gap-1.5 text-xs"
               style={{ color: status.color }}
             >
               {data.runStatus === "running" ? (
@@ -188,7 +188,7 @@ export function FlowNodeCard({ data, selected }: NodeProps<FlowNode>) {
 
           {data.problem && (
             <p
-              className="mt-1 line-clamp-2 text-[0.68rem] leading-snug"
+              className="mt-1 line-clamp-2 text-xs leading-snug"
               style={{ color: "var(--status-bad)" }}
               title={data.problem}
             >
@@ -203,7 +203,7 @@ export function FlowNodeCard({ data, selected }: NodeProps<FlowNode>) {
       {handsOver && (
         <div className="relative mt-0.5 flex flex-col items-center pb-2">
           <span
-            className="text-[0.62rem] tracking-wide"
+            className="text-[0.7rem] tracking-wide"
             style={{ color: PORT_TINT[HANDOVER] }}
           >
             {PORT_LABEL[HANDOVER]}
@@ -231,7 +231,7 @@ export function FlowNodeCard({ data, selected }: NodeProps<FlowNode>) {
           <div key={port} className="relative flex h-3 items-center">
             {ports.length > 1 && (
               <span
-                className="absolute right-4 text-[0.62rem] whitespace-nowrap"
+                className="absolute right-4 text-[0.7rem] whitespace-nowrap"
                 style={{ color: PORT_TINT[port] ?? "var(--status-good)" }}
               >
                 {PORT_LABEL[port] ?? port}
