@@ -36,8 +36,17 @@ const PORT_LABEL: Record<string, string> = {
   out: "",
   true: "true",
   false: "false",
-  handover: "hand over",
+  handover: "hand over to another agent",
 };
+
+/**
+ * The port that passes the whole conversation to a colleague agent. It hangs
+ * off the bottom of the card, not the right side: the right side is where the
+ * answer comes out, and a second right-hand dot labelled "hand over" read as a
+ * second answer. Below the card, with its own label, it reads as what it is,
+ * the agent stepping aside for another one.
+ */
+const HANDOVER = "handover";
 
 /** Ports whose label and handle are tinted, so a branch reads at a glance. */
 const PORT_TINT: Record<string, string> = {
@@ -48,7 +57,9 @@ const PORT_TINT: Record<string, string> = {
 
 export function FlowNodeCard({ data, selected }: NodeProps<FlowNode>) {
   const status = data.runStatus ? STATUS[data.runStatus] : null;
-  const ports = data.ports.length > 0 ? data.ports : ["out"];
+  const allPorts = data.ports.length > 0 ? data.ports : ["out"];
+  const ports = allPorts.filter((port) => port !== HANDOVER);
+  const handsOver = allPorts.includes(HANDOVER);
   const accent = nodeAccent(data.nodeType);
   const summary = nodeSummary(data.nodeType, data.config ?? {});
 
@@ -186,6 +197,30 @@ export function FlowNodeCard({ data, selected }: NodeProps<FlowNode>) {
                 : data.problem}
             </p>
           )}
+        </div>
+      )}
+
+      {handsOver && (
+        <div className="relative mt-0.5 flex flex-col items-center pb-2">
+          <span
+            className="text-[0.62rem] tracking-wide"
+            style={{ color: PORT_TINT[HANDOVER] }}
+          >
+            {PORT_LABEL[HANDOVER]}
+          </span>
+          <Handle
+            id={HANDOVER}
+            type="source"
+            position={Position.Bottom}
+            className="!h-3.5 !w-3.5 !border-2 !border-[var(--color-ink-900)] transition-transform hover:!scale-125"
+            style={{
+              position: "absolute",
+              bottom: -1,
+              left: "50%",
+              transform: "translateX(-50%)",
+              background: PORT_TINT[HANDOVER],
+            }}
+          />
         </div>
       )}
 

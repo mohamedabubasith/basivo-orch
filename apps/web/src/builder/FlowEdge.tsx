@@ -28,6 +28,7 @@ export function FlowEdge({
   style,
   markerEnd,
   selected,
+  sourceHandleId,
 }: EdgeProps) {
   const { deleteElements } = useReactFlow();
   const [path, labelX, labelY] = getSmoothStepPath({
@@ -39,10 +40,27 @@ export function FlowEdge({
     targetPosition,
   });
 
+  // A handover line carries the conversation, not a result. Said on the line
+  // itself, so the two kinds of connection leaving an agent never look alike.
+  const handover = sourceHandleId === "handover";
+
   return (
     <>
-      <BaseEdge id={id} path={path} style={style} markerEnd={markerEnd} />
+      <BaseEdge
+        id={id}
+        path={path}
+        style={handover ? { ...style, stroke: "var(--series)" } : style}
+        markerEnd={markerEnd}
+      />
       <EdgeLabelRenderer>
+        {handover && (
+          <span
+            className="pointer-events-none absolute -translate-x-1/2 rounded-full border border-ink-700/70 bg-ink-900 px-2 py-0.5 text-[0.62rem] whitespace-nowrap"
+            style={{ left: labelX, top: labelY - 24, color: "var(--series)" }}
+          >
+            hands the conversation over
+          </span>
+        )}
         <button
           type="button"
           aria-label="Disconnect"

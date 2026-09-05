@@ -234,7 +234,17 @@ class AgentConfig(BaseModel):
     # -- tools ---------------------------------------------------------------
     tools: list[ToolDefinition] = Field(default_factory=list, max_length=32)
     #: Other agents this one may work with at run time.
-    sub_agents: list[SubAgentDefinition] = Field(default_factory=list, max_length=8)
+    sub_agents: list[SubAgentDefinition] = Field(
+        default_factory=list,
+        max_length=8,
+        title="Sub-agents (helpers inside this node)",
+        description=(
+            "Specialists this agent can ask while it works, for example a researcher and a "
+            "writer. It receives their answers and writes the final reply itself. To let a "
+            "different agent take over the conversation instead, connect one to the port "
+            "under this node."
+        ),
+    )
     #: How this agent works with them, when there are any.
     #:
     #: "delegate" — it asks (`ask_<name>`), receives an answer, and writes the
@@ -243,7 +253,11 @@ class AgentConfig(BaseModel):
     #: "handover" — it transfers (`transfer_to_<name>`) and the receiving
     #: agent answers directly, and may transfer on again. Right for triage,
     #: where claiming the first agent wrote the final answer would be a lie.
-    team_mode: Literal["delegate", "handover"] = "delegate"
+    team_mode: Literal["delegate", "handover"] = Field(
+        default="delegate",
+        title="How it works with its sub-agents",
+        json_schema_extra={"x-advanced": True},
+    )
     #: How many model turns the loop may take. Each round of tool results costs
     #: a turn, so an agent that keeps calling tools is bounded, not unbounded.
     max_iterations: int = Field(default=6, ge=1, le=25)
@@ -268,7 +282,15 @@ class AgentConfig(BaseModel):
     #: Whether this agent may hand the conversation to an agent wired to its
     #: handover port. Off unless something is wired there, so an agent that
     #: works alone is never told about a mechanism it cannot use.
-    handover: bool = Field(default=True, title="Allow handover")
+    handover: bool = Field(
+        default=True,
+        title="Allow hand over",
+        description=(
+            "Lets this agent pass the whole conversation to an AI Agent connected to the port "
+            "under it. That agent answers directly, and may hand over again. Nothing happens "
+            "unless a node is connected there."
+        ),
+    )
 
     # -- skills ----------------------------------------------------------------
     #: Ids of skills from the workspace library this agent may use.
