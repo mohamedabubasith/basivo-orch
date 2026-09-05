@@ -61,6 +61,11 @@ async def fetch_models(
     if provider_name == "jira":
         return await _verify_jira(api_key=api_key, base_url=base_url)
 
+    if provider_name == "mcp":
+        # A bearer token for whichever MCP server the node names; there is no
+        # endpoint to test it against until a node says which server.
+        raise ModelFetchNotSupported(provider_name)
+
     if provider_name in NO_LIVE_CATALOG:
         raise ModelFetchNotSupported(provider_name)
 

@@ -97,7 +97,9 @@ export function CredentialPicker({
         <option value="">
           {provider === "github" || provider === "gitlab" || provider === "jira"
             ? "Pick a credential…"
-            : "Use the server's own key (no credential)"}
+            : provider === "mcp"
+              ? "No credential (the server is open)"
+              : "Use the server's own key (no credential)"}
         </option>
         {matching.map((credential) => (
           <option key={credential.id} value={credential.id}>

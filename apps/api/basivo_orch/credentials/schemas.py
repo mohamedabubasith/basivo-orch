@@ -39,6 +39,8 @@ PROVIDERS: list[str] = [
     # Jira Cloud: a ticket source for the webhook trigger, and where Fix Code
     # and Open PR reports back. Key is written email:api-token; base URL is the site.
     "jira",
+    # A bearer token for an MCP server an agent calls (see flows/nodes/mcp.py).
+    "mcp",
     "telegram",
     "discord",
     "slack",

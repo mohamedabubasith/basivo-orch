@@ -58,7 +58,11 @@ export function ExpandDialog({
   // button is the kind of thing people describe as the app being stuck.
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
-      if (event.key === "Escape") onClose();
+      if (event.key !== "Escape") return;
+      // Claimed here so the node dialog underneath (also listening) leaves
+      // itself open: one Escape closes one layer.
+      event.preventDefault();
+      onClose();
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -66,6 +70,7 @@ export function ExpandDialog({
 
   return (
     <div
+      data-expand-dialog
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose();

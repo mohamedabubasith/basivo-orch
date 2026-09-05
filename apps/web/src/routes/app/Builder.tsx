@@ -1698,7 +1698,11 @@ function NodeDialog({
 }) {
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
-      if (event.key === "Escape") onClose();
+      if (event.key !== "Escape") return;
+      // An expanded field is a dialog above this one; its Escape is its own.
+      const target = event.target as HTMLElement | null;
+      if (target?.closest?.("[data-expand-dialog]")) return;
+      onClose();
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);

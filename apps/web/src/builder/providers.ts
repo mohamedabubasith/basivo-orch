@@ -33,10 +33,11 @@ export const PROVIDER_LABEL: Record<string, string> = {
   github: "GitHub (repos & issues)",
   gitlab: "GitLab (repos & issues)",
   jira: "Jira (tickets)",
+  mcp: "MCP server (bearer token)",
 };
 
-/** Credentials that are not model providers: git hosts and ticket trackers. */
-export const NON_MODEL_PROVIDERS = new Set(["github", "gitlab", "jira"]);
+/** Credentials that are not model providers: git hosts, ticket trackers, tool servers. */
+export const NON_MODEL_PROVIDERS = new Set(["github", "gitlab", "jira", "mcp"]);
 
 /** Model providers only — what the Agent node's LLM picker offers. The VCS
  *  hosts are credentials, not places to run a model. */

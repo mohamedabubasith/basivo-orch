@@ -280,6 +280,14 @@ function NewCredential({
             The AI Agent node still needs a real API key.
           </p>
         )}
+        {provider === "mcp" && (
+          <p className="-mt-2 text-xs leading-relaxed text-ink-500">
+            The token an MCP server expects. An agent node that names the
+            server sends it as Authorization: Bearer. There is nothing to test
+            it against until a node says which server, so Test connection is
+            skipped for this provider.
+          </p>
+        )}
         {provider === "jira" && (
           <p className="-mt-2 text-xs leading-relaxed text-ink-500">
             Write the key as{" "}
