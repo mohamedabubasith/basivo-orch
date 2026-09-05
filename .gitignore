@@ -54,3 +54,5 @@ AGENT.md
 
 # --- generated ---
 apps/api/basivo_orch/auth/**/__pycache__/
+.qa/run/
+.qa/secrets.env

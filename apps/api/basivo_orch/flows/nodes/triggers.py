@@ -59,15 +59,20 @@ class WebhookTriggerConfig(BaseModel):
         max_length=200,
         description="Sent by callers as the X-Webhook-Secret header.",
     )
-    #: "Listen to a GitHub repository": the platform registers the webhook at
-    #: GitHub itself when the author presses Connect, so nobody has to find
-    #: the repository's settings page or copy a URL and secret. Remembered
-    #: here so the panel shows what was chosen; hidden from the generic form.
-    listen_provider: Literal["", "github"] = Field(default="", json_schema_extra={"x-hidden": True})
+    #: "Listen to a GitHub repository" or "listen to a Jira site": the platform
+    #: registers the webhook there itself when the flow is published, so nobody
+    #: has to find a settings page or copy a URL and secret. Remembered here so
+    #: the panel shows what was chosen; hidden from the generic form.
+    listen_provider: Literal["", "github", "jira"] = Field(
+        default="", json_schema_extra={"x-hidden": True}
+    )
     listen_credential_id: str = Field(
         default="", max_length=64, json_schema_extra={"x-hidden": True}
     )
     listen_repo: str = Field(default="", max_length=200, json_schema_extra={"x-hidden": True})
+    #: Jira: a JQL filter such as `project = OPS`. Empty means every project
+    #: the credential can see.
+    listen_filter: str = Field(default="", max_length=500, json_schema_extra={"x-hidden": True})
     listen_events: list[str] = Field(
         default_factory=lambda: ["issues"], json_schema_extra={"x-hidden": True}
     )
@@ -95,23 +100,40 @@ class WebhookTriggerNode(Node):
             "secret it displays."
         ),
     )
-    example = "Webhook -> If / Else -> Open Issue"
+    example = "Webhook -> If / Else -> Fix Code and Open PR"
     tier = 1
     category = "trigger"
     is_trigger = True
     config_model = WebhookTriggerConfig
-    output_paths = ("body", "headers", "query", "method")
+    output_paths = (
+        "body",
+        "headers",
+        "query",
+        "method",
+        "ticket.key",
+        "ticket.title",
+        "ticket.description",
+        "ticket.url",
+    )
 
     async def run(self, config: WebhookTriggerConfig, ctx: NodeContext) -> NodeResult:
+        from basivo_orch.flows.nodes.jira import ticket_from_payload
+
         payload = ctx.trigger.get("payload", {})
-        return NodeResult(
-            output={
-                "body": payload.get("body"),
-                "headers": payload.get("headers", {}),
-                "query": payload.get("query", {}),
-                "method": payload.get("method"),
-            }
-        )
+        body = payload.get("body")
+        output: dict[str, Any] = {
+            "body": body,
+            "headers": payload.get("headers", {}),
+            "query": payload.get("query", {}),
+            "method": payload.get("method"),
+        }
+        # A Jira delivery carries its description as a document tree, which no
+        # template can read; the ticket is handed over flattened, under one
+        # name, so "{{ input.ticket.title }}" works without knowing Jira's shape.
+        ticket = ticket_from_payload(body)
+        if ticket is not None:
+            output["ticket"] = ticket
+        return NodeResult(output=output)
 
 
 class ScheduleTriggerConfig(BaseModel):

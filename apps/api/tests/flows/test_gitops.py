@@ -1075,3 +1075,298 @@ async def test_a_non_numeric_issue_number_is_a_clear_error_not_a_bad_request(mon
                 ),
                 make_context(_Recorder(), http),
             )
+
+
+# ---------------------------------------------------------------------------
+# The ticket is the task: deletions, skills, MCP servers, Jira
+# ---------------------------------------------------------------------------
+
+
+def test_the_prompts_let_the_ticket_ask_for_more_than_a_bug_fix():
+    """The first prompt allowed defects only, so a rewrite ticket was refused
+    and the agent fixed an unrelated bug instead. Pinned so it stays fixed."""
+    from basivo_orch.flows.nodes.gitops import CLAUDE_CODE_PROMPT, SYSTEM_PROMPT
+
+    for prompt in (SYSTEM_PROMPT, CLAUDE_CODE_PROMPT):
+        assert "The ticket is your task" in prompt
+        assert "new feature, a rewrite" in prompt
+        assert "Never write credentials" in prompt
+        assert "protected paths" in prompt
+
+
+def github_with_deletes(requests: list[httpx.Request], files: dict[str, str]):
+    """The scripted GitHub, with several files and the DELETE contents route."""
+    inner = github_repo_handler(requests)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if "/git/trees/" in path:
+            requests.append(request)
+            return httpx.Response(200, json={"tree": [{"path": p, "type": "blob"} for p in files]})
+        name = path.rsplit("/contents/", 1)[-1] if "/contents/" in path else ""
+        if name in files and request.method == "GET":
+            requests.append(request)
+            return httpx.Response(
+                200,
+                json={
+                    "content": base64.b64encode(files[name].encode()).decode(),
+                    "sha": f"sha-{name}",
+                },
+            )
+        if "/contents/" in path and request.method == "DELETE":
+            requests.append(request)
+            return httpx.Response(200, json={})
+        return inner(request)
+
+    return handler
+
+
+async def test_the_builtin_agent_can_delete_files_the_ticket_wants_gone(monkeypatch):
+    requests: list[httpx.Request] = []
+    turn = {"n": 0}
+
+    def model(messages):
+        turn["n"] += 1
+        if turn["n"] == 1:
+            return tool_call("delete_file", {"path": "legacy.py"}, call_id="d1")
+        if turn["n"] == 2:
+            return tool_call("write_file", {"path": "app.py", "content": "app = 1\n"}, call_id="w1")
+        return says("Removed legacy.py and added app.py as the ticket asked.")
+
+    async def fake_build(ctx, **kwargs):
+        return FakeChatModel(respond=model)
+
+    monkeypatch.setattr("basivo_orch.flows.nodes.gitops.build_chat_model", fake_build)
+    recorder = _Recorder()
+    files = {"calc.py": "def add(a, b):\n    return a - b\n", "legacy.py": "old = True\n"}
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(github_with_deletes(requests, files))
+    ) as http:
+        result = await AutofixNode().run(
+            AutofixConfig(
+                git_credential_id="cred-git",
+                repo="acme/api",
+                problem="Remove legacy.py and add app.py",
+                provider="openai",
+                engine="builtin",
+            ),
+            make_context(recorder, http),
+        )
+
+    assert result.output["files_changed"] == ["app.py", "legacy.py"]
+    delete = next(r for r in requests if r.method == "DELETE")
+    assert delete.url.path == "/repos/acme/api/contents/legacy.py"
+    assert json.loads(delete.content)["sha"] == "sha-legacy.py"
+    assert any(r.method == "PUT" and r.url.path.endswith("/contents/app.py") for r in requests)
+    kinds = [kind for kind, _ in recorder.steps]
+    assert "fix.deleted" in kinds and "pr.opened" in kinds
+
+
+async def test_deleting_a_protected_or_unknown_path_is_refused_in_words(monkeypatch):
+    requests: list[httpx.Request] = []
+    answers: list[str] = []
+    turn = {"n": 0}
+
+    def model(messages):
+        turn["n"] += 1
+        if turn["n"] == 1:
+            return tool_call("delete_file", {"path": ".github/workflows/ci.yml"}, call_id="d1")
+        if turn["n"] == 2:
+            answers.append(str(messages[-1].content))
+            return tool_call("delete_file", {"path": "ghost.py"}, call_id="d2")
+        if turn["n"] == 3:
+            answers.append(str(messages[-1].content))
+            return tool_call(
+                "write_file",
+                {"path": "calc.py", "content": "def add(a, b):\n    return a + b\n"},
+                call_id="w1",
+            )
+        return says("done")
+
+    async def fake_build(ctx, **kwargs):
+        return FakeChatModel(respond=model)
+
+    monkeypatch.setattr("basivo_orch.flows.nodes.gitops.build_chat_model", fake_build)
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(github_repo_handler(requests))
+    ) as http:
+        await AutofixNode().run(
+            AutofixConfig(
+                git_credential_id="cred-git", repo="acme/api", problem="x", provider="openai"
+            ),
+            make_context(_Recorder(), http),
+        )
+    assert "protected path" in answers[0]
+    assert "does not exist" in answers[1]
+    assert not any(r.method == "DELETE" for r in requests)
+
+
+async def test_claude_code_deletions_reach_the_branch(monkeypatch, tmp_path):
+    """Claude Code has no delete tool here, so it marks the file (see
+    DELETE_MARKER) and the diff reader pushes a deletion. Found on a live run
+    that shipped two emptied files instead."""
+    from basivo_orch.flows.nodes.gitops import DELETE_MARKER
+
+    monkeypatch.setenv(
+        "BASIVO_CLAUDE_CODE_BIN",
+        str(
+            _fake_claude(
+                tmp_path,
+                f"open('README.md', 'w').write('{DELETE_MARKER}\\n'); "
+                "open('NOTES.md', 'w').write('new\\n')",
+            )
+        ),
+    )
+    requests: list[httpx.Request] = []
+    recorder = _Recorder()
+    files = {"calc.py": "def add(a, b):\n    return a - b\n", "README.md": "# api\n"}
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(github_with_deletes(requests, files))
+    ) as http:
+        # The archive route lives in github_with_archive; layer it on.
+        archive_handler = github_with_archive([])
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path.endswith("/tarball/main") or request.url.host == "codeload.test":
+                return archive_handler(request)
+            return github_with_deletes(requests, files)(request)
+
+        http._transport = httpx.MockTransport(handler)  # noqa: SLF001 — test plumbing
+        result = await AutofixNode().run(
+            AutofixConfig(
+                git_credential_id="cred-git",
+                credential_id="cred-claude",
+                repo="acme/api",
+                problem="Replace README.md with NOTES.md",
+            ),
+            make_context_with_claude(recorder, http),
+        )
+    assert result.output["files_changed"] == ["NOTES.md", "README.md"]
+    delete = next(r for r in requests if r.method == "DELETE")
+    assert delete.url.path.endswith("/contents/README.md")
+    assert ("fix.deleted", {"path": "README.md"}) in recorder.steps
+
+
+async def test_skills_and_mcp_servers_reach_claude_code(monkeypatch, tmp_path):
+    """Skills ride in the system prompt; MCP servers become the config document
+    and the allow-list. Both are the node's own settings, not the worker's."""
+    from basivo_orch.flows.nodes import claude_code
+    from basivo_orch.flows.nodes.mcp import McpServer
+    from basivo_orch.flows.nodes.skills import LoadedSkill
+
+    seen: dict = {}
+
+    async def fake_run(**kwargs):
+        seen.update(kwargs)
+        (kwargs["cwd"] / "calc.py").write_text("def add(a, b):\n    return a + b\n")
+        return claude_code.ClaudeCodeResult(text="fixed", cost_usd=0.01, turns=2)
+
+    monkeypatch.setattr(claude_code, "run_claude_code", fake_run)
+    monkeypatch.setattr(claude_code, "binary", lambda: "/usr/bin/claude")
+
+    requests: list[httpx.Request] = []
+    recorder = _Recorder()
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(github_with_archive(requests))
+    ) as http:
+        ctx = make_context_with_claude(recorder, http)
+        inner_resolve = ctx.resolve_credential
+
+        async def resolve(credential_id: str):
+            if credential_id == "cred-mcp":
+                return ResolvedCredential(
+                    provider="mcp", api_key="tok-mcp", base_url=None, options={}
+                )
+            return await inner_resolve(credential_id)
+
+        async def load_skills(ids):
+            return [
+                LoadedSkill(
+                    id="s1",
+                    name="house-style",
+                    description="How we write.",
+                    instructions="Prefer small functions.",
+                )
+            ]
+
+        ctx.resolve_credential = resolve
+        ctx.load_skills = load_skills
+        await AutofixNode().run(
+            AutofixConfig(
+                git_credential_id="cred-git",
+                credential_id="cred-claude",
+                repo="acme/api",
+                problem="x",
+                skills=["s1"],
+                mcp_servers=[
+                    McpServer(name="docs", url="https://mcp.test/mcp", credential_id="cred-mcp")
+                ],
+            ),
+            ctx,
+        )
+    assert (
+        "### house-style" in seen["system_prompt"]
+        and "Prefer small functions." in seen["system_prompt"]
+    )
+    assert seen["mcp_config"]["mcpServers"]["docs"]["headers"] == {
+        "Authorization": "Bearer tok-mcp"
+    }
+    assert seen["extra_allowed_tools"] == ["mcp__docs"]
+    assert ("mcp.configured", {"servers": ["docs"]}) in recorder.steps
+
+
+async def test_a_jira_ticket_gets_the_report_back_on_jira(monkeypatch):
+    requests: list[httpx.Request] = []
+
+    async def fake_build(ctx, **kwargs):
+        return FakeChatModel(respond=scripted_fix_model())
+
+    monkeypatch.setattr("basivo_orch.flows.nodes.gitops.build_chat_model", fake_build)
+    github = github_repo_handler(requests)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "acme.atlassian.net":
+            requests.append(request)
+            assert request.url.path == "/rest/api/3/issue/OPS-7/comment"
+            assert request.headers["authorization"].startswith("Basic ")
+            return httpx.Response(201, json={"id": "77"})
+        return github(request)
+
+    recorder = _Recorder()
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        ctx = make_context(recorder, http)
+        inner_resolve = ctx.resolve_credential
+
+        async def resolve(credential_id: str):
+            if credential_id == "cred-jira":
+                return ResolvedCredential(
+                    provider="jira",
+                    api_key="me@acme.com:tok",
+                    base_url="https://acme.atlassian.net",
+                    options={},
+                )
+            return await inner_resolve(credential_id)
+
+        ctx.resolve_credential = resolve
+        result = await AutofixNode().run(
+            AutofixConfig(
+                git_credential_id="cred-git",
+                repo="acme/api",
+                problem="Rewrite pricing",
+                provider="openai",
+                issue_number="OPS-7",
+                ticket_provider="jira",
+                ticket_credential_id="cred-jira",
+            ),
+            ctx,
+        )
+    assert result.output["issue_number"] == "OPS-7"
+    assert (
+        result.output["comment_url"]
+        == "https://acme.atlassian.net/browse/OPS-7?focusedCommentId=77"
+    )
+    posted = json.loads(next(r for r in requests if r.url.host == "acme.atlassian.net").content)
+    assert (
+        "https://github.com/acme/api/pull/42" in posted["body"]["content"][0]["content"][0]["text"]
+    )
+    assert not any(r.url.path.endswith("/issues/7/comments") for r in requests), "not on GitHub"

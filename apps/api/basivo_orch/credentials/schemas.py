@@ -36,6 +36,9 @@ PROVIDERS: list[str] = [
     # VCS hosts, for the git.ticket / git.autofix nodes — not model providers.
     "github",
     "gitlab",
+    # Jira Cloud: a ticket source for the webhook trigger, and where Fix Code
+    # and Open PR reports back. Key is written email:api-token; base URL is the site.
+    "jira",
     "telegram",
     "discord",
     "slack",

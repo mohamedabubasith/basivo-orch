@@ -179,24 +179,44 @@ def github_hook_secret(flow_id: uuid.UUID) -> str:
     return hmac.new(key, f"github-hook:{flow_id}".encode(), hashlib.sha256).hexdigest()
 
 
+def jira_hook_secret(flow_id: uuid.UUID) -> str:
+    """The token in the URL this platform registers at Jira.
+
+    Jira Cloud's webhook API has no signing secret to give it, so the URL
+    itself carries one, as `?key=…`. Derived like the others: never stored,
+    never typed, rotated with the deployment key. The URL is only ever seen by
+    Jira's webhook settings page, which the registering account administers.
+    """
+    key = get_auth_settings().secret_key.get_secret_value().encode()
+    return hmac.new(key, f"jira-hook:{flow_id}".encode(), hashlib.sha256).hexdigest()
+
+
 def authenticate_inbound(
     flow_id: uuid.UUID,
     config: WebhookTriggerConfig,
     *,
     raw_body: bytes,
     headers: Mapping[str, str],
+    query: Mapping[str, str] | None = None,
 ) -> None:
     """Admit a delivery with the trigger's own secret, or with the one this
-    platform registered at GitHub on the author's behalf.
+    platform registered at GitHub or Jira on the author's behalf.
 
     A person who pressed Connect never saw a secret and should not need one:
     a GitHub-signed delivery is checked against the derived secret whenever
-    the trigger's typed secret does not admit it (or there is none).
+    the trigger's typed secret does not admit it (or there is none), and a
+    flow listening to Jira admits the URL token it registered there.
     """
     try:
         authenticate_hook(config, raw_body=raw_body, headers=headers)
         return
     except HTTPException as denied:
+        if config.listen_provider == "jira" and query is not None:
+            presented = str(query.get("key", ""))
+            if presented and hmac.compare_digest(
+                presented.encode(), jira_hook_secret(flow_id).encode()
+            ):
+                return
         if "x-hub-signature-256" not in {k.lower() for k in headers}:
             raise
         platform = WebhookTriggerConfig(
@@ -274,5 +294,94 @@ async def register_github_webhook(
     return {
         "hook_id": data.get("id"),
         "events": data.get("events", events),
+        "updated": bool(existing),
+    }
+
+
+async def register_jira_webhook(
+    http: httpx.AsyncClient,
+    *,
+    site: str,
+    api_key: str,
+    hook_url: str,
+    events: list[str],
+    jql: str = "",
+    name: str = "Basivo",
+) -> dict[str, Any]:
+    """Create, or update, the one webhook on the Jira site that points at `hook_url`.
+
+    Jira Cloud's webhook registration API (`/rest/webhooks/1.0/webhook`) is
+    the one a site administrator's API token can use. Idempotent on the URL,
+    like the GitHub version: reconnecting edits the existing webhook rather
+    than stacking another that would start every run twice.
+    """
+    from basivo_orch.flows.nodes.jira import basic_auth_header
+
+    headers = {**basic_auth_header(api_key), "Content-Type": "application/json"}
+    base = site.rstrip("/")
+    body: dict[str, Any] = {
+        "name": name,
+        "url": hook_url,
+        "events": events,
+        "excludeBody": False,
+    }
+    if jql.strip():
+        body["filters"] = {"issue-related-events-section": jql.strip()}
+
+    listing = await http.get(f"{base}/rest/webhooks/1.0/webhook", headers=headers)
+    if listing.status_code in (401, 403):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Jira refused this credential for webhook administration. The account has to be "
+            "a Jira administrator on that site, and the credential is written email:api-token.",
+        )
+    if listing.status_code == 404:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"No Jira site answered at {base}. The credential's base URL should be the site, "
+            "for example https://your-team.atlassian.net.",
+        )
+    if listing.status_code >= 400:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"Jira answered {listing.status_code}.")
+    try:
+        hooks = listing.json()
+    except ValueError:
+        hooks = []
+    # The registered URL carries the flow's token; match on everything before
+    # the query string so a rotated deployment key still finds its own hook.
+    plain = hook_url.split("?", 1)[0]
+    existing = next(
+        (
+            h
+            for h in hooks
+            if isinstance(h, dict) and str(h.get("url", "")).split("?", 1)[0] == plain
+        ),
+        None,
+    )
+    if existing:
+        hook_id = str(existing.get("self", "")).rstrip("/").rsplit("/", 1)[-1]
+        response = await http.put(
+            f"{base}/rest/webhooks/1.0/webhook/{hook_id}", headers=headers, json=body
+        )
+    else:
+        response = await http.post(f"{base}/rest/webhooks/1.0/webhook", headers=headers, json=body)
+    if response.status_code >= 400:
+        detail = ""
+        try:
+            payload = response.json()
+            detail = str(
+                payload.get("message") or "; ".join(payload.get("messages", []) or []) or ""
+            )
+        except ValueError:
+            pass
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Jira would not save the webhook: {detail or response.status_code}. "
+            "The URL has to be https and publicly reachable.",
+        )
+    data = response.json() if response.content else {}
+    return {
+        "hook_id": str(data.get("self", "")).rstrip("/").rsplit("/", 1)[-1] or None,
+        "events": list(data.get("events", events) or events),
         "updated": bool(existing),
     }

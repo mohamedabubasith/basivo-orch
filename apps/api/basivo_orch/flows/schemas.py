@@ -44,6 +44,13 @@ class GitHubConnect(BaseModel):
     events: list[str] = Field(default_factory=lambda: ["issues"], max_length=6)
 
 
+class JiraConnect(BaseModel):
+    credential_id: str = Field(min_length=1, max_length=64)
+    #: Optional JQL, e.g. "project = OPS". Empty listens to every project.
+    filter: str = Field(default="", max_length=500)
+    events: list[str] = Field(default_factory=lambda: ["jira:issue_created"], max_length=6)
+
+
 class TelegramConnect(BaseModel):
     credential_id: str = Field(min_length=1, max_length=64)
     #: Discard whatever queued up while the bot was pointed elsewhere. On by

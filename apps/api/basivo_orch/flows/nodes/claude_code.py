@@ -85,12 +85,20 @@ async def run_claude_code(
     max_turns: int = 30,
     max_budget_usd: float | None = None,
     timeout_seconds: float = 780.0,
+    mcp_config: dict[str, Any] | None = None,
+    extra_allowed_tools: list[str] | tuple[str, ...] = (),
 ) -> ClaudeCodeResult:
     """One headless Claude Code session over `cwd`. Returns what it said and cost.
 
     The prompt travels on stdin: it carries a whole bug report and can run to
     kilobytes, and an argument that long is visible in the process table and
     hits ARG_MAX on a bad day.
+
+    `mcp_config` is a `{"mcpServers": {...}}` document (see `nodes/mcp.py`);
+    it is written to a file in the throwaway HOME rather than passed inline,
+    because its headers can carry a credential and the command line is public
+    to every process on the worker. `extra_allowed_tools` are the `mcp__…`
+    patterns that let the agent call them.
     """
     executable = binary()
     if executable is None:
@@ -119,7 +127,7 @@ async def run_claude_code(
         "--permission-mode",
         "acceptEdits",
         "--allowedTools",
-        ",".join(FILE_TOOLS),
+        ",".join([*FILE_TOOLS, *extra_allowed_tools]),
         "--disallowedTools",
         ",".join(DENIED_TOOLS),
         "--max-turns",
@@ -135,6 +143,13 @@ async def run_claude_code(
     # A throwaway HOME: settings, transcripts and caches land here and are
     # deleted with it, so nothing persists between runs or tenants.
     with tempfile.TemporaryDirectory(prefix="basivo-claude-home-") as home:
+        if mcp_config:
+            mcp_file = Path(home) / "mcp.json"
+            mcp_file.write_text(json.dumps(mcp_config))
+            mcp_file.chmod(0o600)
+            argv += ["--mcp-config", str(mcp_file)]
+            if "--strict-mcp-config" not in argv:
+                argv.append("--strict-mcp-config")
         env = {
             "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"),
             "HOME": home,

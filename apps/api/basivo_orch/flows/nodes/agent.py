@@ -74,6 +74,7 @@ from basivo_orch.flows.nodes.base import (
 )
 from basivo_orch.flows.nodes.code import PythonExecutionError, run_python
 from basivo_orch.flows.nodes.http import assert_public_url
+from basivo_orch.flows.nodes.mcp import McpServer, mcp_toolset
 from basivo_orch.flows.nodes.models import build_chat_model
 from basivo_orch.flows.nodes.skills import (
     LoadedSkill,
@@ -284,6 +285,18 @@ class AgentConfig(BaseModel):
         default=60000, ge=1000, le=400000, title="Skill budget (characters)"
     )
 
+    # -- MCP servers -------------------------------------------------------------
+    #: Tools that live elsewhere: documentation servers, an issue tracker, a
+    #: team's own services. Connected for the duration of the run; every tool
+    #: the server offers (or the listed subset) is offered to the model as
+    #: <server>__<tool>. See `nodes/mcp.py`.
+    mcp_servers: list[McpServer] = Field(
+        default_factory=list,
+        max_length=8,
+        title="MCP servers",
+        description="Tool servers the agent may call, reached over HTTP.",
+    )
+
     # -- memory ----------------------------------------------------------------
     #: Whether this agent remembers earlier runs.
     #:
@@ -380,10 +393,11 @@ def _tool_name(label: str) -> str:
     return slug[:40] or "agent"
 
 
-async def _load_skills(
-    config: AgentConfig, ctx: NodeContext
-) -> tuple[list[LoadedSkill], list[Any]]:
+async def load_skill_tools(config: Any, ctx: NodeContext) -> tuple[list[LoadedSkill], list[Any]]:
     """Fetch the selected skills and build the tools that read them.
+
+    `config` is anything with `skills` and `skill_budget_chars`: the AI Agent
+    node's config, and the repair agent's, which offers the same library.
 
     Returns ([], []) when none are selected, so an agent without skills gets no
     extra tools at all — an empty `load_skill` in the list would be a tool the
@@ -532,6 +546,12 @@ class AgentNode(Node):
     timeout_seconds = 660.0
 
     async def run(self, config: AgentConfig, ctx: NodeContext) -> NodeResult:
+        # The MCP sessions live exactly as long as the run: opened before the
+        # model sees its tool list, closed after the last tool result.
+        async with mcp_toolset(ctx, config.mcp_servers) as mcp_tools:
+            return await self._run(config, ctx, mcp_tools)
+
+    async def _run(self, config: AgentConfig, ctx: NodeContext, mcp_tools: list[Any]) -> NodeResult:
         model = await build_chat_model(
             ctx,
             provider=config.provider,
@@ -545,7 +565,7 @@ class AgentNode(Node):
             stop=config.stop_sequences or None,
         )
 
-        skills, skill_extras = await _load_skills(config, ctx)
+        skills, skill_extras = await load_skill_tools(config, ctx)
 
         template = ctx.template_context()
         system = str(render_value(config.system, template)) if config.system else ""
@@ -627,6 +647,7 @@ class AgentNode(Node):
             *skill_extras,
             *_handover_tools(ctx, colleagues, handover),
             *[guard(definition) for definition in config.tools],
+            *mcp_tools,
         ]
 
         if colleagues:
@@ -758,6 +779,7 @@ class AgentNode(Node):
                 "model": config.model,
                 "tools": [tool.name for tool in config.tools],
                 "skills": [skill.name for skill in skills],
+                "mcp_servers": [server.name for server in config.mcp_servers],
                 "sub_agents": [sub.name for sub in config.sub_agents],
                 "max_iterations": config.max_iterations,
             },

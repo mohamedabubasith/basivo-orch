@@ -55,6 +55,7 @@ from basivo_orch.flows.schemas import (
     FlowSummary,
     FlowUpdate,
     GitHubConnect,
+    JiraConnect,
     NodeTypeRead,
     RunAccepted,
     RunDetail,
@@ -70,7 +71,9 @@ from basivo_orch.flows.webhooks import (
     ensure_method_allowed,
     github_hook_secret,
     hook_idempotency_key,
+    jira_hook_secret,
     register_github_webhook,
+    register_jira_webhook,
     telegram_hook_secret,
     telegram_idempotency_key,
     wrap_hook_payload,
@@ -271,6 +274,24 @@ async def connect_github_repository(
     """
     flow = await _load_flow(session, context.organization_id, flow_id)
     return await _connect_github(session, context, flow, payload)
+
+
+@management_router.post("/orgs/{organization_id}/flows/{flow_id}/jira/connect")
+async def connect_jira_site(
+    flow_id: uuid.UUID,
+    payload: JiraConnect,
+    context: OrgContext = Depends(require(Permission.FLOW_UPDATE)),
+    session: AsyncSession = Depends(get_async_session),
+) -> dict[str, Any]:
+    """Register this flow's hook URL as a webhook on a Jira Cloud site.
+
+    Same promise as the GitHub version: the person picks a credential and,
+    optionally, a project filter; Jira's settings page is never visited. Jira
+    has no signing secret to give, so the registered URL carries a derived
+    token (see `jira_hook_secret`) that the inbound hook checks.
+    """
+    flow = await _load_flow(session, context.organization_id, flow_id)
+    return await _connect_jira(session, context, flow, payload)
 
 
 @management_router.post("/orgs/{organization_id}/flows/{flow_id}/telegram/connect")
@@ -480,37 +501,105 @@ async def publish_flow(
     # the person never presses a second button; a failure is reported next to
     # the published version rather than failing the publish, because the flow
     # itself is fine and the fix is on the GitHub side.
-    github = await _register_listen(session, context, flow, Graph.model_validate(version.graph))
-    if github is not None:
-        result["github"] = github
+    listen = await _register_listen(session, context, flow, Graph.model_validate(version.graph))
+    if listen is not None:
+        provider, outcome = listen
+        result[provider] = outcome
     return result
 
 
 async def _register_listen(
     session: AsyncSession, context: OrgContext, flow: Flow, graph: Graph
-) -> dict[str, Any] | None:
-    """Register the webhook the trigger asked for, if it asked for one."""
+) -> tuple[str, dict[str, Any]] | None:
+    """Register the webhook the trigger asked for, if it asked for one.
+
+    Returns (provider, outcome) so the publish response can say which system
+    was set up — `github` or `jira` — and what happened there.
+    """
     trigger = next((n for n in graph.nodes if n.type == "trigger.webhook"), None)
     if trigger is None:
         return None
     config = WebhookTriggerConfig.model_validate(trigger.config)
-    if config.listen_provider != "github" or not (
-        config.listen_credential_id and config.listen_repo
-    ):
+    if not config.listen_credential_id:
         return None
+    if config.listen_provider == "github" and config.listen_repo:
+        try:
+            return "github", await _connect_github(
+                session,
+                context,
+                flow,
+                GitHubConnect(
+                    credential_id=config.listen_credential_id,
+                    repo=config.listen_repo,
+                    events=config.listen_events or ["issues"],
+                ),
+            )
+        except HTTPException as exc:
+            return "github", {"repo": config.listen_repo, "error": str(exc.detail)}
+    if config.listen_provider == "jira":
+        try:
+            return "jira", await _connect_jira(
+                session,
+                context,
+                flow,
+                JiraConnect(
+                    credential_id=config.listen_credential_id,
+                    filter=config.listen_filter,
+                    events=config.listen_events or ["jira:issue_created"],
+                ),
+            )
+        except HTTPException as exc:
+            return "jira", {"filter": config.listen_filter, "error": str(exc.detail)}
+    return None
+
+
+async def _connect_jira(
+    session: AsyncSession, context: OrgContext, flow: Flow, payload: JiraConnect
+) -> dict[str, Any]:
+    from basivo_orch.auth.settings import get_settings as get_auth_settings
+    from basivo_orch.credentials.crypto import decrypt
+    from basivo_orch.credentials.models import Credential
+    from basivo_orch.flows.nodes.base import NodeError
+    from basivo_orch.flows.nodes.jira import JIRA_HOOK_EVENTS, site_url
+
     try:
-        return await _connect_github(
-            session,
-            context,
-            flow,
-            GitHubConnect(
-                credential_id=config.listen_credential_id,
-                repo=config.listen_repo,
-                events=config.listen_events or ["issues"],
-            ),
-        )
-    except HTTPException as exc:
-        return {"repo": config.listen_repo, "error": str(exc.detail)}
+        credential = await session.get(Credential, uuid.UUID(payload.credential_id))
+    except ValueError:
+        credential = None
+    if (
+        credential is None
+        or credential.organization_id != context.organization_id
+        or credential.provider != "jira"
+    ):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Pick a Jira credential first.")
+    events = [e for e in payload.events if e in JIRA_HOOK_EVENTS] or ["jira:issue_created"]
+    try:
+        site = site_url(credential.base_url)
+    except NodeError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from None
+    public = str(get_auth_settings().public_base_url).rstrip("/")
+    hook_url = f"{public}/hooks/{flow.id}?key={jira_hook_secret(flow.id)}"
+    async with httpx.AsyncClient(timeout=20) as http:
+        try:
+            result = await register_jira_webhook(
+                http,
+                site=site,
+                api_key=decrypt(credential.secret_encrypted),
+                hook_url=hook_url,
+                events=events,
+                jql=payload.filter,
+                name=f"Basivo flow {flow.name}"[:255],
+            )
+        except NodeError as exc:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from None
+    return {
+        "site": site,
+        "filter": payload.filter.strip(),
+        "events": result["events"],
+        "webhook": f"{public}/hooks/{flow.id}",
+        "updated": result["updated"],
+        "published": flow.published_version_id is not None,
+    }
 
 
 async def _connect_github(
@@ -1052,7 +1141,9 @@ async def inbound_hook(
     else:
         config = WebhookTriggerConfig.model_validate(trigger.config)
 
-    authenticate_inbound(flow.id, config, raw_body=raw_body, headers=request.headers)
+    authenticate_inbound(
+        flow.id, config, raw_body=raw_body, headers=request.headers, query=request.query_params
+    )
     ensure_method_allowed(config, request.method)
 
     payload = wrap_hook_payload(

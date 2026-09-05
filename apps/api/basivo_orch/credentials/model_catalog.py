@@ -58,6 +58,9 @@ async def fetch_models(
         # endpoint — proves the token works without touching a repository.
         return await _verify_vcs_token(provider_name, api_key=api_key, base_url=base_url)
 
+    if provider_name == "jira":
+        return await _verify_jira(api_key=api_key, base_url=base_url)
+
     if provider_name in NO_LIVE_CATALOG:
         raise ModelFetchNotSupported(provider_name)
 
@@ -204,3 +207,20 @@ async def _verify_posting_token(
         payload = await _get(webhook, {})
         return [str(payload.get("name") or "webhook")]
     return ["webhook (accepted without a test message)"]
+
+
+async def _verify_jira(*, api_key: str, base_url: str) -> list[str]:
+    """Who the Jira credential is. Read-only; proves site, email and token."""
+    import httpx
+
+    from basivo_orch.flows.nodes.base import NodeError
+    from basivo_orch.flows.nodes.jira import JiraClient
+
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            me = await JiraClient(client, base_url=base_url, api_key=api_key).myself()
+    except NodeError as exc:
+        raise ModelFetchFailed(str(exc)) from exc
+    except httpx.HTTPError as exc:
+        raise ModelFetchFailed(str(exc)) from exc
+    return [str(me.get("displayName") or me.get("emailAddress") or "account")]

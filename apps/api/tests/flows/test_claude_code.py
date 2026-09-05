@@ -222,3 +222,38 @@ def test_changed_files_sees_edits_additions_and_deletions(tmp_path):
     changes = claude_code.changed_files(before, claude_code.snapshot(root))
 
     assert changes == {"edit.py": b"new", "gone.py": None, "added.py": b"fresh"}
+
+
+async def test_mcp_servers_travel_in_a_private_file_not_on_the_command_line(use_fake, tmp_path):
+    """The config can carry a bearer token in its headers, and the command line
+    is readable by every process on the worker; so it goes through a file in
+    the throwaway HOME, and the agent is allowed to call the servers."""
+    use_fake(
+        "cfg = next(a for a in argv if a.endswith('mcp.json')); "
+        "print(json.dumps({'result': json.dumps({'argv': argv, 'cfg': open(cfg).read()})}))"
+    )
+    result = await claude_code.run_claude_code(
+        cwd=tmp_path,
+        prompt="x",
+        system_prompt="",
+        api_key="sk-ant-api-key",
+        mcp_config={
+            "mcpServers": {
+                "docs": {
+                    "type": "http",
+                    "url": "https://mcp.test/mcp",
+                    "headers": {"Authorization": "Bearer tok-secret"},
+                }
+            }
+        },
+        extra_allowed_tools=["mcp__docs"],
+    )
+    payload = json.loads(result.text)
+    argv = payload["argv"]
+    assert "--mcp-config" in argv and argv.count("--strict-mcp-config") == 1
+    assert "tok-secret" not in " ".join(argv), "the token is in the file, not the process table"
+    assert json.loads(payload["cfg"])["mcpServers"]["docs"]["headers"]["Authorization"] == (
+        "Bearer tok-secret"
+    )
+    allowed = argv[argv.index("--allowedTools") + 1].split(",")
+    assert "mcp__docs" in allowed and "Read" in allowed

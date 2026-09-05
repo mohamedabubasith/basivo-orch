@@ -18,7 +18,9 @@ from basivo_orch.flows.schemas import NodeTypeRead
 def test_stable_nodes_declare_their_paths():
     by_type = {spec["type"]: spec["output_paths"] for spec in registry.palette()}
 
-    assert by_type["trigger.webhook"] == ["body", "headers", "query", "method"]
+    assert by_type["trigger.webhook"][:4] == ["body", "headers", "query", "method"]
+    # A Jira delivery is also offered flattened, under one name.
+    assert "ticket.title" in by_type["trigger.webhook"]
     assert by_type["http.request"] == ["status", "headers", "body"]
     assert "usage.cost_usd" in by_type["agent.llm"]
     assert by_type["git.ticket"] == ["url", "number"]
@@ -32,4 +34,4 @@ def test_the_response_schema_carries_output_paths():
     validated = NodeTypeRead.model_validate(
         next(spec for spec in registry.palette() if spec["type"] == "trigger.webhook")
     )
-    assert validated.output_paths == ["body", "headers", "query", "method"]
+    assert validated.output_paths[:4] == ["body", "headers", "query", "method"]
