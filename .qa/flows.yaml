@@ -52,8 +52,8 @@ flows:
       - drag from the right handle of Set Variables to the left handle of If / Else
       - drag from the right handle of Set Variables to the left handle of If / Else a second time
       - expect the repeated connection to be refused with a message that Set Variables is already connected to If / Else
-      - drag from the true handle of If / Else to the left handle of Run Manually
-      - expect that to be refused with a message that a trigger starts the flow so nothing can connect into it
+      - drag from the true handle of If / Else onto the Run Manually node, which has no input handle
+      - expect a message saying Run Manually is the trigger and starts the flow, so nothing can connect into it, and no new connection
       - click the small cross on the connection between Set Variables and If / Else
       - expect that connection to be gone and the flow to show Unsaved changes
 

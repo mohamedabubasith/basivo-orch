@@ -38,6 +38,7 @@ import {
   useReactFlow,
   type Connection,
   type IsValidConnection,
+  type OnConnectEnd,
   type Edge,
   type NodeChange,
   MarkerType,
@@ -269,7 +270,8 @@ function BuilderInner() {
   }, [nodes, edges]);
 
   const canvasRef = useRef<HTMLDivElement>(null);
-  const { screenToFlowPosition } = useReactFlow();
+  const { screenToFlowPosition, flowToScreenPosition, getViewport, setCenter } =
+    useReactFlow();
 
   const specMap = useMemo(
     () => new Map((specs ?? []).map((spec) => [spec.type, spec])),
@@ -330,21 +332,54 @@ function BuilderInner() {
    * on every hover during a drag, so it must not touch state; the reason is
    * parked in a ref and shown once, when the drag ends without connecting.
    */
-  const refusal = useRef<string | null>(null);
   const isValidConnection: IsValidConnection<Edge> = useCallback(
-    (candidate) => {
-      const problem = connectionProblem(candidate, nodes, edges);
-      refusal.current = problem;
-      return problem === null;
+    (candidate) => connectionProblem(candidate, nodes, edges) === null,
+    [nodes, edges],
+  );
+  // Why a drop did nothing, said out loud. The first version kept the last
+  // rejection in a ref, which the drag's own start (the pointer passing over
+  // the source's handle: "cannot connect to itself") had already filled, so
+  // every failed drop showed that stale sentence. Everything is derived from
+  // the final state instead.
+  const onConnectEnd = useCallback<OnConnectEnd>(
+    (event, state) => {
+      if (state.isValid || !state.fromNode) return;
+      const from = state.fromNode;
+      if (state.toNode && state.toHandle) {
+        // Dropped on a handle that refused it.
+        const problem = connectionProblem(
+          {
+            source: from.id,
+            target: state.toNode.id,
+            sourceHandle: state.fromHandle?.id ?? null,
+          },
+          nodes,
+          edges,
+        );
+        if (problem) setBanner({ tone: "bad", text: problem });
+        return;
+      }
+      // Dropped on a node but not on a handle. Silence there read as "the app
+      // ignored me" (found by the QA plugin): a trigger has no input, or the
+      // input is the dot on the node's left.
+      const point =
+        "clientX" in event ? event : (event as TouchEvent).changedTouches?.[0];
+      if (!point) return;
+      const element = document
+        .elementFromPoint(point.clientX, point.clientY)
+        ?.closest?.(".react-flow__node");
+      const id = element?.getAttribute("data-id");
+      const node = id ? nodes.find((candidate) => candidate.id === id) : null;
+      if (!node || node.id === from.id) return;
+      setBanner({
+        tone: "bad",
+        text: node.data.isTrigger
+          ? `${node.data.label} is the trigger. It starts the flow, so nothing can connect into it.`
+          : `Drop the connection on the input dot at the left edge of ${node.data.label}.`,
+      });
     },
     [nodes, edges],
   );
-  const onConnectEnd = useCallback(() => {
-    if (refusal.current) {
-      setBanner({ tone: "bad", text: refusal.current });
-      refusal.current = null;
-    }
-  }, []);
 
   const onConnect = useCallback(
     (connection: Connection) => {
@@ -356,7 +391,6 @@ function BuilderInner() {
         setBanner({ tone: "bad", text: problem });
         return;
       }
-      refusal.current = null;
       setEdges((current) =>
         addEdge(
           {
@@ -467,6 +501,26 @@ function BuilderInner() {
       },
     ]);
     markDirty();
+    // The slot for a new node is to the right of the last one, which on a
+    // laptop is off the edge of the canvas by the third node. A node the
+    // person cannot see is a node they cannot wire, so the view follows it.
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (rect) {
+      const centre = { x: position.x + NODE_WIDTH / 2, y: position.y + 40 };
+      const screen = flowToScreenPosition(centre);
+      const margin = 48;
+      if (
+        screen.x > rect.right - margin ||
+        screen.x < rect.left + margin ||
+        screen.y > rect.bottom - margin ||
+        screen.y < rect.top + margin
+      ) {
+        void setCenter(centre.x, centre.y, {
+          zoom: getViewport().zoom,
+          duration: 250,
+        });
+      }
+    }
   }
 
   function updateSelected(patch: (node: FlowNode) => FlowNode) {
