@@ -42,6 +42,21 @@ jobs:
 
       - run: uv sync --all-extras --dev
 
+      # Posters are RENDERED, not generated: a model writes HTML and headless
+      # Chromium screenshots it. Four tests drive that for real rather than
+      # against a stub, so the browser has to be here. Cached, because the
+      # download is most of the job otherwise.
+      - name: cache the browser
+        id: browser-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('apps/api/uv.lock') }}
+
+      - name: install chromium
+        if: steps.browser-cache.outputs.cache-hit != 'true'
+        run: uv run playwright install --with-deps chromium
+
       - name: lint
         run: uv run ruff check --output-format=github .
 
