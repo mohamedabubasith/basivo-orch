@@ -1,232 +1,170 @@
-# Basivo Agent Orchestrator
+<img src="docs/images/banner.png" alt="A Basivo flow on the canvas: a GitHub issue trigger, an agent, and a pull request" width="100%">
 
-Visual agent pipelines with run logs as a first-class feature. Like n8n or
-Flowise in shape, but built around the thing those tools treat as an
-afterthought: **what actually happened when the pipeline ran.**
+<sub>A ticket arrives, an agent reads the repository, a pull request comes out.</sub>
 
-> **Beta scope.** This repository contains the landing page, the complete
-> authentication layer, and the workflow engine with its Tier 1 nodes and
-> dual-mode execution API. The visual canvas and the Tier 2 capability nodes
-> are not here yet — see [What is not built](#what-is-not-built).
+# <img src="docs/images/mark.png" width="26" align="center" alt=""> Basivo
 
-The build follows [`docs/SOW.md`](docs/SOW.md), which is the grounding
-document: node taxonomy, observability requirements and the external API
-contract all come from it. Phase 1 of its sequencing (§6) is done.
+Agent pipelines that end in something real: a pull request, a video, a post, a reply.
+
+[![CI](https://github.com/mohamedabubasith/basivo-orch/actions/workflows/ci.yml/badge.svg)](https://github.com/mohamedabubasith/basivo-orch/actions/workflows/ci.yml)
+[![Security](https://github.com/mohamedabubasith/basivo-orch/actions/workflows/security.yml/badge.svg)](https://github.com/mohamedabubasith/basivo-orch/actions/workflows/security.yml)
+[![Release](https://img.shields.io/badge/release-v0.1.0-blue)](https://github.com/mohamedabubasith/basivo-orch/releases)
+
+## What it is
+
+A trigger fires. A GitHub issue, a Jira ticket, a webhook, a schedule, a
+Telegram message. A graph of nodes runs. Something comes out the other end that
+a person can look at.
+
+You build the graph on a canvas, configure each node in a dialog, and watch the
+run afterwards: per node status, duration, tokens, cost, and an event log you
+can replay. Model keys are yours. OpenAI, Anthropic, Gemini, Groq and others
+all go through one table in `apps/api/basivo_orch/flows/nodes/models.py`.
+
+## The headline flow
+
+A ticket goes in. An agent reads it, changes the repository, and opens a pull
+request. This works against real repositories today. One real run took 36
+seconds and cost nine cents.
+
+<img src="docs/images/run.png" alt="A finished run: the incoming payload, a timeline, and per node status and cost" width="840">
+
+<sub>A finished run: the payload it started from, the timeline, and what each node cost.</sub>
+
+The cost is on the run page because a pipeline you cannot price is a pipeline
+you cannot run twice.
+
+## What you can build
+
+- **Issue to pull request.** A GitHub issue or a Jira ticket triggers an agent
+  that edits the repository, opens the PR, and comments back on the issue.
+- **A narrated video.** Write the script, speak it, render the animation with
+  Remotion, then post the file to Telegram or Discord.
+- **A bot that answers.** A Telegram message triggers an agent with chat memory
+  and its own tools, and the reply goes back to the same chat.
+- **A scheduled post.** A cron trigger, an agent that writes the copy, an image
+  render, and a post to Slack, Mastodon or Bluesky.
+
+Twenty-three node types ship today: the AI agent (tools, skills, sub-agents,
+MCP servers, hand over), plain text generation, code in a sandbox, HTTP,
+conditionals, set variables, chat memory, image render, video render, speech,
+photo montage, wedding invitation, fix code and open a pull request, comment on
+an issue, post to Telegram, Discord, Slack, Mastodon and Bluesky, and the
+triggers.
+
+## Building one
+
+<img src="docs/images/builder.png" alt="The flow canvas with the node palette open" width="840">
+
+<sub>The canvas, with the palette on the left. Drag a node in, connect it, publish.</sub>
+
+<img src="docs/images/trigger.png" alt="The webhook trigger dialog, with a GitHub repository and the events to listen for" width="620">
+
+<sub>Node configuration opens in the middle of the screen. Here: which repository, which events.</sub>
+
+Around the canvas there is a console: flows, runs, skills, credentials, API
+keys, security and billing.
+
+## Running it locally
+
+You need Docker, [uv](https://docs.astral.sh/uv/) and Node 20 or newer.
+
+```bash
+make setup     # install deps, start Postgres, Redis and Mailpit, migrate
+make dev       # API on :8000, the worker, and the web app on :5173
+```
+
+Registration emails land in Mailpit at http://localhost:8025, not in a real
+inbox. `make help` lists the rest of the targets.
+
+The API does not execute runs. It writes them queued and returns; the worker
+claims them with `FOR UPDATE SKIP LOCKED` and runs them. So if runs sit at
+queued, no worker is running. `make dev` starts one. `make worker` starts one
+on its own.
+
+## How it is put together
 
 ```
 basivo-orch/
 ├── apps/
-│   ├── api/          FastAPI. Auth embedded via basivo-auth, Postgres, Alembic
-│   └── web/          React 19 + Vite + Tailwind 4. Landing page and auth UIs
-├── docker-compose.yml   Postgres, Redis, Mailpit
+│   ├── api/                  FastAPI, SQLAlchemy, Alembic
+│   │   └── basivo_orch/
+│   │       ├── flows/        engine.py, graph.py, templating.py, nodes/
+│   │       ├── auth/         generated by basivo-auth
+│   │       ├── billing/  credentials/  skills/  admin/
+│   │       └── worker.py     claims queued runs, fires schedules
+│   └── web/                  React, Vite, Tailwind
+│       └── src/
+│           ├── builder/      the canvas, the inspector, node icons
+│           └── routes/       landing, auth, and the console
+├── deploy/                   one server: Compose, Caddy, Terraform
+├── docs/                     SOW.md, video.md, billing.md, recipes/
+├── docker-compose.yml        Postgres, Redis, Mailpit
 └── Makefile
 ```
 
-## Running it
+**Video renders with Remotion.** Remotion is source-available, free for up to
+three people and paid above that, and that applies to anyone self-hosting this
+too. It is written down in [`docs/video.md`](docs/video.md) rather than left in
+a dependency list.
 
-Needs Docker, [uv](https://docs.astral.sh/uv/) and Node 20+.
+**Billing has one switch, `BILLING_MODE`.** In demo nothing is enforced and
+nothing can be charged. See [`docs/billing.md`](docs/billing.md).
+
+**Auth comes from a sibling project,
+[basivo-auth](https://github.com/mohamedabubasith/basivo-auth).**
+`apps/api/basivo_orch/auth/` is generated code and gets overwritten on a
+recopy. The local edits are listed in
+[`docs/generated-code-edits.md`](docs/generated-code-edits.md).
+
+**Deployment is one server**: Docker, Postgres, Redis, Caddy. See
+[`deploy/README.md`](deploy/README.md).
+
+## Every run is observable
+
+One row per node attempt, with status, duration, tokens and cost as columns.
+Events are written with a gapless per-run sequence and then published, so you
+can attach to a run already in progress, resume a dropped connection where it
+stopped, and replay the whole thing afterwards.
+
+## Tests
+
+771 tests pass, including tests that encode real video. CI runs lint, the
+suite, a migration up and back down against a real Postgres, both Docker
+images, and a job that renders a video for real. A separate Security workflow
+runs CodeQL, secret scanning, dependency audits and a container scan.
 
 ```bash
-make setup     # install deps, start containers, run migrations
-make api       # terminal 1 → http://localhost:8000
-make web       # terminal 2 → http://localhost:5173
+make test      # the API suite
+make lint      # ruff, tsc, oxlint
 ```
 
-Registration emails are caught locally by Mailpit at **http://localhost:8025** —
-confirmation and password-reset links land there, not in a real inbox.
+## What it is not
 
-`make help` lists the rest.
+- **It is v0.1.0, a pre-release.** It works, and it has not been through many
+  hands yet.
+- **It is not hosted.** You run it. One server is enough.
+- **Nothing runs without a worker.** The API only queues.
+- **It brings no model keys.** You add yours.
+- **Video is not free above three people.** That is Remotion's licence, and it
+  follows the repository.
+- **Demo billing enforces nothing.** Do not read the plans on the billing page
+  as limits until `BILLING_MODE` says production.
 
-## Authentication
-
-Auth is generated and maintained by
-[basivo-auth](https://github.com/mohamedabubasith/basivo-auth), installed in
-*embedded* mode: it lives at `apps/api/basivo_orch/auth/` and shares this
-project's SQLAlchemy `Base`, session dependency and migration history. One
-engine, one connection pool, one `alembic upgrade head` — and orchestrator
-tables will be able to foreign-key to `user` and `organization` directly.
-
-What is wired up and tested end to end:
+## Docs
 
 | | |
-| --- | --- |
-| Accounts | register, email confirmation, sign in, sign out |
-| Passwords | forgot, reset, change — all revoking other sessions |
-| Two-factor | TOTP enrolment with QR, step-up at login, single-use recovery codes |
-| Sessions | HttpOnly cookies, refresh rotation with reuse detection |
-| Tenancy | organisations with per-org roles and permission-checked routes |
-| SSO | Google / GitHub / OIDC, rendered only when credentials are configured |
+|---|---|
+| [`docs/SOW.md`](docs/SOW.md) | What the product is meant to be |
+| [`docs/video.md`](docs/video.md) | The video nodes, the renderer, and Remotion's licence |
+| [`docs/billing.md`](docs/billing.md) | The one switch and where limits are enforced |
+| [`docs/recipes/`](docs/recipes) | Issue to PR, agent memory, agent skills, narrated video, autofix on failure |
+| [`docs/generated-code-edits.md`](docs/generated-code-edits.md) | What was changed in generated auth code |
+| [`deploy/README.md`](deploy/README.md) | The single-server deployment |
+| [`CLAUDE.md`](CLAUDE.md) | Contributor rules, and the reasons behind them |
 
-Auth owns `basivo_orch/auth/` and `tests/auth/` and nothing else. To pull
-upstream fixes:
+## Licence
 
-```bash
-cd apps/api
-uv sync --group tools     # installs the CLI version pinned in pyproject.toml
-basivo-auth update
-git diff                  # review before committing
-```
-
-The version that generated the package is recorded in
-`apps/api/.copier-answers.yml`.
-
-### Two things worth knowing before you deploy
-
-**Cookies need a shared parent domain.** The SPA and API run on separate
-origins (`localhost:5173` and `localhost:8000` in development). That works
-locally because ports do not affect same-site. In production, put them on
-`app.example.com` and `api.example.com` and set `COOKIE_DOMAIN=.example.com`,
-or the session cookie is host-only to the API and the SPA never authenticates.
-
-**`COOKIE_SECURE=false` is a development-only line** in `apps/api/.env`,
-needed because the dev server speaks plain HTTP. The settings model refuses to
-start with it false when `ENVIRONMENT` is staging or production, so it cannot
-reach a deploy by accident.
-
-### The email links are load-bearing
-
-The API mails users at `{FRONTEND_BASE_URL}/auth/verify?token=…` and
-`/auth/reset-password?token=…`. Those two frontend routes are named in
-`apps/web/src/App.tsx` and must keep matching `_frontend_link()` in
-`apps/api/basivo_orch/auth/email/sender.py`. Renaming one breaks every link
-already sitting in someone's inbox.
-
-This is also why the Vite dev server does **not** proxy `/auth` to the API:
-those paths are pages in the SPA *and* endpoints on the API. See the comment
-in `apps/web/vite.config.ts`.
-
-## The workflow engine
-
-Flows are graphs. Each is versioned immutably, so a run from three weeks ago
-still describes the graph that actually executed rather than today's draft.
-
-**Tier 1 nodes** (SOW §2) — `GET /api/v1/nodes` returns the palette, including
-each node's JSON Schema, so the editor cannot offer a node the engine would
-reject:
-
-| | |
-| --- | --- |
-| Triggers | Manual, Webhook, Scheduler |
-| Utility | HTTP Request, Condition/Router, Variable/Set |
-
-**The run log** (SOW §3) is a first-class table, not console output. One row
-per node *attempt* with status, duration, input/output summaries and an error
-— columns rather than a JSON blob, because "which node type fails most" has to
-stay a query when there are millions of rows. A branch that was not taken is
-recorded as `skipped`, never omitted: an absent row and a skipped row are
-indistinguishable in aggregate, and omitting it would make every Condition
-node's dead side look perfectly healthy.
-
-### Running a flow from outside (SOW §4)
-
-Published flows are callable with an organisation-scoped API key. Sessions
-cannot serve this — a cron job or a Lambda has no cookie jar — so keys are
-separate, hashed at rest, and revocable.
-
-```bash
-# blocking
-curl -X POST https://api.example.com/flows/$ID/run \
-     -H "Authorization: Bearer bsv_..." -d '{"input": {...}}'
-
-# async: 202 + run_id, then poll
-curl -X POST ".../flows/$ID/run?mode=async" ...   # or  Prefer: respond-async
-curl ".../flows/$ID/runs/$RUN_ID"
-
-# stream it instead
-curl -N -X POST ".../flows/$ID/run/stream" ...
-
-# or attach to a run already in progress
-curl -N ".../flows/$ID/runs/$RUN_ID/stream"
-```
-
-That last one is the constraint that shaped the design. "Attach to an
-in-progress run" is impossible with pub/sub alone — a client arriving at t+5s
-has simply missed the first five seconds. So every event is written to
-`run_event` with a gapless per-run sequence and *then* published to Redis, and
-a reader subscribes **before** replaying history so nothing falls between the
-two. `Last-Event-ID` resumes exactly where a dropped connection stopped.
-
-Redis carries only the live tail. If it is down, streaming degrades to polling
-and nothing is lost.
-
-### Two guards worth knowing about
-
-**The HTTP node cannot reach your network.** A node that fetches a
-user-supplied URL is SSRF by construction; without a guard it will happily
-return `169.254.169.254`'s IAM credentials as node output. Every resolved
-address is checked, redirects are followed by hand and re-checked, and the
-error never reveals what a hostname resolved to.
-
-**Node config is not an expression language.** `{{ nodes.fetch.body.id }}` is a
-data path — dotted keys and list indices over plain data, no calls, no
-operators, no attribute access. Jinja or `eval` here would hand every author of
-a flow arbitrary code execution inside the orchestrator.
-
-## Configuration
-
-One secret. `apps/api/.env` is generated on install with a random `SECRET_KEY`;
-every other key the service needs — JWT signing, CSRF, reset and verification
-tokens, OAuth state, TOTP encryption — is derived from it with HKDF at runtime.
-Rotating it ends all sessions and invalidates outstanding email links.
-
-The frontend reads one variable, `VITE_API_URL` (see `apps/web/.env.example`).
-It must match the API's `PUBLIC_BASE_URL`, and the API's `CORS_ORIGINS` must
-list the SPA's origin.
-
-## Verification
-
-The auth layer was not assumed to work — it was driven against the real stack
-(Postgres, Redis, Mailpit, uvicorn):
-
-- **162** unit tests in `apps/api/tests/` (auth, plus the engine, graph
-  validation, templating and the SSRF guard)
-- **67** end-to-end assertions over the live auth API: rotation and reuse
-  detection, timing-equalised login, CSRF enforcement, lockout, rate limiting,
-  404-not-403 for non-members
-- **76** end-to-end assertions over the flow API: both run modes, SSE, attaching
-  to a run mid-flight, `Last-Event-ID` resume, idempotent redelivery, tenant
-  isolation and key revocation
-- **40** assertions driving the auth API cross-origin exactly as the browser
-  does — preflights, exposed headers, cookie flags, the full 2FA exchange
-
-```bash
-make test     # unit tests
-make lint     # ruff, mypy, tsc, oxlint
-make build    # production build of the web app
-```
-
-## What is not built
-
-Named plainly, because a beta that overstates itself wastes the tester's time:
-
-- **No visual canvas.** Flows are created and edited through the API. The graph
-  format, validation and palette are all in place for one; nobody has drawn it.
-- **No Tier 2 capability nodes.** Agent, Code Agent, Voice, Memory and the
-  Data/Integration nodes are the product's differentiator and none exist yet.
-  The node interface they will implement does, and the engine already records
-  `cost_usd` / `tokens_in` / `tokens_out` for them.
-- **The scheduler does not run.** `trigger.schedule` validates its cron
-  expression and is otherwise inert; nothing fires it.
-- **Webhook delivery is not wired.** The trigger node works when a run is
-  started through the API; there is no public per-flow webhook URL yet.
-- **Background runs are in-process.** `mode=async` uses an asyncio task, so a
-  restart loses in-flight runs and nothing balances across workers. Correct for
-  a beta, wrong for scale — the seam is one function (`execute_detached`).
-- **The landing page's log stream is a scripted mock.** It is built from the
-  shapes the real run viewer uses, and says so on the page.
-- **Organisations, flows and runs have APIs but no UI.** All are tested; none
-  have screens.
-
-Authentication, tenancy, the run log and the execution contract came first
-deliberately — they are the parts that are painful to retrofit once real users
-and real integrations exist.
-
-## A note on the auth dependency
-
-Building this on top of `basivo-auth` surfaced five defects in it, all fixed
-upstream and pulled in here: the 2FA step-up token was not consumed on use;
-`install_auth` had no way to exempt an API-key-authenticated API from CSRF (so
-`X-API-Key` callers were rejected with "CSRF token missing"); `init`
-under-reported what an embedded host needs to type-check; and `--local`
-rendered the last release instead of the working copy, which is the kind of
-thing that costs an afternoon. See its CHANGELOG for 0.2.1 through 0.2.3.
+There is no licence file in this repository yet, so all rights are reserved for
+now. Remotion, which the video nodes use, has its own terms: see
+[`docs/video.md`](docs/video.md).

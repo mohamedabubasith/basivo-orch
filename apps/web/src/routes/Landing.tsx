@@ -1,12 +1,12 @@
 import {
   CTA,
+  Compare,
   Features,
   Footer,
   Hero,
   HowItWorks,
   Nav,
-  Observability,
-  Stats,
+  Trust,
 } from "../components/landing/Sections";
 
 export function Landing() {
@@ -15,10 +15,10 @@ export function Landing() {
       <Nav />
       <main>
         <Hero />
-        <Stats />
-        <Observability />
-        <Features />
         <HowItWorks />
+        <Features />
+        <Compare />
+        <Trust />
         <CTA />
       </main>
       <Footer />

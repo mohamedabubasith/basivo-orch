@@ -1,13 +1,15 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+<!-- The mark: a ticket sharpened into an arrow, with the run chevron cut
+     out of it. One path, one fill, knockout by evenodd, so it survives a
+     16px favicon and a one-colour print. The gradient is decoration only;
+     the colours are baked because a favicon has no stylesheet. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
   <defs>
-    <linearGradient id="b" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#818cf8"/>
-      <stop offset="100%" stop-color="#22d3ee"/>
+    <linearGradient id="basivo" x1="3" y1="3" x2="29" y2="29"
+                    gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#a08cff"/>
+      <stop offset="0.55" stop-color="#8b5cf6"/>
+      <stop offset="1" stop-color="#2dd4bf"/>
     </linearGradient>
   </defs>
-  <rect width="32" height="32" rx="9" fill="#0a0c14"/>
-  <circle cx="10" cy="10" r="3" fill="url(#b)"/>
-  <circle cx="22" cy="10" r="3" fill="url(#b)"/>
-  <circle cx="16" cy="22" r="3" fill="url(#b)"/>
-  <path d="M10 13v3a3 3 0 0 0 3 3h6a3 3 0 0 0 3-3v-3" stroke="url(#b)" stroke-width="1.8" fill="none" stroke-linecap="round"/>
+  <path fill="url(#basivo)" fill-rule="evenodd" d="M8.5 2.5h11.6L30 16l-9.9 13.5H8.5A6 6 0 0 1 2.5 23.5v-15A6 6 0 0 1 8.5 2.5ZM8.56 11.44 13.11 16 8.56 20.56a2.75 2.75 0 0 0 3.89 3.89L18.94 17.94a2.75 2.75 0 0 0 0-3.89L12.44 7.56a2.75 2.75 0 0 0-3.89 3.89Z"/>
 </svg>

@@ -339,31 +339,28 @@ export function Logo({ className }: { className?: string }) {
   const gradient = useId();
   return (
     <span className={cx("inline-flex items-center gap-2.5", className)}>
+      {/* One path, one fill, the chevron knocked out by evenodd rather than
+          painted over: the mark has to hold as a 16px favicon and as flat
+          black on a print, so nothing about it may depend on the gradient. */}
       <svg viewBox="0 0 32 32" className="h-7 w-7" aria-hidden="true">
         <defs>
-          <linearGradient id={gradient} x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0%" stopColor="var(--series)" />
-            <stop offset="100%" stopColor="var(--color-accent-500)" />
+          <linearGradient
+            id={gradient}
+            x1="3"
+            y1="3"
+            x2="29"
+            y2="29"
+            gradientUnits="userSpaceOnUse"
+          >
+            <stop offset="0" stopColor="var(--series)" />
+            <stop offset="0.55" stopColor="var(--series)" />
+            <stop offset="1" stopColor="var(--color-accent-500)" />
           </linearGradient>
         </defs>
-        <rect
-          x="2"
-          y="2"
-          width="28"
-          height="28"
-          rx="9"
-          fill={`url(#${gradient})`}
-          opacity="0.16"
-        />
-        <circle cx="10" cy="10" r="3" fill={`url(#${gradient})`} />
-        <circle cx="22" cy="10" r="3" fill={`url(#${gradient})`} />
-        <circle cx="16" cy="22" r="3" fill={`url(#${gradient})`} />
         <path
-          d="M10 13v3a3 3 0 0 0 3 3h6a3 3 0 0 0 3-3v-3"
-          stroke={`url(#${gradient})`}
-          strokeWidth="1.8"
-          fill="none"
-          strokeLinecap="round"
+          fill={`url(#${gradient})`}
+          fillRule="evenodd"
+          d="M8.5 2.5h11.6L30 16l-9.9 13.5H8.5A6 6 0 0 1 2.5 23.5v-15A6 6 0 0 1 8.5 2.5ZM8.56 11.44 13.11 16 8.56 20.56a2.75 2.75 0 0 0 3.89 3.89L18.94 17.94a2.75 2.75 0 0 0 0-3.89L12.44 7.56a2.75 2.75 0 0 0-3.89 3.89Z"
         />
       </svg>
       <span className="text-[1.05rem] font-semibold tracking-tight text-ink-100">
