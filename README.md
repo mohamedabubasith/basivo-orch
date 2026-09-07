@@ -20,23 +20,37 @@
 
 ## What it is
 
-A trigger fires. A GitHub issue, a Jira ticket, a webhook, a schedule, a
-Telegram message. A graph of nodes runs. Something comes out the other end that
-a person can look at.
+You draw a pipeline on a canvas, and it runs without you. What comes out the
+other end is a thing, not a log line: a pull request, a rendered MP4, a voice
+track, a montage, a post in a channel, a reply to the person who asked.
 
-You build the graph on a canvas, configure each node in a dialog, and watch the
-run afterwards: per node status, duration, tokens, cost, and an event log you
-can replay. Model keys are yours. OpenAI, Anthropic, Gemini, Groq and others
-all go through one table in `apps/api/basivo_orch/flows/nodes/models.py`.
+Inside a flow there are twenty three node types. An agent with real tools,
+skills, sub-agents, MCP servers and hand over. A plain completion when no tools
+are needed. Python in a sandbox, HTTP, conditionals, variables, chat memory
+that survives between runs. Renders: video from React, images from HTML, a
+photo montage, an invitation, speech from text. Delivery: a pull request, an
+issue comment, a post to Telegram, Discord, Slack, Mastodon or Bluesky.
 
-## The headline flow
+Something has to start it, and there are five ways: a webhook you own, which
+registers itself against GitHub or Jira; a schedule; a Telegram bot; an API
+call with your own key; or you, pressing run.
 
-A ticket goes in. An agent reads it, changes the repository, and opens a pull
-request. This works against real repositories today. One real run took 36
-seconds and cost nine cents.
+Model keys are yours. OpenAI, Anthropic, Gemini, Groq and others all go through
+one table in `apps/api/basivo_orch/flows/nodes/models.py`, and every call
+reports its tokens and its price on the run page.
 
-The cost is on the run page because a pipeline you cannot price is a pipeline
-you cannot run twice.
+## What one run looks like
+
+Take the flow this repository uses on itself. A ticket goes in, an agent reads
+it, changes the repository and opens a pull request. Thirty six seconds, nine
+cents, and the pull request is real.
+
+Take another. A schedule fires at nine, a model writes the copy, the video node
+renders it, the speech node reads it, and the post lands in a Telegram channel
+before anyone is at a desk.
+
+Both are the same product. The cost is on the run page in both, because a
+pipeline you cannot price is a pipeline you cannot run twice.
 
 ## What you can build
 
