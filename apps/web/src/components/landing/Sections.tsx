@@ -13,13 +13,14 @@ import { consoleOrigin } from "../../lib/consoleOrigin";
 
 import { Backdrop } from "../Backdrop";
 import { Badge, Button, Logo } from "../ui";
+import { FlowAnimation } from "./FlowAnimation";
 import { LogStream } from "./LogStream";
 
 /**
  * Which optional media the build actually shipped.
  *
- * The hero video and the how-it-works screenshots are optional: a checkout
- * without them must still render a finished page, and probing at run time
+ * The hero video is optional: a checkout without it must still render a
+ * finished page, and probing at run time
  * would flash an empty frame before the error handler fired. `import.meta.glob`
  * answers at build time instead, and the loader functions are never called, so
  * nothing extra is bundled.
@@ -316,22 +317,16 @@ const STEPS = [
     n: "01",
     title: "Choose what starts it",
     body: "A GitHub issue, a Jira ticket, your own webhook, a schedule, or a message someone sends a Telegram bot. That is the trigger, and it is the only thing you have to wire up outside Basivo.",
-    shot: "/shot-trigger.png",
-    alt: "The trigger picker, with GitHub, Jira, webhook and schedule side by side",
   },
   {
     n: "02",
     title: "Draw the flow",
     body: "Drag nodes onto the canvas and join them up. An agent with tools, a condition, a bit of Python, an HTTP call, a render, a post. Publishing gives the flow a stable address.",
-    shot: "/shot-flow.png",
-    alt: "The flow canvas, with an agent node wired between a trigger and a pull request node",
   },
   {
     n: "03",
     title: "Watch it run",
     body: "Every node reports its status, how long it took, the tokens it burned and what those cost. One real run against a real repository finished in 36 seconds for nine cents, and that number is printed on the run page.",
-    shot: "/shot-run.png",
-    alt: "The run page, showing each node with its duration, tokens and cost",
   },
 ] as const;
 
@@ -345,39 +340,32 @@ export function HowItWorks() {
           lede="You are drawing a pipeline, not writing YAML about one."
         />
 
-        <div className="mt-14 grid gap-8 md:grid-cols-3 md:gap-6">
-          {STEPS.map((step, i) => {
-            const shot = asset(step.shot);
-            return (
-              <Reveal key={step.n} delay={i * 0.1}>
-                <div className="relative flex h-full flex-col">
-                  {shot && (
-                    <img
-                      src={shot}
-                      alt={step.alt}
-                      loading="lazy"
-                      className="mb-5 w-full rounded-xl border border-[var(--edge)] bg-ink-900/60"
-                    />
-                  )}
-                  <span className="font-mono text-sm text-brand-400/70">
-                    {step.n}
-                  </span>
-                  <h3 className="mt-3 text-lg font-semibold text-ink-100">
-                    {step.title}
-                  </h3>
-                  <p className="mt-2 text-[0.95rem] leading-relaxed text-ink-400">
-                    {step.body}
-                  </p>
-                  {i < STEPS.length - 1 && !shot && (
-                    <span
-                      aria-hidden="true"
-                      className="absolute top-2 -right-3 hidden h-px w-6 bg-gradient-to-r from-ink-600 to-transparent md:block"
-                    />
-                  )}
-                </div>
-              </Reveal>
-            );
-          })}
+        <Reveal className="mt-14">
+          <FlowAnimation />
+        </Reveal>
+
+        <div className="mt-12 grid gap-8 md:grid-cols-3 md:gap-6">
+          {STEPS.map((step, i) => (
+            <Reveal key={step.n} delay={i * 0.1}>
+              <div className="relative flex h-full flex-col">
+                <span className="font-mono text-sm text-brand-400/70">
+                  {step.n}
+                </span>
+                <h3 className="mt-3 text-lg font-semibold text-ink-100">
+                  {step.title}
+                </h3>
+                <p className="mt-2 text-[0.95rem] leading-relaxed text-ink-400">
+                  {step.body}
+                </p>
+                {i < STEPS.length - 1 && (
+                  <span
+                    aria-hidden="true"
+                    className="absolute top-2 -right-3 hidden h-px w-6 bg-gradient-to-r from-ink-600 to-transparent md:block"
+                  />
+                )}
+              </div>
+            </Reveal>
+          ))}
         </div>
       </div>
     </section>
@@ -483,9 +471,16 @@ export function Features() {
 
 const COMPARISON = [
   {
+    them: "Wiring a trigger anywhere else",
+    theirs:
+      "Copy a webhook URL into the repository settings, paste a secret, choose the events, then keep all three in step by hand.",
+    ours: "Pick the repository and tick the events. Publishing the flow registers the hook and keeps the secret. Delete the flow and the hook goes with it.",
+  },
+  {
     them: "n8n, Zapier",
-    theirs: "General automation with an AI node added to the palette.",
-    ours: "Built around the agent. Skills, sub-agents, handover, MCP and the price of each model call are part of the design rather than a late addition.",
+    theirs:
+      "General automation with an AI node added to the palette. Video, if you need it, is a service you run beside them.",
+    ours: "Built around the agent, and the render is a node on the same canvas. Skills, sub-agents, handover, MCP and the price of each model call are part of the design rather than a late addition.",
   },
   {
     them: "Flowise and other chat builders",
@@ -506,7 +501,7 @@ export function Compare() {
         <Heading
           eyebrow="Compared"
           title="Where this is different, and where it is not"
-          lede="Three tools people ask about, and an honest answer for each."
+          lede="Four things people ask about, and an honest answer for each."
         />
 
         <Reveal className="mt-14">

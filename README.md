@@ -1,14 +1,22 @@
-<img src="docs/images/banner.png" alt="A Basivo flow on the canvas: a GitHub issue trigger, an agent, and a pull request" width="100%">
+<div align="center">
 
-<sub>A ticket arrives, an agent reads the repository, a pull request comes out.</sub>
+<img src="docs/media/mark.png" width="96" alt="Basivo">
 
-# <img src="docs/images/mark.png" width="26" align="center" alt=""> Basivo
+# Basivo
 
-Agent pipelines that end in something real: a pull request, a video, a post, a reply.
+**Agent pipelines that end in something real: a pull request, a video, a post, a reply.**
 
 [![CI](https://github.com/mohamedabubasith/basivo-orch/actions/workflows/ci.yml/badge.svg)](https://github.com/mohamedabubasith/basivo-orch/actions/workflows/ci.yml)
 [![Security](https://github.com/mohamedabubasith/basivo-orch/actions/workflows/security.yml/badge.svg)](https://github.com/mohamedabubasith/basivo-orch/actions/workflows/security.yml)
 [![Release](https://img.shields.io/badge/release-v0.1.0-blue)](https://github.com/mohamedabubasith/basivo-orch/releases)
+
+<video src="https://github.com/mohamedabubasith/basivo-orch/raw/main/docs/media/basivo.mp4" poster="https://github.com/mohamedabubasith/basivo-orch/raw/main/docs/media/poster.jpg" width="860" controls muted playsinline></video>
+
+[Watch it](https://github.com/mohamedabubasith/basivo-orch/raw/main/docs/media/basivo.mp4) if your viewer does not play video inline.
+
+<sub>Forty two seconds, made by this repository's own video node.</sub>
+
+</div>
 
 ## What it is
 
@@ -27,10 +35,6 @@ A ticket goes in. An agent reads it, changes the repository, and opens a pull
 request. This works against real repositories today. One real run took 36
 seconds and cost nine cents.
 
-<img src="docs/images/run.png" alt="A finished run: the incoming payload, a timeline, and per node status and cost" width="840">
-
-<sub>A finished run: the payload it started from, the timeline, and what each node cost.</sub>
-
 The cost is on the run page because a pipeline you cannot price is a pipeline
 you cannot run twice.
 
@@ -38,29 +42,59 @@ you cannot run twice.
 
 - **Issue to pull request.** A GitHub issue or a Jira ticket triggers an agent
   that edits the repository, opens the PR, and comments back on the issue.
-- **A narrated video.** Write the script, speak it, render the animation with
-  Remotion, then post the file to Telegram or Discord.
+- **A narrated video.** Write the script with an LLM, speak it, render the
+  animation with Remotion, then post the file to Telegram or Discord.
 - **A bot that answers.** A Telegram message triggers an agent with chat memory
   and its own tools, and the reply goes back to the same chat.
-- **A scheduled post.** A cron trigger, an agent that writes the copy, an image
-  render, and a post to Slack, Mastodon or Bluesky.
+- **A scheduled post.** A cron trigger, an LLM that writes the copy, a video or
+  an image render, and a post to Slack, Mastodon or Bluesky. Nobody is watching
+  while it happens.
+- **An invitation or a montage.** Photos and a few fields in, a rendered MP4
+  out, addressed to the person who asked for it.
 
-Twenty-three node types ship today: the AI agent (tools, skills, sub-agents,
-MCP servers, hand over), plain text generation, code in a sandbox, HTTP,
-conditionals, set variables, chat memory, image render, video render, speech,
-photo montage, wedding invitation, fix code and open a pull request, comment on
-an issue, post to Telegram, Discord, Slack, Mastodon and Bluesky, and the
-triggers.
+### The whole palette
+
+Twenty three node types ship today, and none of them is a placeholder.
+
+| | |
+|---|---|
+| **Triggers** | Run manually, a webhook (GitHub and Jira register themselves), a schedule, a Telegram bot |
+| **Agents and models** | AI Agent with tools, skills, sub-agents, hand over and MCP servers; Write with AI for a plain completion; Chat Memory that survives between runs |
+| **Code and data** | Python in a sandbox, HTTP Request, If / Else, Set Variables |
+| **Repositories** | Fix Code and Open PR, Open Issue, Comment on Issue |
+| **Media** | Make a Video, Describe a Video (the model writes the composition, we render it and check the frames), Photo Montage, Wedding Invitation, HTML to Image, Prepare Photo, Text to Speech |
+| **Delivery** | Post to Social (Telegram, Discord, Slack, Mastodon, Bluesky), Telegram Reply |
+
+Every model call reports its tokens and its price, whichever provider it went
+to, and every render reports the seconds it took.
+
+## Compared
+
+People ask which tool this replaces, so here is the honest version.
+
+| Instead of | What they are | What this does |
+|---|---|---|
+| n8n, Zapier | General automation with an AI node added to the palette. Video, if you need it, is a service you run beside them. | Built around the agent, and the render is a node on the same canvas. React goes in, an MP4 comes out. |
+| Flowise and other chat builders | Aimed at a chat window with a person typing into it. | Aimed at work that finishes on a trigger or a schedule while nobody is watching, and leaves a file behind. |
+| Hosted agent products | Model spend folded into a subscription you cannot see inside. | Your own keys, billed by the provider at their price, with tokens and dollars on every node of every run. |
+
+The setup difference is the one you feel first. Connecting a repository
+elsewhere means copying a webhook URL into GitHub settings, pasting a secret,
+choosing events, and keeping all three in step. Here you pick the repository
+and tick the events; publishing the flow registers the hook and holds the
+secret. If you delete the flow, the hook goes with it.
+
+Where the others win: n8n and Zapier connect to hundreds of applications. This
+has twenty three node types. If the job is moving rows between SaaS tools, use
+one of those and take the afternoon off.
 
 ## Building one
 
-<img src="docs/images/builder.png" alt="The flow canvas with the node palette open" width="840">
-
-<sub>The canvas, with the palette on the left. Drag a node in, connect it, publish.</sub>
-
-<img src="docs/images/trigger.png" alt="The webhook trigger dialog, with a GitHub repository and the events to listen for" width="620">
-
-<sub>Node configuration opens in the middle of the screen. Here: which repository, which events.</sub>
+Drag a node onto the canvas and join it to the last one. Double click it and
+its settings open in the middle of the screen, not in a panel squeezed against
+the edge. A trigger explains itself: point the webhook at a GitHub repository,
+tick the events you care about, and publishing registers the hook for you.
+There is nothing to set up on GitHub.
 
 Around the canvas there is a console: flows, runs, skills, credentials, API
 keys, security and billing.
