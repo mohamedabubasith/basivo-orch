@@ -113,6 +113,22 @@ async def cmd_set_password(email: str, password: str | None) -> None:
     await engine.dispose()
 
 
+async def cmd_staff(email: str, *, revoke: bool) -> None:
+    """Grant or take away platform staff.
+
+    Staff read the admin API: every workspace's failure counts, and the plan
+    prices. Deliberately a local command and not a screen, because an endpoint
+    that can promote its own caller is the security model gone.
+    """
+    engine, maker = _sessionmaker()
+    async with maker() as session:
+        user = await _find(session, email)
+        user.is_superuser = not revoke
+        await session.commit()
+        print(f"{user.email} is {'no longer' if revoke else 'now'} platform staff.")
+    await engine.dispose()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="basivo_orch.manage", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -126,6 +142,10 @@ def main() -> None:
     password.add_argument("email")
     password.add_argument("--password", help="Omit to be prompted, or to have one generated.")
 
+    staff = sub.add_parser("staff", help="Grant platform staff (the admin API).")
+    staff.add_argument("email")
+    staff.add_argument("--revoke", action="store_true", help="Take it away instead.")
+
     args = parser.parse_args()
     if args.command == "list":
         asyncio.run(cmd_list())
@@ -133,6 +153,8 @@ def main() -> None:
         asyncio.run(cmd_confirm(args.email))
     elif args.command == "set-password":
         asyncio.run(cmd_set_password(args.email, args.password))
+    elif args.command == "staff":
+        asyncio.run(cmd_staff(args.email, revoke=args.revoke))
 
 
 if __name__ == "__main__":

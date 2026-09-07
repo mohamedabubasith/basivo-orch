@@ -16,6 +16,8 @@ export interface PublicConfig {
   app_name: string;
   version: string;
   require_verified_email: boolean;
+  /** "demo" means the plans are a preview and no limit is enforced. */
+  billing_mode?: "demo" | "production";
   /** Where a published flow answers — the server's own idea of its address. */
   public_base_url?: string;
 }
@@ -24,6 +26,7 @@ const FALLBACK: PublicConfig = {
   app_name: "Basivo",
   version: "unknown",
   require_verified_email: true,
+  billing_mode: "demo",
 };
 
 let cached: Promise<PublicConfig> | null = null;

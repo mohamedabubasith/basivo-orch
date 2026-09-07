@@ -6,12 +6,17 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 import redis.asyncio as redis
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from basivo_orch import __version__
+from basivo_orch.admin.router import router as admin_router
 from basivo_orch.auth.router import auth_router, install_auth
 from basivo_orch.auth.settings import get_settings as get_auth_settings
+from basivo_orch.billing.router import router as billing_router
+from basivo_orch.billing.router import webhook_router as billing_webhook_router
+from basivo_orch.billing.service import QuotaExceeded
 from basivo_orch.config import get_settings
 from basivo_orch.credentials.router import router as credentials_router
 from basivo_orch.db import dispose_engine
@@ -97,7 +102,10 @@ def create_app() -> FastAPI:
         # /hooks is exempt for the same reason as /flows: authenticated by the
         # webhook trigger's secret (HMAC or token header), never by a cookie —
         # GitHub cannot fetch a CSRF token before delivering a webhook.
-        csrf_exempt_prefixes=("/flows", "/hooks"),
+        # /billing is the payment provider's webhook, authenticated by the
+        # signature over its own body. A provider cannot fetch a CSRF token
+        # first, for the same reason GitHub cannot.
+        csrf_exempt_prefixes=("/flows", "/hooks", "/billing"),
     )
 
     app.add_middleware(
@@ -127,8 +135,25 @@ def create_app() -> FastAPI:
     app.include_router(management_router, prefix=settings.API_V1_PREFIX)
     app.include_router(credentials_router, prefix=settings.API_V1_PREFIX)
     app.include_router(skills_router, prefix=settings.API_V1_PREFIX)
+    app.include_router(billing_router, prefix=settings.API_V1_PREFIX)
+    app.include_router(admin_router, prefix=settings.API_V1_PREFIX)
     app.include_router(external_router)
     app.include_router(hooks_router)
+    app.include_router(billing_webhook_router)
+
+    @app.exception_handler(QuotaExceeded)
+    async def _quota_exceeded(_: Request, exc: QuotaExceeded) -> JSONResponse:
+        """A plan limit, answered in one place.
+
+        Runs are started from four routes and a webhook; a check that each of
+        them had to remember to translate would be a check one of them
+        forgets. 402 is the only status a client can tell apart from "you may
+        not do this at all" and "something broke".
+        """
+        return JSONResponse(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            content={"detail": exc.message, "plan": exc.plan, "limit": exc.limit_name},
+        )
 
     @app.get("/health", tags=["ops"])
     async def health() -> dict[str, str]:
@@ -156,6 +181,11 @@ def create_app() -> FastAPI:
             # gate stands down when mail cannot be delivered, and a UI that
             # showed a wall the API is not applying would strand people.
             "require_verified_email": gate_is_active(),
+            # "demo" means the plans on the billing page are a preview and
+            # no limit is enforced. The UI has to say so, and it must not
+            # decide that for itself: a console that showed a paywall the
+            # API does not apply would be worse than showing none.
+            "billing_mode": settings.BILLING_MODE,
         }
 
     return app

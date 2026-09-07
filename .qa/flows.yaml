@@ -150,3 +150,23 @@ flows:
       - expect a dialog with a Name field
       - press Escape without creating anything
 
+
+  - id: billing-page
+    depends_on: login
+    watch:
+      - apps/web/src/routes/app/Billing.tsx
+    steps:
+      - open /app/billing
+      - expect a Plan and usage heading, a current plan card with a Runs this month meter, and three plan cards named Free, Pro and Team
+      - expect a notice saying billing is switched off in this deployment and that nothing can be charged
+      - expect the upgrade buttons on the paid plans to be disabled
+
+  - id: admin-is-hidden-from-customers
+    depends_on: login
+    watch:
+      - apps/web/src/routes/app/AppShell.tsx
+    steps:
+      - open /app
+      - expect the sidebar to have no Platform group and no Admin link, because the signed-in account is not platform staff
+      - open /app/admin
+      - expect the page to say this area is for platform staff, and no workspace figures to be shown

@@ -188,6 +188,16 @@ const NAV: { heading: string; items: NavItem[] }[] = [
         ),
       },
       {
+        to: "/app/billing",
+        label: "Plan and usage",
+        icon: (
+          <svg viewBox="0 0 24 24" {...stroke}>
+            <rect x="3" y="6" width="18" height="12" rx="2" />
+            <path d="M3 10.5h18M7 14.5h3" />
+          </svg>
+        ),
+      },
+      {
         to: "/app/security",
         label: "Security",
         icon: (
@@ -342,6 +352,24 @@ function WorkspaceGate() {
   );
 }
 
+/** Shown only to platform staff. Not a permission a workspace can grant:
+ *  `is_superuser` is set with a local command, never from the product. */
+const STAFF_NAV: { heading: string; items: NavItem[] } = {
+  heading: "Platform",
+  items: [
+    {
+      to: "/app/admin",
+      label: "Admin",
+      icon: (
+        <svg viewBox="0 0 24 24" {...stroke}>
+          <path d="M12 3.5 5 6.5v5c0 4 2.9 7.6 7 9 4.1-1.4 7-5 7-9v-5l-7-3Z" />
+          <path d="M12 9.5v5M9.5 12h5" />
+        </svg>
+      ),
+    },
+  ],
+};
+
 /* ---------------------------------------------------------------- sidebar --- */
 
 function SidebarContent({
@@ -351,6 +379,9 @@ function SidebarContent({
   collapsed: boolean;
   onToggle?: () => void;
 }) {
+  const { user } = useAuth();
+  const groups = user?.is_superuser ? [...NAV, STAFF_NAV] : NAV;
+
   return (
     <div className="flex h-full flex-col overflow-hidden">
       <div
@@ -365,7 +396,7 @@ function SidebarContent({
       {!collapsed && <WorkspaceSwitcher />}
 
       <nav className="mt-1 flex-1 overflow-y-auto px-3">
-        {NAV.map((group) => (
+        {groups.map((group) => (
           <div key={group.heading} className="mb-3.5">
             {!collapsed && (
               <p className="mb-1 px-3 text-[0.7rem] font-medium tracking-[0.14em] text-ink-400 uppercase">

@@ -11,6 +11,7 @@ import { AuthProvider } from "./lib/auth";
 import { consoleOrigin, isAppRoute, isConsoleHost } from "./lib/consoleOrigin";
 import { ThemeProvider } from "./lib/theme";
 import { Landing } from "./routes/Landing";
+import { Admin } from "./routes/app/Admin";
 import { ApiKeys } from "./routes/app/ApiKeys";
 import { Credentials } from "./routes/app/Credentials";
 import { Skills } from "./routes/app/Skills";
@@ -20,6 +21,7 @@ import {
   RequireAuth,
   RequireVerified,
 } from "./routes/app/AppShell";
+import { Billing } from "./routes/app/Billing";
 import { Builder } from "./routes/app/Builder";
 import { Dashboard } from "./routes/app/Dashboard";
 import { EmailGate } from "./routes/app/EmailGate";
@@ -117,7 +119,9 @@ function AppRoutes() {
             <Route path="api-keys" element={<ApiKeys />} />
             <Route path="credentials" element={<Credentials />} />
             <Route path="skills" element={<Skills />} />
+            <Route path="billing" element={<Billing />} />
             <Route path="security" element={<Security />} />
+            <Route path="admin" element={<Admin />} />
           </Route>
         </Route>
       </Route>

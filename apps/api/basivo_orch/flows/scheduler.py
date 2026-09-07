@@ -145,6 +145,7 @@ async def sync_schedule(
 
 async def _fire(session: AsyncSession, row: FlowSchedule, redis_client: RedisClient | None) -> bool:
     """Start one due flow. Returns whether a run was actually created."""
+    from basivo_orch.billing.service import QuotaExceeded
     from basivo_orch.flows import service
 
     flow = await session.get(Flow, row.flow_id)
@@ -163,13 +164,21 @@ async def _fire(session: AsyncSession, row: FlowSchedule, redis_client: RedisCli
         return False
 
     fired_at = datetime.now(UTC)
-    run, created = await service.create_run(
-        session,
-        flow=flow,
-        version=version,
-        trigger=TriggerKind.SCHEDULE,
-        payload={"fired_at": fired_at.isoformat(), "scheduled": True},
-    )
+    try:
+        run, created = await service.create_run(
+            session,
+            flow=flow,
+            version=version,
+            trigger=TriggerKind.SCHEDULE,
+            payload={"fired_at": fired_at.isoformat(), "scheduled": True},
+        )
+    except QuotaExceeded as exc:
+        # The workspace is out of runs. The slot was already claimed, so the
+        # schedule simply misses this one and tries again at the next; the
+        # ticker must not stop, and a schedule must not be deleted over a
+        # plan limit that a payment would lift a minute later.
+        log.info("schedule.over_quota", flow_id=str(flow.id), reason=exc.message)
+        return False
     if created:
         service.enqueue(run)
         log.info("schedule.fired", flow_id=str(flow.id), run_id=str(run.id))

@@ -11,7 +11,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -49,6 +49,68 @@ class Settings(BaseSettings):
             "with it on and mail broken, nobody who signs up can ever get in."
         ),
     )
+
+    # --- billing ----------------------------------------------------------
+    # One switch decides whether money is real in this deployment.
+    #
+    #   demo        the plans are a preview. Nothing is enforced, no limit
+    #               applies, the provider is never called and the webhook
+    #               endpoint does not exist. A demo box cannot take a payment
+    #               even if someone points a live provider at it.
+    #   production  the free plan and its limits apply to every workspace, and
+    #               paying moves a workspace onto a bigger one.
+    #
+    # It is deliberately not derived from ENVIRONMENT: a staging box runs
+    # ENVIRONMENT=production for cookie and TLS strictness while still having
+    # no payment provider behind it.
+    BILLING_MODE: Literal["demo", "production"] = "demo"
+
+    DODO_API_KEY: str = ""
+    DODO_WEBHOOK_SECRET: str = ""
+    DODO_ENVIRONMENT: Literal["test_mode", "live_mode"] = "test_mode"
+    #: Provider product ids, one per paid plan. Both are required in
+    #: production mode: a plan whose product id is missing would send a
+    #: customer to a checkout for nothing.
+    DODO_PRODUCT_PRO: str = ""
+    DODO_PRODUCT_TEAM: str = ""
+    #: How long a workspace keeps its plan after a payment fails. The
+    #: subscription is not cancelled and nothing is deleted; the limits simply
+    #: fall back to Free once this passes.
+    BILLING_GRACE_DAYS: int = 7
+
+    @property
+    def billing_is_live(self) -> bool:
+        return self.BILLING_MODE == "production"
+
+    @model_validator(mode="after")
+    def _production_billing_is_configured(self) -> Settings:
+        """Fail at startup, not at the first checkout.
+
+        A deployment that says it takes money and has no key would look
+        healthy right up to the moment a customer tried to pay.
+        """
+        if self.BILLING_MODE != "production":
+            return self
+        missing = [
+            name
+            for name, value in (
+                ("DODO_API_KEY", self.DODO_API_KEY),
+                ("DODO_WEBHOOK_SECRET", self.DODO_WEBHOOK_SECRET),
+                ("DODO_PRODUCT_PRO", self.DODO_PRODUCT_PRO),
+                ("DODO_PRODUCT_TEAM", self.DODO_PRODUCT_TEAM),
+            )
+            if not value.strip()
+        ]
+        if missing:
+            raise ValueError("BILLING_MODE=production needs " + ", ".join(missing) + " to be set.")
+        return self
+
+    def product_id(self, plan: str) -> str:
+        """The provider product for a plan code, or empty when there is none."""
+        return {
+            "pro": self.DODO_PRODUCT_PRO.strip(),
+            "team": self.DODO_PRODUCT_TEAM.strip(),
+        }.get(plan, "")
 
     @field_validator("DEBUG")
     @classmethod

@@ -130,6 +130,12 @@ class Permission(StrEnum):
     #: can write the instructions their agent follows. Deleting one is held
     #: higher because flows reference skills by id, and a skill removed from
     #: under a published flow changes what that flow does.
+    #: Billing is the workspace's money. Everyone may see what plan they are
+    #: on and how much of it is used, because a limit nobody can see is a
+    #: limit that looks like a bug. Only the owner may spend.
+    BILLING_READ = "billing:read"
+    BILLING_MANAGE = "billing:manage"
+
     SKILL_READ = "skill:read"
     SKILL_WRITE = "skill:write"
     SKILL_DELETE = "skill:delete"
@@ -151,6 +157,7 @@ ROLE_PERMISSIONS: dict[Role, frozenset[Permission]] = {
             # Reading the library is how a reviewer answers "why did the agent
             # say that" without the authority to change the answer.
             Permission.SKILL_READ,
+            Permission.BILLING_READ,
         }
     ),
     Role.MEMBER: frozenset(
@@ -166,6 +173,7 @@ ROLE_PERMISSIONS: dict[Role, frozenset[Permission]] = {
             Permission.CREDENTIAL_READ,
             Permission.SKILL_READ,
             Permission.SKILL_WRITE,
+            Permission.BILLING_READ,
         }
     ),
     Role.ADMIN: frozenset(
@@ -199,6 +207,9 @@ ROLE_PERMISSIONS: dict[Role, frozenset[Permission]] = {
             Permission.SKILL_READ,
             Permission.SKILL_WRITE,
             Permission.SKILL_DELETE,
+            # An admin sees the plan and the usage. Buying one is the owner's,
+            # because it is the owner's card and the owner's company.
+            Permission.BILLING_READ,
         }
     ),
     Role.OWNER: frozenset(Permission),

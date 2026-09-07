@@ -11,6 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from basivo_orch.billing import service as billing
 from basivo_orch.flows import nodes as node_registry
 from basivo_orch.flows.engine import Engine
 from basivo_orch.flows.events import RedisClient
@@ -54,6 +55,11 @@ async def create_flow(
     # a second flow called "Untitled flow" becomes `untitled-flow-2` rather than
     # an error. Not hypothetical: with creation reduced to one click, every
     # user's second flow collided.
+    # Plan limits are checked here rather than in the route, because the
+    # template installer creates flows too and would otherwise be a way past
+    # the limit. `check_flow_quota` is a no-op while billing is switched off.
+    await billing.check_flow_quota(session, organization_id)
+
     explicit = bool(slug)
     base = slug or slugify(name)
     candidate = base
@@ -308,6 +314,11 @@ async def create_run(
         if found := existing.scalar_one_or_none():
             return found, False
 
+    # After the idempotency lookup on purpose: a provider retrying a delivery
+    # must get back the run it already started, not a refusal for a run that
+    # was already counted against the plan.
+    await billing.check_run_quota(session, flow.organization_id)
+
     run = Run(
         flow_id=flow.id,
         flow_version_id=version.id,
@@ -383,6 +394,12 @@ async def list_runs(
     offset: int = 0,
 ) -> list[Run]:
     statement = select(Run).where(Run.organization_id == organization_id)
+    # How far back a plan lists runs. Older runs are still stored and still
+    # counted; the smaller plans simply do not show them, which is what the
+    # bigger plans sell. Nothing is deleted for being on a smaller plan.
+    cutoff = await billing.history_cutoff(session, organization_id)
+    if cutoff is not None:
+        statement = statement.where(Run.created_at >= cutoff)
     if flow_id is not None:
         statement = statement.where(Run.flow_id == flow_id)
     if status is not None:

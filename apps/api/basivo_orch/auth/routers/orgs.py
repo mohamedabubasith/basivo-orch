@@ -41,6 +41,7 @@ from basivo_orch.auth.schemas import (
 )
 from basivo_orch.auth.security.audit import AuditAction, Outcome, record
 from basivo_orch.auth.security.ratelimit import client_ip, limiter
+from basivo_orch.billing.service import check_seat_quota
 from basivo_orch.gate import current_app_user
 
 router = APIRouter(prefix="/orgs", tags=["organisations"])
@@ -277,6 +278,10 @@ async def invite_member(
     target_role = _parse_role(payload.role)
     # Permission to invite is not permission to invite *at any level*.
     await assert_can_assign(session, context, target_role)
+
+    # Seats are what the paid plans sell, so the count is checked here, where
+    # every member is added. A no-op while billing is switched off.
+    await check_seat_quota(session, context.organization_id)
 
     invitee = (
         await session.execute(select(User).where(User.email == payload.email))
