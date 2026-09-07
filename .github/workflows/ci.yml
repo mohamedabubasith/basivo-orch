@@ -1,0 +1,164 @@
+# What has to be true before anything reaches main.
+#
+# The jobs are split by what they protect rather than by language, so a red
+# tick names the thing that broke: the API's own rules, the console's, or the
+# images the server actually runs.
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A second push to the same branch cancels the first. CI that is still
+# checking a commit nobody is waiting for is just queue time for the one
+# somebody is.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UV_NO_PROGRESS: "1"
+  FORCE_COLOR: "1"
+
+jobs:
+  api:
+    name: API lint and tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: apps/api/uv.lock
+
+      - run: uv sync --all-extras --dev
+
+      - name: lint
+        run: uv run ruff check --output-format=github .
+
+      - name: formatting
+        run: uv run ruff format --check .
+
+      # The suite runs on SQLite with a fake Redis, so no services are needed
+      # here. That is not a shortcut for CI, it is the same path a deployment
+      # without Redis takes.
+      - name: tests
+        run: uv run pytest -q
+
+  web:
+    name: console typecheck, lint and build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      - run: npm ci
+
+      # `tsc --noEmit` checks nothing in this repo: the tsconfig is
+      # solution-style, so only a build of the referenced projects is a real
+      # typecheck. Getting this wrong once meant a green CI over broken types.
+      - name: typecheck
+        run: npx tsc -b --force
+
+      - name: lint
+        run: npx oxlint src
+
+      - name: unit tests
+        run: npm test
+
+      - name: build
+        run: npm run build
+
+  migrations:
+    name: migrations reach head on a real Postgres
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/api
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: basivo
+          POSTGRES_PASSWORD: basivo
+          POSTGRES_DB: basivo_orch
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U basivo"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: apps/api/uv.lock
+
+      - run: uv sync --all-extras --dev
+
+      # The test suite runs on SQLite, which hides anything Postgres-specific:
+      # a JSONB variant, a server_default, an index that only one of them will
+      # build. This job is the only place a migration meets the database it
+      # will actually run against.
+      - name: upgrade to head
+        env:
+          DATABASE_URL: postgresql+asyncpg://basivo:basivo@localhost:5432/basivo_orch
+          SECRET_KEY: ci-secret-key-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          ENVIRONMENT: test
+        run: uv run alembic upgrade head
+
+      - name: and back down again
+        env:
+          DATABASE_URL: postgresql+asyncpg://basivo:basivo@localhost:5432/basivo_orch
+          SECRET_KEY: ci-secret-key-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          ENVIRONMENT: test
+        run: uv run alembic downgrade base
+
+  images:
+    name: images build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+
+      # Both targets, because the worker image is a different one: FFmpeg,
+      # Node, Chromium and the voice model that the API has no use for. A
+      # change that breaks only the worker build would otherwise ship.
+      - name: API image
+        uses: docker/build-push-action@v6
+        with:
+          context: apps/api
+          target: runtime
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Only on main. The worker image carries FFmpeg, Node, Chromium and the
+      # voice model, which is several minutes of build even warm, and a pull
+      # request that breaks it is caught before the next deploy either way.
+      - name: worker image
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v6
+        with:
+          context: apps/api
+          target: worker
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

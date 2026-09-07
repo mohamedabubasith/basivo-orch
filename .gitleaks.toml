@@ -1,0 +1,33 @@
+# What counts as a leak here.
+#
+# The scan runs over the whole history, so it has to be quiet about the things
+# that are supposed to look like credentials and loud about everything else. A
+# scanner that cries wolf on every test fixture gets muted, and then the one
+# real key goes through.
+#
+# Nothing below relaxes a rule for application code. The allowlist is test
+# fixtures, which are constants in a repository anyone can read, and one
+# documentation placeholder.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Fixtures and placeholders, not credentials"
+
+paths = [
+  # Test fixtures. Every value here is a literal in a public repository and
+  # opens nothing: fake tokens, a fake webhook secret, a password used to log
+  # into an in-memory SQLite database.
+  '''apps/api/tests/.*''',
+  # The example .env, which ships placeholders precisely so nobody invents
+  # their own.
+  '''deploy/\.env\.example''',
+]
+
+regexes = [
+  # The curl example in the console and the docs. "YOUR_API_KEY" is the point
+  # of it.
+  '''bsv_YOUR_API_KEY''',
+  '''whsec_\.\.\.''',
+]

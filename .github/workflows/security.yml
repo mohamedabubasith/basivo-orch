@@ -1,0 +1,168 @@
+# Security checks, kept apart from CI on purpose.
+#
+# CI answers "does this work". This answers "is this safe to run", and the two
+# fail for different reasons: a dependency advisory published overnight has
+# nothing to do with the commit that happens to be on main. That is also why
+# this runs on a schedule and not only on push.
+name: Security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Monday morning, so a weekend advisory is waiting rather than discovered
+    # by a deploy.
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  codeql:
+    name: CodeQL (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [python, javascript-typescript]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: github/codeql-action/init@v3
+        with:
+          language: ${{ matrix.language }}
+          # The extended suite includes the injection and path-traversal
+          # queries, which is the whole reason this repository needs scanning:
+          # it runs user-authored code and user-supplied templates.
+          queries: security-extended
+      - uses: github/codeql-action/analyze@v3
+        with:
+          category: /language:${{ matrix.language }}
+
+  secrets:
+    name: no secrets in the history
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # A secret committed and then removed is still leaked, so the whole
+          # history is scanned rather than the tip.
+          fetch-depth: 0
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The allowlist for test fixtures and documentation placeholders.
+          GITLEAKS_CONFIG: .gitleaks.toml
+
+  python-advisories:
+    name: python dependencies
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: apps/api/uv.lock
+
+      # Audited from the lockfile, which is what a deployment installs. A
+      # scan of the loose ranges in pyproject.toml would be checking versions
+      # nobody runs.
+      - name: pip-audit the lockfile
+        run: |
+          uv export --frozen --no-dev --no-emit-project --format requirements-txt > /tmp/requirements.txt
+          uvx pip-audit --strict --disable-pip -r /tmp/requirements.txt
+
+  node-advisories:
+    name: console dependencies
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - run: npm ci
+      # High and above only. Everything this builds is static and served by
+      # Caddy, so a moderate advisory in a build-time package is not worth a
+      # red main branch every week.
+      - run: npm audit --audit-level=high
+
+  new-dependencies:
+    name: new dependencies on this pull request
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: high
+          # A licence that requires publishing our source is a decision, not a
+          # detail to discover after shipping.
+          deny-licenses: AGPL-3.0, GPL-3.0, SSPL-1.0
+
+  containers:
+    name: images and Dockerfile
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: hadolint
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: apps/api/Dockerfile
+          # Warnings are printed, errors fail. A style opinion should not stop
+          # a release; a real mistake should.
+          failure-threshold: error
+          # DL3008 (pin apt versions) is deliberate here: the base image is
+          # rebuilt on every deploy, and pinning apt versions means a security
+          # update to a system library needs a code change to reach the server.
+          ignore: DL3008
+
+      - name: build the API image
+        uses: docker/build-push-action@v6
+        with:
+          context: apps/api
+          target: runtime
+          push: false
+          load: true
+          tags: basivo-orch-api:scan
+          cache-from: type=gha
+
+      - name: trivy
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: basivo-orch-api:scan
+          format: sarif
+          output: trivy.sarif
+          severity: HIGH,CRITICAL
+          # The report is uploaded either way; the job does not fail on a
+          # base-image advisory nobody can fix from this repository.
+          exit-code: "0"
+
+      - name: upload the report
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy.sarif
+          category: trivy

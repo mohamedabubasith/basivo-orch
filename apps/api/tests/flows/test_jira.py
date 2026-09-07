@@ -10,7 +10,7 @@ import httpx
 import pytest
 from fastapi import HTTPException
 
-from basivo_orch.flows.nodes.base import NodeContext, NodeError, ResolvedCredential
+from basivo_orch.flows.nodes.base import NodeContext, NodeError
 from basivo_orch.flows.nodes.jira import (
     JiraClient,
     adf_text,

@@ -43,8 +43,12 @@ pnpm-debug.log*
 *.swp
 
 # --- ai assistants / editors ---
-.claude/
-CLAUDE.md
+# CLAUDE.md is the contributor guide, not a personal file: it is where the
+# contracts that bite live, and a rule nobody can read is a rule that gets
+# broken. Same for the shared skills. Everything else under .claude/ is one
+# developer's own settings and stays out.
+.claude/*
+!.claude/skills/
 AGENTS.md
 AGENT.md
 .cursor/
