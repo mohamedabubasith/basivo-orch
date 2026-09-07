@@ -87,14 +87,21 @@ these are backed by tests that fail the suite if skipped:
   bytes through the graph, which would land in every run's stored summary.
   They live in Postgres because the API and worker are separate containers;
   `Engine.MAX_ARTIFACT_BYTES` is what keeps that honest.
-- Video (`video.render`) shells out to HyperFrames (`hyperframes@0.8.3`,
-  Apache 2.0) — Node 22+ and FFmpeg are required in the worker image, and
-  `BASIVO_HYPERFRAMES_BIN` points at the binary. Unlike the poster node it
-  MUST run JavaScript (the animation is JS), so a composition is code: the
-  subprocess gets a stripped environment and a wall-clock cap.
-- Every colour in a video template needs a `var(--x, fallback)`. A
-  composition rendered with only some variables otherwise produces an invalid
-  gradient and a black video — caught by looking at a frame, not by a test.
+- Video renders with **Remotion**: a composition is a React component, and the
+  renderer project (`nodes/remotion_project`) is installed into the worker
+  image once, never per render. Remotion is source-available and paid above
+  three people, which applies to anyone self-hosting this too, so the licence
+  is stated in `docs/video.md` rather than buried in a dependency list.
+- The composition never owns narration, captions or its own length. Those are
+  siblings of the author's component in `src/Root.tsx`. The previous renderer
+  spliced them into HTML as strings and every failure of that was silent: one
+  stray tag swallowed the markup after it, and a composition that brought its
+  own captions rendered two sets at once.
+- A composition is READ before it is rendered (`scene_problems`) and then
+  LOOKED AT before it is encoded (`review_frames`): three stills from the same
+  bundle, checked for a flat frame and for a picture that never changes. A
+  video that renders eight seconds of empty gradient is the worst outcome
+  there is, because nothing failed.
 - Posters are RENDERED, not generated: a model writes HTML, `design.render`
   screenshots it in headless Chromium with real fonts. Image models get
   typography wrong about one time in ten and never say so. The worker image
@@ -129,18 +136,15 @@ these are backed by tests that fail the suite if skipped:
   `load_engine()` flips `has_timings` by hand because upstream looks for an
   output named `duration` while the export says `durations`. Get either wrong
   and the voice still works while captions silently become impossible.
-- HyperFrames mixes audio itself: an `<audio src>` inside the stage is picked
-  up by the render's ffmpeg graph (verified — `hasAudio: true`, an AAC stream
-  at -22.8 dB). Never write a second muxing path. Caption timing must be
-  appended to `window.__timelines[id]`, never CSS animation — the renderer
-  produces frames by SEEKING that timeline, so a CSS animation renders as one
-  frozen frame.
-- The composition probe must multiply opacity down the ANCESTOR chain.
-  `opacity` does not inherit as a computed value, so a heading inside an
-  `opacity: 0` clip computes to 1 — reading only the element's own style
-  passed a composition that rendered thirty seconds of black with a
-  voice-over over it. It also samples every ~2s (`probe_moments`), because
-  three points caught total failures and missed an eight-second dead tail.
+- Audio is mixed by Remotion from the `<Audio>` the ROOT renders, never by a
+  second ffmpeg pass of ours. A composition that brings its own is refused
+  before rendering: told "a voice is already recorded", a model helpfully
+  added one pointing at a file that does not exist, and a missing media source
+  fails the whole render.
+- Nothing in a composition may depend on wall-clock time or CSS animation.
+  Every frame is drawn independently and seeked to, so a CSS animation renders
+  as one frozen frame for the whole video. Anything not derived from
+  `useCurrentFrame()` does not move.
 - `strip_audio` runs before narration is injected. Told "a voice is already
   recorded", an agent added `<audio src="voice.mp3">`; there is no such file,
   and the renderer treats a missing media source as a correctness error and
@@ -163,12 +167,13 @@ these are backed by tests that fail the suite if skipped:
   `resident_mb()` reads /proc, not `ru_maxrss`, which is a high-water mark and
   would make a worker restart forever after one expensive render.
 - The worker has its OWN image target (`--target worker`): FFmpeg, Node 22,
-  HyperFrames, Chromium and the voice model, ~700MB the API has no use for.
-  HyperFrames renders with puppeteer-core, which bundles NO browser — left
-  alone it downloads Chrome 152 on the first render in every fresh container —
-  so `HYPERFRAMES_BROWSER_PATH` points at Playwright's Chromium. Not the
-  chrome-headless-shell it prefers: that has no linux/arm64 build, so pointing
-  at Playwright's is the only choice that works on both architectures.
+  the Remotion project, Chromium and the voice model, ~700MB the API has no
+  use for. Two browsers live there on purpose: Playwright's Chromium renders
+  posters, and Remotion downloads the Chrome Headless Shell build it has
+  tested against. Mixing them produces frame differences nobody notices until
+  a customer says their video looks wrong. Both are fetched at BUILD time into
+  paths every user can read (`XDG_CACHE_HOME=/opt/basivo/cache`), because the
+  default is the building user's home, which the `basivo` user cannot see.
 - Two site addresses in the Caddyfile must be DISTINCT. Setting
   CONSOLE_ADDRESS == LANDING_ADDRESS is an "ambiguous site definition" error,
   not a no-op; the single-host deployment uses the inert

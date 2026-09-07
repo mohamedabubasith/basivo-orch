@@ -100,6 +100,49 @@ jobs:
       - name: build
         run: npm run build
 
+  video:
+    name: video renders for real
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: apps/api/uv.lock
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - run: uv sync --all-extras --dev
+
+      # The renderer and the browser it draws with. Cached on the manifest, so
+      # this is a download once and a restore afterwards.
+      - name: cache the renderer
+        id: renderer-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            apps/api/basivo_orch/flows/nodes/remotion_project/node_modules
+            ~/.cache/puppeteer
+          key: remotion-${{ runner.os }}-${{ hashFiles('apps/api/basivo_orch/flows/nodes/remotion_project/package.json') }}
+
+      - name: install the renderer
+        if: steps.renderer-cache.outputs.cache-hit != 'true'
+        working-directory: apps/api/basivo_orch/flows/nodes/remotion_project
+        run: |
+          npm install --omit=dev --no-audit --no-fund
+          node -e "require('@remotion/renderer').ensureBrowser().then(() => console.log('browser ok'))"
+
+      # The tests that encode a real file. They skip themselves when the
+      # renderer is missing, which is exactly why they need a job that
+      # installs it: a video feature whose only proof is a mock is a video
+      # feature nobody has watched.
+      - name: render
+        run: uv run pytest -q -m slow tests/flows/test_video.py tests/flows/test_montage.py
+
   migrations:
     name: migrations reach head on a real Postgres
     runs-on: ubuntu-latest

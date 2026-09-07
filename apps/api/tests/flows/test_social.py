@@ -15,9 +15,20 @@ import httpx
 import pytest
 
 from basivo_orch.flows.nodes.base import NodeContext, NodeError, ResolvedCredential
-from basivo_orch.flows.nodes.social import SocialPostConfig, SocialPostNode
+from basivo_orch.flows.nodes.social import (
+    MEDIA_LIMITS,
+    SocialPostConfig,
+    SocialPostNode,
+    sniff_media,
+)
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"poster-bytes"
+JPEG = b"\xff\xd8\xff\xe0" + b"jpeg-bytes"
+GIF = b"GIF89a" + b"gif-bytes"
+#: A real MP4 begins with a box length, then "ftyp", then the major brand.
+MP4 = b"\x00\x00\x00\x18ftypmp42" + b"video-bytes"
+MOV = b"\x00\x00\x00\x14ftypqt  " + b"video-bytes"
+WEBM = b"\x1a\x45\xdf\xa3" + b"matroska-bytes"
 
 
 class _Recorder:
@@ -299,7 +310,7 @@ async def test_a_missing_image_names_the_reference_rather_than_failing_blankly()
 
 
 def test_a_post_must_contain_something():
-    with pytest.raises(ValueError, match="text, an image, or both"):
+    with pytest.raises(ValueError, match="text, a file, or both"):
         SocialPostConfig(platform="telegram", credential_id="c", target="@c")
 
 
@@ -307,3 +318,217 @@ def test_posting_is_never_replayed():
     """A retry after a timeout publishes a second time. Recovery must not."""
     assert SocialPostNode.replay_safe is False
     assert SocialPostNode.max_attempts == 1
+
+
+# ---------------------------------------------------------------------------
+# What the file actually is
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("data", "expected"),
+    [
+        (PNG, ("image", "image/png")),
+        (JPEG, ("image", "image/jpeg")),
+        (GIF, ("gif", "image/gif")),
+        (MP4, ("video", "video/mp4")),
+        (MOV, ("video", "video/quicktime")),
+        (WEBM, ("video", "video/webm")),
+    ],
+)
+def test_the_sniffer_names_the_container_from_the_bytes(data: bytes, expected: tuple[str, str]):
+    """The file name is the part most likely to be wrong, so it is not read."""
+    assert sniff_media(data) == expected
+
+
+def test_a_file_too_short_to_identify_is_refused_rather_than_guessed():
+    with pytest.raises(NodeError, match="not an image or a video"):
+        sniff_media(b"ftyp")
+
+
+async def test_an_unidentifiable_file_is_refused_before_anything_is_sent():
+    async with httpx.AsyncClient() as http:
+        ctx = make_context(_Recorder(), http, provider="telegram", artifact=b"not media at all")
+        with pytest.raises(NodeError, match="PNG, JPEG, GIF, MP4, MOV or WebM"):
+            await SocialPostNode().run(
+                SocialPostConfig(
+                    platform="telegram",
+                    credential_id="cred",
+                    text="hi",
+                    target="@c",
+                    artifact_id="art-1",
+                ),
+                ctx,
+            )
+
+
+async def test_a_file_over_the_platform_limit_names_the_limit_and_the_size():
+    """Discord's webhook takes 8 MB. A 9 MB video should not be uploaded to
+    find that out."""
+
+    oversized = MP4 + b"x" * (MEDIA_LIMITS["discord"] + 1 - len(MP4))
+    async with httpx.AsyncClient() as http:
+        ctx = make_context(
+            _Recorder(),
+            http,
+            provider="discord",
+            api_key="https://discord.com/api/webhooks/1/abc",
+            artifact=oversized,
+        )
+        with pytest.raises(NodeError, match=r"up to 8\.0 MB and this file is 8\.0 MB"):
+            await SocialPostNode().run(
+                SocialPostConfig(
+                    platform="discord", credential_id="cred", text="hi", artifact_id="art-1"
+                ),
+                ctx,
+            )
+
+
+# ---------------------------------------------------------------------------
+# Video, per platform
+# ---------------------------------------------------------------------------
+
+
+async def test_telegram_sends_a_video_to_sendvideo_and_asks_for_streaming():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/sendVideo"), "a video must not go to sendPhoto"
+        return httpx.Response(200, json={"ok": True, "result": {"message_id": 5, "chat": {}}})
+
+    result, requests, recorder = await run_post(
+        SocialPostConfig(
+            platform="telegram",
+            credential_id="cred",
+            text="the render is up",
+            artifact_id="art-1",
+            target="@basivo",
+        ),
+        handler,
+        provider="telegram",
+        artifact=MP4,
+    )
+
+    body = requests[0].content
+    assert b'name="video"' in body, "the file field must match the endpoint"
+    assert b'filename="post.mp4"' in body
+    assert b"video/mp4" in body
+    assert b"supports_streaming" in body, "without it the channel offers a download"
+    assert MP4 in body
+    assert result.output["id"] == "5"
+    assert recorder.data_for("post.started")[0]["media"] == "video"
+
+
+async def test_telegram_sends_a_gif_to_sendanimation():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/sendAnimation")
+        return httpx.Response(200, json={"ok": True, "result": {"message_id": 6, "chat": {}}})
+
+    _, requests, _ = await run_post(
+        SocialPostConfig(
+            platform="telegram",
+            credential_id="cred",
+            text="loop",
+            artifact_id="art-1",
+            target="@basivo",
+        ),
+        handler,
+        provider="telegram",
+        artifact=GIF,
+    )
+    assert b'name="animation"' in requests[0].content
+    assert b'filename="post.gif"' in requests[0].content
+
+
+async def test_discord_sends_the_video_under_its_real_name_and_type():
+    """Discord embeds a player from the extension and content type; poster.png
+    on an MP4 is an attachment nobody can play."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"id": "42"})
+
+    _, requests, _ = await run_post(
+        SocialPostConfig(
+            platform="discord", credential_id="cred", text="new clip", artifact_id="art-1"
+        ),
+        handler,
+        provider="discord",
+        api_key="https://discord.com/api/webhooks/1/abc",
+        artifact=WEBM,
+    )
+    body = requests[0].content
+    assert b'filename="post.webm"' in body
+    assert b"video/webm" in body
+    assert WEBM in body
+
+
+async def test_slack_refuses_a_video_the_same_way_it_refuses_an_image():
+    """An incoming webhook carries no upload of any kind. Better a clear
+    refusal than a post that silently loses the video."""
+
+    async with httpx.AsyncClient() as http:
+        ctx = make_context(
+            _Recorder(),
+            http,
+            provider="slack",
+            api_key="https://hooks.slack.com/services/x",
+            artifact=MP4,
+        )
+        with pytest.raises(NodeError, match="cannot attach files"):
+            await SocialPostNode().run(
+                SocialPostConfig(
+                    platform="slack", credential_id="cred", text="hi", artifact_id="art-1"
+                ),
+                ctx,
+            )
+
+
+async def test_mastodon_waits_for_a_video_that_is_still_processing():
+    """202 means the id exists but attaching it now is rejected."""
+
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(f"{request.method} {request.url.path}")
+        if request.url.path == "/api/v2/media":
+            assert b'filename="post.mp4"' in request.content
+            assert b"video/mp4" in request.content
+            return httpx.Response(202, json={"id": "media-9"})
+        if request.url.path == "/api/v1/media/media-9":
+            return httpx.Response(200, json={"id": "media-9", "url": "https://m.social/v.mp4"})
+        assert json.loads(request.content)["media_ids"] == ["media-9"]
+        return httpx.Response(200, json={"id": "s2", "url": "https://m.social/@me/s2"})
+
+    result, _, _ = await run_post(
+        SocialPostConfig(
+            platform="mastodon", credential_id="cred", text="rendered", artifact_id="art-1"
+        ),
+        handler,
+        provider="mastodon",
+        base_url="https://m.social",
+        artifact=MP4,
+    )
+
+    assert calls == [
+        "POST /api/v2/media",
+        "GET /api/v1/media/media-9",
+        "POST /api/v1/statuses",
+    ]
+    assert result.output["url"] == "https://m.social/@me/s2"
+
+
+async def test_bluesky_refuses_a_video_before_it_uploads_anything():
+    """The blob upload would accept an MP4 and post an image embed that will
+    not play, so the refusal comes before the session is created."""
+
+    def handler(request: httpx.Request) -> httpx.Response:  # pragma: no cover - must not run
+        raise AssertionError(f"Bluesky was called: {request.url}")
+
+    with pytest.raises(NodeError, match="images only, not video"):
+        await run_post(
+            SocialPostConfig(
+                platform="bluesky", credential_id="cred", text="clip", artifact_id="art-1"
+            ),
+            handler,
+            provider="bluesky",
+            options={"identifier": "me.bsky.social"},
+            artifact=MP4,
+        )

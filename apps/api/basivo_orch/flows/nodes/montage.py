@@ -20,7 +20,6 @@ bot still works on a day when the model provider does not.
 
 from __future__ import annotations
 
-import html as html_escape
 import json
 import uuid
 from typing import Any, Literal
@@ -95,7 +94,7 @@ class MontageNode(Node):
     output_paths = ("artifact_id", "url", "seconds", "photo_count", "width", "height")
 
     async def run(self, config: MontageConfig, ctx: NodeContext) -> NodeResult:
-        from basivo_orch.flows.nodes.video import VideoRenderConfig, _render
+        from basivo_orch.flows.nodes.remotion import RenderJob, render
 
         if ctx.load_artifact is None or ctx.save_artifact is None:
             raise NodeError("A montage can only be made inside a real run.")
@@ -130,43 +129,56 @@ class MontageNode(Node):
                 "the video can be remade."
             )
 
-        composition = build_composition(
+        props = montage_props(
             names=list(assets),
             plan=plan,
-            width=width,
-            height=height,
-            fps=config.fps,
             theme=THEMES[config.theme],
-            music=bool(config.music_artifact_id.strip()),
+            title=str(plan.get("title") or config.title),
+            subtitle=str(plan.get("subtitle") or config.subtitle),
+            end_card=config.end_card,
         )
 
+        music_name = ""
         if music_id := config.music_artifact_id.strip():
             music = await ctx.load_artifact(str(render_value(music_id, template)).strip())
             if music is None:
+                # A track that has expired costs the soundtrack, not the film.
                 await ctx.step("montage.music_missing", {})
             else:
                 assets["music.mp3"] = music
+                music_name = "music.mp3"
 
         await ctx.progress(
             f"Rendering {plan['seconds']:g}s from {len(assets)} photographs. This is the slow part."
         )
 
-        render_config = VideoRenderConfig(
-            template="custom",
-            html=composition,
-            format="mp4",
-            fps=config.fps,
-            quality=config.quality,
-            filename="montage",
+        data, info = await render(
+            RenderJob(
+                scene_tsx=MONTAGE_SCENE,
+                width=width,
+                height=height,
+                fps=config.fps,
+                duration_seconds=float(plan["seconds"]),
+                props=props,
+                background=THEMES[config.theme]["bg"],
+                fmt="mp4",
+                quality=config.quality,
+                assets=assets,
+                audio=music_name,
+            )
         )
-        data, logs = await _render(composition, variables={}, config=render_config, assets=assets)
 
         saved = await ctx.save_artifact(
             data, filename="montage.mp4", content_type="video/mp4", node_id=ctx.node_id
         )
         await ctx.step(
             "montage.rendered",
-            {**saved, "seconds": plan["seconds"], "photos": len(assets), "log_tail": logs[-400:]},
+            {
+                **saved,
+                "seconds": plan["seconds"],
+                "photos": len(assets),
+                "frames": info.get("durationInFrames"),
+            },
         )
         return NodeResult(
             output={
@@ -254,142 +266,205 @@ def _plan(config: MontageConfig, ids: list[str]) -> dict[str, Any]:
     }
 
 
-def build_composition(
+#: The composition every montage renders through.
+#:
+#: One component with props rather than generated markup: the shape is the
+#: same whether there are three photographs or twelve, and only the list
+#: changes. The previous renderer wrote a fresh HTML document per montage,
+#: which meant every montage was a composition nobody had ever rendered
+#: before.
+MONTAGE_SCENE = """import React from "react";
+import {
+  AbsoluteFill,
+  Img,
+  interpolate,
+  staticFile,
+  useCurrentFrame,
+  useVideoConfig,
+} from "remotion";
+
+// Each photograph is oversized and drifts, alternating direction so the film
+// does not feel like it is sliding one way for thirty seconds. A photograph
+// held perfectly still reads as a broken video, which is the single most
+// common complaint about slideshow software.
+const DRIFTS = [
+  { from: { scale: 1.06, x: -2, y: -1 }, to: { scale: 1.16, x: 2, y: 1 } },
+  { from: { scale: 1.14, x: 2, y: 1 }, to: { scale: 1.05, x: -2, y: -1 } },
+  { from: { scale: 1.05, x: 0, y: 2 }, to: { scale: 1.15, x: 0, y: -2 } },
+  { from: { scale: 1.12, x: -2, y: 1 }, to: { scale: 1.04, x: 2, y: -1 } },
+];
+
+export default function Scene({ shots, per, theme, title, subtitle, endCard }) {
+  const frame = useCurrentFrame();
+  const { fps, durationInFrames, width, height } = useVideoConfig();
+  const perFrames = Math.max(1, Math.round(per * fps));
+  // Long enough to read as a dissolve, short enough that a two second shot is
+  // still mostly itself.
+  const fade = Math.min(Math.round(fps * 0.5), Math.round(perFrames / 3));
+  const unit = Math.min(width, height);
+
+  return (
+    <AbsoluteFill style={{ backgroundColor: theme.bg }}>
+      {shots.map((shot, index) => {
+        const start = index * perFrames;
+        const end = start + perFrames;
+        // Held one fade beyond its own slot so the next photograph appears
+        // underneath rather than against the background.
+        if (frame < start - fade || frame > end + fade) return null;
+
+        const drift = DRIFTS[index % DRIFTS.length];
+        const progress = interpolate(frame, [start - fade, end + fade], [0, 1], {
+          extrapolateLeft: "clamp",
+          extrapolateRight: "clamp",
+        });
+        const scale = interpolate(progress, [0, 1], [drift.from.scale, drift.to.scale]);
+        const x = interpolate(progress, [0, 1], [drift.from.x, drift.to.x]);
+        const y = interpolate(progress, [0, 1], [drift.from.y, drift.to.y]);
+        const opacity = interpolate(
+          frame,
+          [start - fade, start, end, end + fade],
+          [0, 1, 1, 0],
+          { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
+        );
+
+        return (
+          <AbsoluteFill key={shot.name} style={{ opacity }}>
+            <Img
+              src={staticFile(shot.name)}
+              style={{
+                width: "100%",
+                height: "100%",
+                objectFit: "cover",
+                transform: `scale(${scale}) translate(${x}%, ${y}%)`,
+              }}
+            />
+            {shot.caption ? (
+              <AbsoluteFill
+                style={{
+                  justifyContent: "flex-end",
+                  alignItems: "center",
+                  paddingBottom: unit * 0.12,
+                  // A gradient rather than a band: a hard edge across a
+                  // photograph looks like a mistake, and text with nothing
+                  // behind it disappears over a bright sky.
+                  background:
+                    "linear-gradient(to top, rgba(0,0,0,0.72) 0%, rgba(0,0,0,0) 38%)",
+                }}
+              >
+                <div
+                  style={{
+                    color: theme.ink,
+                    fontFamily: theme.font,
+                    fontSize: unit * 0.052,
+                    textAlign: "center",
+                    maxWidth: "82%",
+                    textShadow: "0 2px 10px rgba(0,0,0,0.6)",
+                  }}
+                >
+                  {shot.caption}
+                </div>
+              </AbsoluteFill>
+            ) : null}
+          </AbsoluteFill>
+        );
+      })}
+
+      {title ? (
+        <AbsoluteFill
+          style={{
+            justifyContent: "center",
+            alignItems: "center",
+            textAlign: "center",
+            opacity: interpolate(frame, [0, fps * 0.4, fps * 2.2, fps * 2.8], [0, 1, 1, 0], {
+              extrapolateLeft: "clamp",
+              extrapolateRight: "clamp",
+            }),
+            background: "rgba(0,0,0,0.35)",
+          }}
+        >
+          <div>
+            <div
+              style={{
+                color: theme.ink,
+                fontFamily: theme.font,
+                fontSize: unit * 0.095,
+                letterSpacing: unit * 0.002,
+              }}
+            >
+              {title}
+            </div>
+            {subtitle ? (
+              <div
+                style={{
+                  color: theme.accent,
+                  fontFamily: theme.font,
+                  fontSize: unit * 0.042,
+                  marginTop: unit * 0.02,
+                }}
+              >
+                {subtitle}
+              </div>
+            ) : null}
+          </div>
+        </AbsoluteFill>
+      ) : null}
+
+      {endCard ? (
+        <AbsoluteFill
+          style={{
+            justifyContent: "center",
+            alignItems: "center",
+            textAlign: "center",
+            backgroundColor: theme.bg,
+            opacity: interpolate(
+              frame,
+              [durationInFrames - fps * 1.6, durationInFrames - fps * 1.2],
+              [0, 1],
+              { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
+            ),
+          }}
+        >
+          <div
+            style={{
+              color: theme.accent,
+              fontFamily: theme.font,
+              fontSize: unit * 0.07,
+              maxWidth: "80%",
+            }}
+          >
+            {endCard}
+          </div>
+        </AbsoluteFill>
+      ) : null}
+    </AbsoluteFill>
+  );
+}
+"""
+
+
+def montage_props(
     *,
     names: list[str],
     plan: dict[str, Any],
-    width: int,
-    height: int,
-    fps: int,
     theme: dict[str, str],
-    music: bool,
-) -> str:
-    """The HyperFrames composition, written out.
-
-    Generated rather than templated with variables, because the structure
-    itself depends on the number of photographs — the existing templates vary
-    their text, this varies its shape.
-
-    The motion is the whole trick. Each photograph is oversized and drifts
-    across the frame, alternating direction so the film does not feel like it
-    is sliding one way for thirty seconds; the drift is slow enough to read as
-    intentional rather than as a zoom.
-    """
-    per = float(plan["per_photo"])
+    title: str,
+    subtitle: str,
+    end_card: str,
+) -> dict[str, Any]:
+    """What the composition is handed: the shots, in order, with their words."""
     order = plan["order"]
-    layers, timeline = [], []
-
-    for index, name in enumerate(names):
-        start = round(index * per, 3)
-        artifact_id = order[index] if index < len(order) else ""
-        caption = plan["captions"].get(artifact_id, "")
-        # Alternating so consecutive shots move differently.
-        drift = [
-            ("scale(1.06) translate(-2%, -1%)", "scale(1.16) translate(2%, 1%)"),
-            ("scale(1.14) translate(2%, 1%)", "scale(1.05) translate(-2%, -1%)"),
-            ("scale(1.05) translate(0, 2%)", "scale(1.15) translate(0, -2%)"),
-        ][index % 3]
-
-        layers.append(
-            f'<div class="shot" id="s{index}" style="opacity:0">'
-            f'<img src="{name}" alt="">'
-            + (f'<div class="caption">{html_escape.escape(caption)}</div>' if caption else "")
-            + "</div>"
-        )
-        timeline.append(
-            f"tl.fromTo('#s{index} img', {{transform:'{drift[0]}'}}, "
-            f"{{transform:'{drift[1]}', duration:{per + CROSSFADE_SECONDS:.3f}, "
-            f"ease:'none'}}, {start:.3f});"
-        )
-        # The first shot fades up from the title card; the rest cross-fade.
-        fade_in = CROSSFADE_SECONDS if index else 0.9
-        timeline.append(
-            f"tl.to('#s{index}', {{opacity:1, duration:{fade_in:.3f}, "
-            f"ease:'power1.out'}}, {max(0.0, start - CROSSFADE_SECONDS / 2):.3f});"
-        )
-        if index < len(names) - 1:
-            timeline.append(
-                f"tl.to('#s{index}', {{opacity:0, duration:{CROSSFADE_SECONDS:.3f}, "
-                f"ease:'power1.in'}}, {start + per - CROSSFADE_SECONDS / 2:.3f});"
-            )
-        if caption:
-            timeline.append(
-                f"tl.fromTo('#s{index} .caption', {{y:24, opacity:0}}, "
-                f"{{y:0, opacity:1, duration:0.6, ease:'power2.out'}}, {start + 0.35:.3f});"
-            )
-
-    total = round(per * len(names), 3)
-    title_block = ""
-    if plan["title"] or plan["subtitle"]:
-        title_block = (
-            '<div class="title" id="title">'
-            f'<div class="t">{html_escape.escape(plan["title"])}</div>'
-            f'<div class="s">{html_escape.escape(plan["subtitle"])}</div>'
-            "</div>"
-        )
-        timeline.append(
-            "tl.fromTo('#title', {opacity:0, y:18}, "
-            "{opacity:1, y:0, duration:1.0, ease:'power2.out'}, 0.25);"
-        )
-        timeline.append("tl.to('#title', {opacity:0, duration:0.7, ease:'power1.in'}, 3.2);")
-
-    end_block = ""
-    if plan["end_card"]:
-        end_block = f'<div class="end" id="end">{html_escape.escape(plan["end_card"])}</div>'
-        timeline.append(
-            "tl.fromTo('#end', {opacity:0}, {opacity:1, duration:0.8, ease:'power1.out'}, "
-            f"{max(0.0, total - 2.0):.3f});"
-        )
-
-    audio = (
-        '<audio data-audio-src="music.mp3" data-audio-volume="0.8" '
-        f'data-audio-fade-out="1.5" data-audio-duration="{total:.3f}"></audio>'
-        if music
-        else ""
-    )
-
-    return f"""<!doctype html>
-<html><head><meta charset="utf-8">
-<style>
-  html, body {{ margin:0; background:{theme["bg"]}; }}
-  #stage {{ position:relative; width:{width}px; height:{height}px; overflow:hidden;
-           background:{theme["bg"]}; color:{theme["ink"]};
-           font-family:{theme["font"]}; }}
-  .shot {{ position:absolute; inset:0; }}
-  .shot img {{ width:100%; height:100%; object-fit:cover; will-change:transform; }}
-  /* A gradient at the foot of every frame, so a caption stays readable over a
-     bright photograph without a slab of colour behind it. */
-  .shot::after {{ content:''; position:absolute; inset:0;
-    background:linear-gradient(to top, {theme["bg"]}cc 0%, transparent 38%); }}
-  .caption {{ position:absolute; left:6%; right:6%; bottom:9%; z-index:2;
-    font-size:{int(height * 0.031)}px; line-height:1.35; text-align:center;
-    text-shadow:0 2px 18px rgba(0,0,0,.55); }}
-  .title {{ position:absolute; inset:0; z-index:3; display:flex; flex-direction:column;
-    align-items:center; justify-content:center; text-align:center;
-    background:linear-gradient(180deg, {theme["bg"]}99, {theme["bg"]}dd); }}
-  .title .t {{ font-size:{int(height * 0.058)}px; letter-spacing:.02em; }}
-  .title .s {{ margin-top:{int(height * 0.018)}px; font-size:{int(height * 0.026)}px;
-    color:{theme["accent"]}; letter-spacing:.16em; text-transform:uppercase; }}
-  .end {{ position:absolute; inset:0; z-index:4; display:flex; align-items:center;
-    justify-content:center; background:{theme["bg"]}; color:{theme["accent"]};
-    font-size:{int(height * 0.032)}px; letter-spacing:.14em; opacity:0; }}
-</style></head>
-<body>
-<div id="stage" data-composition-id="montage" data-start="0" data-duration="{total:.3f}"
-     data-width="{width}" data-height="{height}" data-fps="{fps}"
-     data-composition-variables='{{}}'>
-  <div class="clip layer" data-start="0" data-duration="{total:.3f}" data-track-index="0">
-    {"".join(layers)}
-    {title_block}
-    {end_block}
-    {audio}
-  </div>
-  <script src="https://cdn.jsdelivr.net/npm/gsap@3/dist/gsap.min.js"></script>
-  <script>
-    const tl = gsap.timeline({{ paused: true }});
-    {" ".join(timeline)}
-    window.__timelines = window.__timelines || {{}};
-    window.__timelines['montage'] = tl;
-  </script>
-</div>
-</body></html>"""
+    shots = [
+        {
+            "name": name,
+            "caption": plan["captions"].get(order[index] if index < len(order) else "", ""),
+        }
+        for index, name in enumerate(names)
+    ]
+    return {
+        "shots": shots,
+        "per": float(plan["per_photo"]),
+        "theme": theme,
+        "title": title,
+        "subtitle": subtitle,
+        "endCard": end_card,
+    }

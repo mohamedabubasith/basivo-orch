@@ -1,29 +1,53 @@
-"""Rendering video through HyperFrames.
+"""Video, rendered with Remotion.
 
-Most of these are fast: they check the contract around the renderer — which
-command is invoked, what the templates promise, what is refused before several
-minutes of work begins. One actually renders an MP4 and is marked `slow`,
-because the only real proof that a composition works is a file with frames in
-it.
+Most of these are fast, because most of what can go wrong is decided before
+anything is rendered: what the composition is allowed to import, what it may
+reach for, whether anything moves. The ones that actually render are marked
+`slow` and skipped where the renderer is not installed, because the only real
+proof that a composition works is a file with frames in it.
+
+The frame tests build their images with Pillow rather than rendering them.
+What is being tested there is the verdict, not the browser: a flat frame is a
+flat frame whoever drew it.
 """
 
 from __future__ import annotations
 
-import json
-import os
-import re
+import io
 import uuid
 
 import pytest
 
 from basivo_orch.flows.nodes.base import NodeContext, NodeError
+from basivo_orch.flows.nodes.remotion import RenderJob, is_installed
 from basivo_orch.flows.nodes.video import (
     MAX_DURATION_SECONDS,
     VideoRenderConfig,
     VideoRenderNode,
-    hyperframes_command,
+    caption_lines,
+    frame_difference,
+    frame_spread,
+    probe_frames,
+    review_frames,
+    scene_problems,
+    strip_code_fences,
 )
-from basivo_orch.flows.nodes.video_templates import TEMPLATES
+from basivo_orch.flows.nodes.video_templates import TEMPLATE_CHOICES, TEMPLATES
+
+GOOD_SCENE = """
+import React from "react";
+import {AbsoluteFill, useCurrentFrame, interpolate} from "remotion";
+
+export default function Scene({headline}) {
+  const frame = useCurrentFrame();
+  const enter = interpolate(frame, [0, 12], [0, 1], {extrapolateRight: "clamp"});
+  return (
+    <AbsoluteFill style={{opacity: enter}}>
+      <h1>{headline}</h1>
+    </AbsoluteFill>
+  );
+}
+"""
 
 
 class _Recorder:
@@ -38,7 +62,7 @@ class _Recorder:
         pass
 
     def data_for(self, kind: str) -> list[dict]:
-        return [data for k, data in self.steps if k == kind]
+        return [data for name, data in self.steps if name == kind]
 
 
 def make_context(recorder: _Recorder, **overrides) -> NodeContext:
@@ -72,176 +96,343 @@ def make_context(recorder: _Recorder, **overrides) -> NodeContext:
     return NodeContext(**fields)
 
 
+def png(colour, *, size=(160, 90), mark: tuple[int, int, int, int] | None = None) -> bytes:
+    """A picture, as bytes. `mark` paints a rectangle so the frame is not flat."""
+    from PIL import Image, ImageDraw
+
+    image = Image.new("RGB", size, colour)
+    if mark:
+        ImageDraw.Draw(image).rectangle(mark, fill=(255, 255, 255))
+    buffer = io.BytesIO()
+    image.save(buffer, "PNG")
+    return buffer.getvalue()
+
+
 # ---------------------------------------------------------------------------
-# The templates
+# What a composition may be
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("name", sorted(TEMPLATES))
-def test_every_template_is_a_valid_seekable_composition(name: str):
-    """The four things HyperFrames needs, present in every starter.
+def test_a_good_composition_has_nothing_wrong_with_it():
+    assert scene_problems(GOOD_SCENE, assets=set()) == []
 
-    A composition missing its timeline renders as a still image and nobody can
-    tell why; missing dimensions renders at the wrong size. Cheaper to assert
-    here than to discover after a four-minute render.
+
+def test_an_empty_composition_says_so():
+    assert scene_problems("") == ["There is no composition at all."]
+
+
+def test_a_composition_with_no_default_export_is_refused():
+    problems = scene_problems(GOOD_SCENE.replace("export default ", ""))
+    assert any("default export" in problem for problem in problems)
+
+
+def test_a_composition_may_not_import_anything_else():
+    scene = 'import gsap from "gsap";\n' + GOOD_SCENE
+    problems = scene_problems(scene)
+    assert any("'gsap'" in problem for problem in problems)
+
+
+def test_a_composition_may_not_import_another_file():
+    """There is one file. An import of a sibling is a bundler error later, and
+    a confusing one, because the file it names never existed."""
+    scene = 'import {Card} from "./Card";\n' + GOOD_SCENE
+    problems = scene_problems(scene)
+    assert any("only one file" in problem for problem in problems)
+
+
+@pytest.mark.parametrize("element", ["<Audio", "<Video", "<OffthreadVideo"])
+def test_a_composition_may_not_bring_its_own_audio_or_video(element: str):
+    """Narration is a sibling of the composition. One that adds its own gets
+    two voices, or names a file that does not exist and fails the render."""
+    scene = GOOD_SCENE.replace("<h1>", f"{element} src={{x}} /><h1>")
+    problems = scene_problems(scene)
+    assert any(element in problem for problem in problems)
+
+
+def test_a_composition_where_nothing_moves_is_refused():
+    still = """
+    import React from "react";
+    import {AbsoluteFill} from "remotion";
+    export default function Scene() {
+      return <AbsoluteFill><h1>Static</h1></AbsoluteFill>;
+    }
     """
-    html = TEMPLATES[name]
-    assert f'data-composition-id="{name}"' in html
-    assert "data-duration=" in html and "data-width=" in html and "data-height=" in html
-    assert "window.__timelines" in html, "no seekable timeline — this would render as a still"
-    assert "gsap" in html
-
-    variables = json.loads(re.search(r"data-composition-variables='([^']+)'", html).group(1))
-    assert variables, "a template with no variables cannot be filled in"
+    problems = scene_problems(still)
+    assert any("Nothing in it moves" in problem for problem in problems)
 
 
-@pytest.mark.parametrize("name", sorted(TEMPLATES))
-def test_every_colour_has_a_fallback(name: str):
-    """A composition rendered with only *some* variables must still look like
-    the design. `var(--bg)` with nothing behind it resolves to nothing, the
-    gradient becomes invalid, and the video comes out black — which is exactly
-    what happened the first time these were rendered."""
-    for reference in re.findall(r"var\(--(\w+)([^)]*)\)", TEMPLATES[name]):
-        name_, rest = reference
-        assert "," in rest, f"--{name_} has no fallback value"
+def test_a_composition_may_not_reach_the_network():
+    scene = GOOD_SCENE.replace("<h1>", '<img src="https://example.com/logo.png" /><h1>')
+    problems = scene_problems(scene)
+    assert any("no network" in problem for problem in problems)
 
 
-def test_a_custom_video_needs_its_html():
-    with pytest.raises(ValueError, match="composition HTML"):
-        VideoRenderConfig(template="custom")
+def test_a_composition_asking_for_a_file_we_do_not_have_is_refused():
+    scene = GOOD_SCENE.replace("<h1>", '<Img src={staticFile("logo.png")} /><h1>')
+    problems = scene_problems(scene, assets={"p0.png"})
+    assert any("'logo.png'" in problem and "p0.png" in problem for problem in problems)
 
 
-def test_variables_must_be_a_json_object():
-    with pytest.raises(ValueError, match="JSON"):
-        VideoRenderConfig(template="announcement", variables="not json")
-    with pytest.raises(ValueError, match="JSON object"):
-        VideoRenderConfig(template="announcement", variables="[1, 2]")
-    # A template reference is not JSON yet; it is checked after rendering.
-    VideoRenderConfig(template="announcement", variables='{"headline": "{{ input.headline }}"}')
-
-
-# ---------------------------------------------------------------------------
-# Around the renderer
-# ---------------------------------------------------------------------------
-
-
-def test_the_renderer_is_pinned_and_overridable(monkeypatch):
-    """A silent upgrade mid-project is a changed video nobody asked for."""
-    monkeypatch.delenv("BASIVO_HYPERFRAMES_BIN", raising=False)
-    monkeypatch.setattr("shutil.which", lambda _name: None)
-    assert hyperframes_command() == ["npx", "--yes", "hyperframes@0.8.3"]
-
-    monkeypatch.setenv("BASIVO_HYPERFRAMES_BIN", "/opt/hf/bin/hyperframes")
-    assert hyperframes_command() == ["/opt/hf/bin/hyperframes"]
-
-
-async def test_a_composition_longer_than_the_limit_is_refused_before_rendering():
-    recorder = _Recorder()
-    long_html = TEMPLATES["announcement"].replace(
-        'data-duration="5"', f'data-duration="{MAX_DURATION_SECONDS + 30}"'
-    )
-    with pytest.raises(NodeError, match=f"limit is {MAX_DURATION_SECONDS}s"):
-        await VideoRenderNode().run(
-            VideoRenderConfig(template="custom", html=long_html), make_context(recorder)
-        )
-    assert not recorder.steps, "work started before the length was checked"
-
-
-async def test_variables_that_do_not_survive_templating_say_so():
-    recorder = _Recorder()
-    with pytest.raises(NodeError, match="did not come out as JSON"):
-        await VideoRenderNode().run(
-            VideoRenderConfig(
-                template="announcement",
-                # An unquoted reference produces invalid JSON once filled in.
-                variables='{"headline": {{ input.headline }}}',
-            ),
-            make_context(recorder),
-        )
-
-
-async def test_a_missing_renderer_explains_how_to_install_it(monkeypatch):
-    monkeypatch.setenv("BASIVO_HYPERFRAMES_BIN", "/nonexistent/hyperframes")
-    recorder = _Recorder()
-    with pytest.raises(NodeError, match="not installed"):
-        await VideoRenderNode().run(
-            VideoRenderConfig(template="announcement"), make_context(recorder)
-        )
-
-
-# ---------------------------------------------------------------------------
-# The real thing
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.slow
-@pytest.mark.skipif(
-    not os.environ.get("BASIVO_HYPERFRAMES_BIN"),
-    reason="set BASIVO_HYPERFRAMES_BIN to run a real render",
-)
-async def test_it_renders_a_real_mp4_from_a_template():
-    recorder = _Recorder()
-    result = await VideoRenderNode().run(
-        VideoRenderConfig(
-            template="announcement",
-            variables='{"headline": "{{ input.headline }}"}',
-            quality="draft",
-            fps=12,
-        ),
-        make_context(recorder),
-    )
-
-    video = recorder.saved[0]
-    # ftyp box near the start is what makes a file an MP4.
-    assert b"ftyp" in video[:64], "that is not an MP4"
-    assert result.output["duration_seconds"] == 5.0
-    assert result.output["format"] == "mp4"
-    assert recorder.data_for("video.started")[0]["variables"] == ["headline"]
-
-
-# ---------------------------------------------------------------------------
-# Compositions an agent wrote
-# ---------------------------------------------------------------------------
+def test_a_composition_asking_for_a_file_we_do_have_is_fine():
+    scene = GOOD_SCENE.replace("<h1>", '<Img src={staticFile("p0.png")} /><h1>')
+    assert scene_problems(scene, assets={"p0.png"}) == []
 
 
 def test_markdown_fences_are_unwrapped():
-    """Models are told not to fence their answer and do it anyway. Rendering
-    the fence produces a video of the literal characters ```html."""
-    from basivo_orch.flows.nodes.video import strip_code_fences
-
-    assert strip_code_fences("```html\n<div>hi</div>\n```") == "<div>hi</div>"
-    assert strip_code_fences("```\n<div>hi</div>\n```") == "<div>hi</div>"
-    assert strip_code_fences("<div>hi</div>") == "<div>hi</div>"
+    assert strip_code_fences("```tsx\nconst a = 1;\n```") == "const a = 1;"
 
 
-def test_a_composition_with_no_timeline_is_caught_before_rendering():
-    """The worst failure mode, because it is silent: a composition with no
-    exposed timeline renders *successfully* as a motionless video."""
-    from basivo_orch.flows.nodes.video import composition_problems
+# ---------------------------------------------------------------------------
+# What the frames say
+# ---------------------------------------------------------------------------
 
-    still = '<div id="stage" data-composition-id="p" data-duration="5"><h1>Hi</h1></div>'
-    assert composition_problems(still) == [
-        "missing the paused GSAP timeline exposed on window.__timelines"
+
+def test_a_flat_frame_scores_near_zero_and_a_drawn_one_does_not():
+    assert frame_spread(png((10, 10, 20))) < 1
+    assert frame_spread(png((10, 10, 20), mark=(10, 10, 90, 60))) > 10
+
+
+def test_two_identical_frames_differ_by_nothing():
+    assert frame_difference(png((30, 30, 30)), png((30, 30, 30))) == 0
+
+
+def test_a_moved_element_registers_as_a_difference():
+    first = png((10, 10, 20), mark=(0, 0, 60, 60))
+    second = png((10, 10, 20), mark=(90, 20, 150, 80))
+    assert frame_difference(first, second) > 5
+
+
+def test_a_video_that_is_blank_all_the_way_through_is_rejected():
+    frames = [png((8, 8, 12)) for _ in range(3)]
+    problems = review_frames(frames, seconds=[0.5, 3.0, 5.5])
+    assert any("Every frame is a flat colour" in problem for problem in problems)
+
+
+def test_a_single_empty_moment_is_named():
+    frames = [
+        png((8, 8, 12), mark=(4, 4, 60, 40)),
+        png((8, 8, 12)),
+        png((8, 8, 12), mark=(80, 20, 140, 70)),
     ]
-    assert composition_problems(TEMPLATES["announcement"]) == []
+    problems = review_frames(frames, seconds=[0.5, 3.0, 5.5])
+    assert any("3.0s is empty" in problem for problem in problems)
 
 
-async def test_an_agent_written_composition_that_is_broken_fails_with_advice():
-    recorder = _Recorder()
-    with pytest.raises(NodeError, match="will not render as video"):
-        await VideoRenderNode().run(
-            VideoRenderConfig(template="custom", html="<h1>just a heading</h1>"),
-            make_context(recorder),
-        )
+def test_a_video_where_the_picture_never_changes_is_rejected():
+    """A still image with a running time is the failure nobody notices: it
+    renders, it plays, and it is worthless."""
+    frame = png((20, 30, 60), mark=(10, 10, 90, 60))
+    problems = review_frames([frame, frame, frame], seconds=[0.5, 3.0, 5.5])
+    assert any("picture never changes" in problem for problem in problems)
 
 
-def test_the_composition_instructions_state_the_rules_that_matter():
-    """These ship with the product because every rule is a way a model-written
-    composition fails, and users should not have to rediscover them."""
-    from basivo_orch.flows.nodes.video import COMPOSITION_INSTRUCTIONS
+def test_frames_that_differ_pass():
+    frames = [
+        png((20, 30, 60), mark=(0, 0, 50, 50)),
+        png((20, 30, 60), mark=(50, 20, 110, 70)),
+        png((20, 30, 60), mark=(100, 30, 158, 88)),
+    ]
+    assert review_frames(frames, seconds=[0.5, 3.0, 5.5]) == []
 
-    for rule in ("window.__timelines", "data-duration", "gsap", "No markdown fences"):
-        assert rule in COMPOSITION_INSTRUCTIONS
+
+def test_nothing_rendered_at_all_is_a_problem():
+    assert review_frames([], seconds=[]) != []
+
+
+def test_the_frames_looked_at_are_spread_across_the_video():
+    frames = probe_frames(10, 30)
+    assert len(frames) == 3
+    assert frames == sorted(set(frames))
+    assert 0 <= frames[0] < frames[-1] <= 10 * 30 - 1
+
+
+def test_a_very_short_video_still_has_a_frame_to_look_at():
+    """A video of a frame and a half is a mistake somebody will make, and it
+    must not produce a negative frame number or an empty list."""
+    frames = probe_frames(0.05, 30)
+    assert frames
+    assert min(frames) >= 0
+    assert max(frames) <= 1
+
+
+# ---------------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------------
+
+
+def test_a_custom_video_needs_a_composition():
+    with pytest.raises(ValueError, match="needs its composition"):
+        VideoRenderConfig(template="custom", scene="   ")
+
+
+def test_values_must_be_a_json_object():
+    with pytest.raises(ValueError, match="JSON object"):
+        VideoRenderConfig(props='["a", "b"]')
+    with pytest.raises(ValueError, match="JSON object"):
+        VideoRenderConfig(props="not json at all")
+
+
+def test_values_holding_a_reference_are_checked_at_run_time_instead():
+    """`{{ ... }}` is not JSON until it is filled in, so refusing it here would
+    refuse the normal case: an agent writing the copy."""
+    config = VideoRenderConfig(props='{"headline": "{{ nodes.writer.output.text }}"}')
+    assert "headline" in config.props
+
+
+def test_a_video_longer_than_the_limit_is_refused():
+    with pytest.raises(ValueError):
+        VideoRenderConfig(duration_seconds=MAX_DURATION_SECONDS + 1)
+
+
+@pytest.mark.parametrize("name", TEMPLATE_CHOICES)
+def test_every_template_would_render(name: str):
+    """The static checks the renderer applies to an agent's work apply to ours
+    too. A template that breaks one of them ships a broken first experience."""
+    template = TEMPLATES[name]
+    assets = {
+        value
+        for value in template.props.values()
+        if isinstance(value, str) and value.endswith((".png", ".jpg"))
+    }
+    for item in template.props.values():
+        if isinstance(item, list):
+            for entry in item:
+                if isinstance(entry, dict):
+                    assets |= {
+                        str(value)
+                        for value in entry.values()
+                        if isinstance(value, str) and value.endswith((".png", ".jpg"))
+                    }
+    assert scene_problems(template.scene, assets=assets) == []
+
+
+@pytest.mark.parametrize("name", TEMPLATE_CHOICES)
+def test_every_template_says_what_it_is_for(name: str):
+    template = TEMPLATES[name]
+    assert template.label and template.description
+    assert template.duration_seconds > 0
+    assert template.props
+
+
+def test_the_render_node_offers_every_template():
+    """The picker and the catalogue are two lists that must not drift apart:
+    a template missing from the picker cannot be chosen, and a choice with no
+    template fails at run time with a KeyError."""
+    choices = set(VideoRenderConfig.model_fields["template"].annotation.__args__)
+    assert choices == set(TEMPLATE_CHOICES) | {"custom"}
+
+
+# ---------------------------------------------------------------------------
+# The job handed to the renderer
+# ---------------------------------------------------------------------------
+
+
+def test_length_becomes_a_whole_number_of_frames():
+    assert (
+        RenderJob(
+            scene_tsx="", width=100, height=100, fps=30, duration_seconds=2.0, props={}
+        ).duration_in_frames
+        == 60
+    )
+    assert (
+        RenderJob(
+            scene_tsx="", width=100, height=100, fps=30, duration_seconds=2.017, props={}
+        ).duration_in_frames
+        == 61
+    )
+
+
+def test_a_video_shorter_than_one_frame_still_has_one():
+    """Zero frames is not a video, and the renderer refuses it with a message
+    about the composition rather than about the length somebody typed."""
+    job = RenderJob(scene_tsx="", width=100, height=100, fps=30, duration_seconds=0.0, props={})
+    assert job.duration_in_frames == 1
+
+
+def test_an_asset_can_only_land_beside_the_composition(tmp_path, monkeypatch):
+    """A composition is written by a model. A file name is not a path."""
+    from basivo_orch.flows.nodes import remotion
+
+    modules = tmp_path / "node_modules"
+    (modules / "remotion").mkdir(parents=True)
+    monkeypatch.setenv(remotion.NODE_MODULES_ENV, str(modules))
+
+    job = RenderJob(
+        scene_tsx=GOOD_SCENE,
+        width=100,
+        height=100,
+        fps=30,
+        duration_seconds=1.0,
+        props={},
+        assets={"../../../etc/passwd": b"nope", "p0.png": b"fine"},
+    )
+    project = remotion._prepare(tmp_path / "work", job)
+
+    assert (project / "public" / "passwd").exists()
+    assert (project / "public" / "p0.png").exists()
+    assert not (tmp_path / "work" / "etc").exists()
+
+
+def test_the_job_carries_the_captions_the_audio_and_the_props(tmp_path, monkeypatch):
+    import json
+
+    from basivo_orch.flows.nodes import remotion
+
+    modules = tmp_path / "node_modules"
+    (modules / "remotion").mkdir(parents=True)
+    monkeypatch.setenv(remotion.NODE_MODULES_ENV, str(modules))
+
+    job = RenderJob(
+        scene_tsx=GOOD_SCENE,
+        width=1080,
+        height=1920,
+        fps=24,
+        duration_seconds=3.0,
+        props={"headline": "Hello"},
+        background="#101010",
+        assets={"narration.wav": b"riff"},
+        audio="narration.wav",
+        captions=[{"text": "hello", "from": 0.0, "to": 1.0}],
+    )
+    project = remotion._prepare(tmp_path / "work", job)
+    written = json.loads((project / "src" / "job.json").read_text())
+
+    assert written["durationInFrames"] == 72
+    assert written["props"] == {"headline": "Hello"}
+    assert written["captions"][0]["text"] == "hello"
+    assert written["audio"] == "narration.wav"
+    assert written["background"] == "#101010"
+    assert (project / "src" / "Scene.tsx").read_text() == GOOD_SCENE
+
+
+def test_a_server_without_the_renderer_says_how_to_install_it(tmp_path, monkeypatch):
+    from basivo_orch.flows.nodes import remotion
+
+    monkeypatch.setenv(remotion.NODE_MODULES_ENV, str(tmp_path / "nothing-here"))
+    job = RenderJob(
+        scene_tsx=GOOD_SCENE, width=100, height=100, fps=30, duration_seconds=1, props={}
+    )
+
+    with pytest.raises(NodeError, match="not installed on this server"):
+        remotion._prepare(tmp_path / "work", job)
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("Module not found: Error: Can't resolve 'gsap'", "can be imported"),
+        ("SyntaxError: Unexpected token (12:4)", "syntax error"),
+        ("Error: ENOSPC: no space left on device", "ran out of disk"),
+    ],
+)
+def test_a_renderer_failure_is_translated_into_something_actionable(raw: str, expected: str):
+    """The bundler's own words are kept, but a person should not have to read
+    webpack output to learn that a package is not available."""
+    from basivo_orch.flows.nodes.remotion import _readable
+
+    message = _readable(raw)
+    assert expected in message
+    assert raw[:20] in message
 
 
 # ---------------------------------------------------------------------------
@@ -249,214 +440,107 @@ def test_the_composition_instructions_state_the_rules_that_matter():
 # ---------------------------------------------------------------------------
 
 
-def _words(*items):
-    return [{"word": word, "start": start, "end": end} for word, start, end in items]
-
-
 def test_caption_lines_break_on_sentences_before_word_count():
-    """A caption that reads "...yourself. Connect a" is harder to read than one
-    that stops where the speaker stopped."""
-    from basivo_orch.flows.nodes.video import caption_lines
-
-    lines = caption_lines(
-        _words(
-            ("Do", 0.0, 0.2),
-            ("it.", 0.3, 0.6),
-            ("Then", 0.7, 0.9),
-            ("ship", 1.0, 1.2),
-            ("it", 1.3, 1.4),
-            ("today", 1.5, 1.8),
-            ("please", 1.9, 2.1),
-            ("now", 2.2, 2.4),
-        )
-    )
-    assert [" ".join(w["word"] for w in line["words"]) for line in lines] == [
-        "Do it.",
-        "Then ship it today please now",
+    words = [
+        {"word": "Make", "start": 0.0, "end": 0.2},
+        {"word": "it.", "start": 0.2, "end": 0.4},
+        {"word": "Then", "start": 0.5, "end": 0.7},
+        {"word": "ship", "start": 0.7, "end": 0.9},
+        {"word": "it.", "start": 0.9, "end": 1.1},
     ]
-    assert lines[0]["start"] == 0.0 and lines[0]["end"] == 0.6
+    lines = caption_lines(words)
+    assert [line["text"] for line in lines] == ["Make it.", "Then ship it."]
+    assert lines[0]["from"] == 0.0
+    assert lines[0]["to"] == 0.4
 
 
-def test_one_line_never_hides_after_the_next_one_appears():
-    """The bug this guards was visible in a real render: two caption lines drawn
-    on the same frame, their words interleaved into nonsense. Lines linger past
-    their last word so they do not blink out on the final syllable — but never
-    past the moment the next line starts."""
-    from basivo_orch.flows.nodes.video import caption_lines, caption_script
+def test_a_long_sentence_is_split_so_a_line_fits_on_a_phone():
+    words = [{"word": f"w{i}", "start": i * 0.2, "end": i * 0.2 + 0.2} for i in range(14)]
+    lines = caption_lines(words)
+    assert len(lines) == 3
+    assert all(len(line["text"].split()) <= 6 for line in lines)
 
-    lines = caption_lines(
-        _words(
-            ("one", 0.0, 0.5),
-            ("two", 0.6, 1.0),
-            ("three", 1.1, 1.5),
-            ("four", 1.6, 2.0),
-            ("five", 2.1, 2.4),
-            ("six", 2.5, 2.52),
-            ("seven", 2.55, 3.0),
-        ),
+
+def test_caption_lines_never_overlap():
+    """Two lines on screen at once is the failure people notice immediately."""
+    words = [{"word": f"w{i}.", "start": i * 0.3, "end": i * 0.3 + 0.3} for i in range(6)]
+    lines = caption_lines(words)
+    for earlier, later in zip(lines, lines[1:], strict=False):
+        assert earlier["to"] <= later["from"]
+
+
+# ---------------------------------------------------------------------------
+# The node
+# ---------------------------------------------------------------------------
+
+
+async def test_values_that_do_not_survive_templating_say_so():
+    recorder = _Recorder()
+    node = VideoRenderNode()
+    config = VideoRenderConfig(props='{"headline": "{{ input.headline }}"}')
+    context = make_context(recorder, input={"headline": 'a "quoted" word'})
+
+    with pytest.raises(NodeError, match="escaping"):
+        await node.run(config, context)
+
+
+async def test_a_custom_composition_is_checked_before_anything_is_rendered():
+    """Several minutes of work should not start on a file that cannot work."""
+    recorder = _Recorder()
+    node = VideoRenderNode()
+    config = VideoRenderConfig(template="custom", scene="const nothing = 1;")
+
+    with pytest.raises(NodeError, match="will not render"):
+        await node.run(config, make_context(recorder))
+
+
+# ---------------------------------------------------------------------------
+# Rendering for real
+# ---------------------------------------------------------------------------
+
+needs_renderer = pytest.mark.skipif(
+    not is_installed(),
+    reason="the Remotion project is not installed here (npm install in remotion_project)",
+)
+
+
+@pytest.mark.slow
+@needs_renderer
+async def test_it_renders_a_real_video_from_a_template():
+    recorder = _Recorder()
+    node = VideoRenderNode()
+    config = VideoRenderConfig(
+        template="announcement",
+        size="square",
+        duration_seconds=2,
+        fps=12,
+        quality="draft",
+        props='{"headline": "It works"}',
     )
-    assert len(lines) == 2, "six words per line, so seven words is two lines"
-    script = caption_script("promo", lines)
+    result = await node.run(config, make_context(recorder))
 
-    # Line 0's last word ends at 2.52 and line 1 starts at 2.55, so the usual
-    # 0.08s linger is clamped rather than overlapping.
-    assert 'tl.set("#hf-line-0",{opacity:0},2.549)' in script
-    assert 'tl.set("#hf-line-1",{opacity:1},2.55)' in script
+    assert result.output["format"] == "mp4"
+    assert recorder.saved and len(recorder.saved[0]) > 10_000
+    # An MP4 announces itself in its first bytes. A renderer that wrote a
+    # zero-length file or an error page would pass a size check and fail here.
+    assert recorder.saved[0][4:8] == b"ftyp"
 
 
-def test_the_caption_layer_carries_its_own_scrim():
-    """Not decoration. An agent told not to write its own subtitles wrote them
-    anyway, in the same band, and the frame showed both sets of words on top of
-    each other. The scrim means the worst case is a hidden line, not an
-    unreadable one — and it is what makes white text legible over a light
-    composition at all."""
-    from basivo_orch.flows.nodes.video import narration_markup
+@pytest.mark.slow
+@needs_renderer
+async def test_a_narrated_composition_shows_its_captions():
+    """The caption layer is ours, so this is the test that it reaches the
+    picture at all: a frame during the line must differ from one after it."""
+    from basivo_orch.flows.nodes.remotion import probe
 
-    markup = narration_markup(
-        audio_name="n.wav",
-        audio_seconds=2.0,
-        lines=[{"start": 0.1, "end": 1.0, "words": _words(("hi", 0.1, 0.5))}],
-        width=1920,
-        height=1080,
+    job = RenderJob(
+        scene_tsx=GOOD_SCENE,
+        width=320,
+        height=180,
+        fps=12,
+        duration_seconds=2.0,
+        props={"headline": "Hello"},
+        captions=[{"text": "a caption on screen", "from": 0.0, "to": 0.9}],
     )
-    assert "linear-gradient" in markup and "rgba(0,0,0,0.86)" in markup
-    assert markup.count("<div") == markup.count("</div>"), "unbalanced markup breaks the layout"
-    # Above everything the composition can produce.
-    assert "z-index:2147483000" in markup
-
-
-def test_captions_are_driven_by_the_timeline_not_by_css():
-    """The renderer produces frames by SEEKING the composition's timeline, so a
-    CSS animation would render as one frozen frame for the whole video."""
-    from basivo_orch.flows.nodes.video import caption_script
-
-    script = caption_script(
-        "promo", [{"start": 0.2, "end": 1.0, "words": _words(("go", 0.2, 0.9))}]
-    )
-    assert "window.__timelines" in script
-    assert "animation" not in script and "@keyframes" not in script
-
-
-def test_narration_survives_a_composition_with_no_recognisable_stage():
-    """A caption layer with nothing to attach to must not cost the voice."""
-    from basivo_orch.flows.nodes.video import inject_narration
-
-    html, captioned, _ = inject_narration(
-        "<html><body><p>no stage here</p></body></html>",
-        audio_name="n.wav",
-        audio_seconds=2.0,
-        lines=[{"start": 0.1, "end": 1.0, "words": _words(("hi", 0.1, 0.5))}],
-        width=640,
-        height=360,
-    )
-    assert captioned is False
-    assert '<audio src="n.wav"' in html, "the voice does not depend on the stage"
-    assert "hf-captions" not in html
-
-
-def test_the_declared_duration_is_widened_to_fit_the_voice():
-    """Otherwise the render cuts the narration off mid-word."""
-    from basivo_orch.flows.nodes.video import ensure_duration
-
-    short = '<div id="stage" data-composition-id="p" data-duration="4" data-fps="30">'
-    widened, changed = ensure_duration(short, 6.3)
-    assert changed and 'data-duration="6.3"' in widened
-
-    # Already long enough: left exactly as authored.
-    same, changed = ensure_duration(
-        '<div id="stage" data-composition-id="p" data-duration="30" data-fps="30">', 20.5
-    )
-    assert changed is False and 'data-duration="30"' in same
-
-
-def test_the_probe_looks_often_enough_to_notice_a_gap():
-    """Three sample points missed a composition that was blank for its last
-    eight seconds: 0.85 of 30s is 25.5s, and the dead zone sat between the
-    samples. A short clip still gets three looks — for six seconds that is the
-    whole video — but anything longer is sampled every couple of seconds, and
-    the last look sits near the end, where dead air usually is."""
-    from basivo_orch.flows.nodes.video import MAX_PROBE_POINTS, probe_moments
-
-    short = probe_moments(6)
-    assert len(short) == 3
-
-    long = probe_moments(30)
-    assert len(long) >= 10
-    gaps = [b - a for a, b in zip(long, long[1:], strict=False)]
-    assert max(gaps) <= 2.5, "a gap wider than this is where a dead zone hides"
-    assert long[-1] >= 30 * 0.95, "the tail is the most common dead zone"
-    assert long[0] > 0, "time zero is before any entrance animation has played"
-
-    # Bounded: each point is a JS evaluation, cheap but not free.
-    assert len(probe_moments(600)) <= MAX_PROBE_POINTS + 1
-
-
-def test_a_composition_that_brings_its_own_audio_has_it_replaced():
-    """The failure this exists for: told "a voice is already recorded", an agent
-    added <audio src="voice.mp3">. There is no voice.mp3, and the renderer
-    treats a missing media source as a correctness error and produces nothing —
-    one hallucinated filename, no video at all."""
-    from basivo_orch.flows.nodes.video import inject_narration, strip_audio
-
-    rogue = (
-        '<html><body><div id="stage" data-composition-id="p" data-duration="4">'
-        '<audio id="audio" src="voice.mp3" preload="auto"></audio>'
-        '<div class="clip">hi</div></div>'
-        "<script>window.__timelines={p:1}</script></body></html>"
-    )
-
-    stripped, count = strip_audio(rogue)
-    assert count == 1 and "voice.mp3" not in stripped
-
-    html, _, dropped = inject_narration(
-        rogue,
-        audio_name="narration.wav",
-        audio_seconds=2.0,
-        lines=[{"start": 0.1, "end": 1.0, "words": _words(("hi", 0.1, 0.5))}],
-        width=640,
-        height=360,
-    )
-    assert dropped == 1
-    assert "voice.mp3" not in html, "a reference to a missing file blocks the whole render"
-    assert html.count("<audio") == 1 and 'src="narration.wav"' in html
-
-
-def test_self_closed_and_uppercase_audio_tags_are_caught_too():
-    """Models write markup in whatever style they feel like."""
-    from basivo_orch.flows.nodes.video import strip_audio
-
-    stripped, count = strip_audio('<AUDIO SRC="a.mp3"/><audio src="b.wav" ></audio><p>keep</p>')
-    assert count == 2
-    assert "a.mp3" not in stripped and "b.wav" not in stripped
-    assert "<p>keep</p>" in stripped
-
-
-async def test_the_probe_sees_through_an_invisible_ancestor():
-    """The hole that shipped a blank video.
-
-    `opacity` does not inherit as a computed value: a heading inside a `.clip`
-    at opacity 0 still computes to opacity 1. Reading only the element's own
-    style, the probe reported "SCENE ONE" as visible while the renderer
-    produced thirty seconds of black — and the review passed it.
-    """
-    from basivo_orch.flows.nodes.video import probe_composition, review
-
-    html = """<!doctype html><html><head><style>
-    #stage{width:640px;height:360px;position:relative;overflow:hidden;background:#000}
-    .clip{position:absolute;inset:0;opacity:0}
-    h1{color:#fff;font-size:60px}
-    </style></head><body>
-    <div id="stage" data-composition-id="p" data-start="0" data-duration="4"
-         data-width="640" data-height="360" data-fps="24">
-      <div class="clip" data-start="0" data-duration="4" data-track-index="0">
-        <h1>SCENE ONE</h1>
-      </div>
-    </div>
-    <script src="https://cdn.jsdelivr.net/npm/gsap@3/dist/gsap.min.js"></script>
-    <script>const tl=gsap.timeline({paused:true});tl.set('#stage',{opacity:1},0);
-    window.__timelines={p:tl};</script></body></html>"""
-
-    visible, errors = await probe_composition(html, width=640, height=360, duration=4.0)
-    assert errors == []
-    assert all(not text for text in visible.values()), "an opacity-0 clip hides its text"
-    assert any("nothing at all is visible" in problem for problem in review(html, visible, errors))
+    during, after = await probe(job, frames=[6, 20])
+    assert frame_difference(during, after) > 1.0

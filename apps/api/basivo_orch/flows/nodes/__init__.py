@@ -26,6 +26,7 @@ from basivo_orch.flows.nodes.gitops import AutofixNode, CommentNode, TicketNode
 from basivo_orch.flows.nodes.http import HttpRequestNode, assert_public_url
 from basivo_orch.flows.nodes.image import ImageEditNode
 from basivo_orch.flows.nodes.invitation import InvitationNode
+from basivo_orch.flows.nodes.llm import LlmGenerateNode
 from basivo_orch.flows.nodes.logic import FALSE_PORT, TRUE_PORT, ConditionNode, SetVariablesNode
 from basivo_orch.flows.nodes.montage import MontageNode
 from basivo_orch.flows.nodes.session import SessionNode
@@ -49,6 +50,7 @@ _NODES: tuple[type[Node], ...] = (
     ConditionNode,
     SetVariablesNode,
     AgentNode,
+    LlmGenerateNode,
     CodeNode,
     TicketNode,
     AutofixNode,

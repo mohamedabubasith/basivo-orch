@@ -1,277 +1,424 @@
-"""Rendering video from HTML, through HyperFrames.
+"""Video, rendered with Remotion.
 
-Same argument as the poster node, one step further: a model writes HTML and a
-browser renders it, frame by frame, into an MP4. HeyGen's HyperFrames does the
-hard half — seeking a GSAP timeline deterministically, capturing every frame in
-headless Chrome, and handing it to FFmpeg — under Apache 2.0. Writing that
-ourselves would be months of work to arrive somewhere worse.
+A composition is a React component. The author writes one file that
+default-exports it; this module puts it inside a project whose dependencies
+are already installed, checks a few frames, and encodes.
 
-Two consequences worth stating plainly.
+Three things are deliberately taken away from the author, because each one is
+a way videos used to break silently:
 
-**This executes JavaScript.** The poster node renders with JS disabled; a video
-cannot, because the animation *is* JavaScript. A composition is therefore code,
-at the same trust level as the Python code node — treat one from an untrusted
-source the way you would treat a script from an untrusted source. The
-subprocess gets a stripped environment (no credentials, no database URL) and a
-hard wall-clock limit; running with `--docker` is the isolation upgrade, and
-the composition never touches the API process.
+**Length, narration and captions belong to the product.** They are assembled
+around the author's component in the renderer project, not spliced into what
+the author wrote. A composition can no longer end before the voice does, and
+an author who adds captions anyway cannot end up with two sets on screen.
 
-**Video is slow and large.** Seconds of footage take tens of seconds to render
-and megabytes to store, so duration and resolution are capped here rather than
-discovered when a worker runs out of memory or the artifact ceiling rejects the
-result after eight minutes of work.
+**Frames are looked at before anything is encoded.** A composition that
+compiles and renders eight seconds of empty gradient is the worst outcome
+there is, because nothing failed. Three small stills cost about a second;
+a wasted render costs minutes.
+
+**There is no network inside a render.** The subprocess gets a stripped
+environment and the composition may only use files this node put beside it.
+A model writing `<Img src="https://...">` would otherwise produce a video with
+a hole in it, and only at the end.
+
+Two consequences worth stating plainly, unchanged from the previous renderer:
+this executes JavaScript that a model wrote, at the same trust level as the
+Code node; and video is slow and large, so duration and resolution are capped
+here rather than discovered when a worker runs out of memory.
+
+Licence: Remotion is source-available, free for individuals and organisations
+of up to three people, and paid above that. See docs/video.md.
 """
 
 from __future__ import annotations
 
-import asyncio
+import io
 import json
-import os
 import re
-import shlex
-import shutil
-import tempfile
-from pathlib import Path
 from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
 from basivo_orch.flows.nodes.base import Node, NodeContext, NodeError, NodeResult
+from basivo_orch.flows.nodes.remotion import (
+    MAX_DURATION_SECONDS,
+    RENDER_TIMEOUT_SECONDS,
+    RenderJob,
+    probe,
+    render,
+)
 from basivo_orch.flows.nodes.video_templates import TEMPLATES
 from basivo_orch.flows.templating import render_value
 
-#: Pinned rather than `latest`: the renderer's version is part of what makes a
-#: composition reproducible, and a silent upgrade mid-project is a changed
-#: video nobody asked for. Override with BASIVO_HYPERFRAMES_BIN.
-HYPERFRAMES_PACKAGE = "hyperframes@0.8.3"
+#: The sizes people actually publish at, named by where they go rather than by
+#: their numbers. Somebody making a story does not think "1080 by 1920".
+SIZES: dict[str, tuple[int, int]] = {
+    "landscape": (1920, 1080),
+    "square": (1080, 1080),
+    "story": (1080, 1920),
+}
 
-#: How long a render may take in total. Generous — a minute of 1080p is real
-#: work — but finite, because a browser that never finishes a frame otherwise
-#: holds a worker slot forever.
-RENDER_TIMEOUT_SECONDS = 900
-
-#: What a composition may declare. Beyond this the wait and the file size stop
-#: being reasonable for a queue that also runs everything else.
-MAX_DURATION_SECONDS = 120
-
-
-#: What an agent must be told to produce a composition that renders.
-#:
-#: Shipped as part of the product rather than left for each user to rediscover:
-#: every rule here corresponds to a way a model-written composition fails, and
-#: the worst of them (no exposed timeline) fails *silently* as a still image.
-COMPOSITION_INSTRUCTIONS = """You write HyperFrames video compositions: one HTML file that a
-headless browser renders frame by frame into MP4.
-
-THE CONTRACT — breaking any of these renders wrong, or not at all:
-1. One root element:
-   <div id="stage" data-composition-id="promo" data-start="0"
-        data-duration="<seconds>" data-width="1920" data-height="1080" data-fps="30">
-   #stage must set overflow:hidden and those exact pixel dimensions.
-2. Content lives in elements with class="clip" plus data-start, data-duration
-   and data-track-index.
-3. Load GSAP from https://cdn.jsdelivr.net/npm/gsap@3/dist/gsap.min.js
-4. Build ONE paused timeline and expose it — without this the video is a still
-   image and nothing says why:
-     const tl = gsap.timeline({ paused: true });
-     tl.from('#a', { opacity: 0, y: 40, duration: .8 }, 0.2);
-     window.__timelines = window.__timelines || {};
-     window.__timelines['promo'] = tl;
-   Every tween needs an explicit position argument (the number after the vars).
-5. Everything inline. No external CSS, no images, no web fonts — system fonts,
-   CSS gradients and shapes only. Anything fetched may not arrive in time.
-6. Several scenes are made by animating the opacity and position of separate
-   .clip elements at different times. Never by changing the DOM.
-
-STYLE: high contrast, large type, generous spacing, one idea per scene.
-
-Reply with ONLY the HTML document. No markdown fences, no commentary."""
-
-#: What a composition must contain to render as video rather than a still.
-_REQUIRED = (
-    ("data-composition-id", 'a root <div id="stage" data-composition-id=...>'),
-    ("data-duration", "data-duration on the root element"),
-    ("window.__timelines", "the paused GSAP timeline exposed on window.__timelines"),
-)
+SIZE_LABELS = {
+    "landscape": "Landscape, YouTube or a website (1920 x 1080)",
+    "square": "Square, Instagram post (1080 x 1080)",
+    "story": "Vertical, Story, Reel or Short (1080 x 1920)",
+}
 
 
 def strip_code_fences(text: str) -> str:
-    """Unwrap ```html … ``` if a model wrapped its answer.
+    """Take the code out of a model's reply.
 
-    Models are told not to, and do it anyway perhaps one time in five.
-    Rendering a fence produces a video of the literal characters ```html,
-    which is a baffling thing to receive.
+    Models wrap code in fences roughly half the time, whatever the prompt
+    says, and a fence in the first line of a composition is a syntax error.
     """
     stripped = text.strip()
     if not stripped.startswith("```"):
         return stripped
-    body = stripped.split("\n", 1)[1] if "\n" in stripped else ""
-    if body.rstrip().endswith("```"):
-        body = body.rstrip()[:-3]
-    return body.strip()
+    lines = stripped.splitlines()
+    lines = lines[1:]
+    if lines and lines[-1].strip().startswith("```"):
+        lines = lines[:-1]
+    return "\n".join(lines).strip()
 
 
-def missing_images(html: str, available: set[str]) -> list[str]:
-    """Filenames the composition asks for that will not be there.
+def message_text_of(message: Any) -> str:
+    """The text of a model reply, whichever shape the provider used.
 
-    A browser renders a missing image as nothing at all: no error, no log, just
-    a blank where a photograph should be, discovered when someone watches the
-    finished video. Since the model is told exactly which names exist, asking
-    for another is a mistake worth sending back to it rather than rendering.
-
-    External URLs are the same failure with a different cause — the renderer
-    has no network for assets — so they are reported together.
+    Anthropic and Gemini answer with a list of content blocks; OpenAI answers
+    with a string. Reading `.content` alone gives `[{'type': 'text', ...}]` as
+    a repr, which then fails to compile as a composition with an error that
+    mentions none of this.
     """
-    import re as _re
+    content = getattr(message, "content", message)
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, str):
+                parts.append(block)
+            elif isinstance(block, dict) and block.get("type") == "text":
+                parts.append(str(block.get("text", "")))
+        return "\n".join(parts)
+    return str(content)
 
-    asked = set(_re.findall(r"""(?:src|href)=["']([^"']+)["']""", html))
+
+# ---------------------------------------------------------------------------
+# Reading a composition before it costs anything
+# ---------------------------------------------------------------------------
+
+#: What a composition may import. Everything else is either unavailable inside
+#: the bundle or a way to reach the network, and a model reaches for both.
+ALLOWED_IMPORTS = {"react", "remotion", "react/jsx-runtime", "react-dom"}
+
+#: Elements the product owns. An author who adds one gets two of them on
+#: screen, or a missing file that fails the render outright: told "a voice is
+#: already recorded", a model helpfully added its own audio tag pointing at a
+#: file that does not exist.
+RESERVED_ELEMENTS = ("<Audio", "<Video", "<OffthreadVideo", "<IFrame")
+
+#: One of these has to appear, or the composition is a still image that took
+#: several minutes to encode.
+MOTION_HOOKS = ("useCurrentFrame", "spring(", "interpolate(", "<Sequence", "<Series")
+
+_IMPORT = re.compile(r"""(?:from|import)\s+["']([^"']+)["']""")
+_STATIC_FILE = re.compile(r"""staticFile\(\s*["']([^"']+)["']\s*\)""")
+_URL = re.compile(r"""["'](https?://[^"']+)["']""")
+
+
+def scene_problems(scene: str, *, assets: set[str] | None = None) -> list[str]:
+    """Everything wrong with a composition that can be seen without rendering.
+
+    Each check here is a failure that has actually happened, and each message
+    is written to be handed straight back to the model that wrote the file.
+    """
     problems: list[str] = []
-    for reference in sorted(asked):
-        if reference.startswith(("data:", "#")):
-            continue
-        if reference.startswith(("http://", "https://")):
-            # The GSAP tag is the one exception, and it is in the shell we
-            # provide rather than something the model chose.
-            if "gsap" not in reference:
-                problems.append(f"references {reference}, and the renderer has no network")
-            continue
-        if reference not in available:
+    text = scene.strip()
+
+    if not text:
+        return ["There is no composition at all."]
+
+    if "export default" not in text:
+        problems.append(
+            "There is no default export. The file must end with a component exported as "
+            "`export default function Scene(props) { ... }`."
+        )
+
+    for module in sorted({name for name in _IMPORT.findall(text)}):
+        base = module.split("/")[0] if not module.startswith(".") else module
+        if module.startswith("."):
             problems.append(
-                f"references {reference!r}, which does not exist"
-                + (f" (available: {', '.join(sorted(available))})" if available else "")
+                f"It imports {module!r}. There is only one file, so it cannot import another."
             )
+        elif module not in ALLOWED_IMPORTS and base not in ALLOWED_IMPORTS:
+            problems.append(
+                f"It imports {module!r}, which is not available. Only 'react' and 'remotion' "
+                "can be imported."
+            )
+
+    for element in RESERVED_ELEMENTS:
+        if element in text:
+            problems.append(
+                f"It uses {element}>. Audio and video are added around the composition, so "
+                "remove it and write only the visuals."
+            )
+
+    if not any(marker in text for marker in MOTION_HOOKS):
+        problems.append(
+            "Nothing in it moves. Drive every position, scale and opacity from "
+            "useCurrentFrame(), or the result is a still image."
+        )
+
+    if urls := _URL.findall(text):
+        problems.append(
+            f"It points at {urls[0]}. There is no network during a render, so anything "
+            "loaded from a URL renders as an empty space."
+        )
+
+    if assets is not None:
+        wanted = set(_STATIC_FILE.findall(text))
+        if missing := sorted(wanted - assets):
+            offer = ", ".join(sorted(assets)) or "none"
+            problems.append(
+                f"It asks for {missing[0]!r}, which does not exist. The files available are: "
+                f"{offer}."
+            )
+
     return problems
 
 
-def composition_problems(html: str) -> list[str]:
-    """What is missing from this composition, in words a person can act on.
+# ---------------------------------------------------------------------------
+# Looking at the frames
+# ---------------------------------------------------------------------------
+#
+# A composition can compile, render, and be worthless: an animation that
+# starts after the video ends, a scene that never becomes opaque, text the
+# same colour as the background it sits on. None of that fails. So a handful
+# of frames are rendered small and inspected, and the model is told what was
+# actually on screen rather than being asked to imagine it.
 
-    Checked before rendering because the alternative is discovering it after
-    several minutes of CPU — and because the commonest failure, a composition
-    with no exposed timeline, renders *successfully* as a motionless video.
+#: Below this, a frame is one flat colour: nothing has been drawn, or
+#: everything drawn is still invisible.
+FLAT_FRAME_STDDEV = 4.0
+
+#: Below this, two frames are the same picture. Compression noise and a
+#: gradient that shifted by a pixel both sit under it.
+IDENTICAL_FRAME_DIFFERENCE = 1.2
+
+#: How many frames to look at. Three catches the common failures (nothing at
+#: the start, nothing in the middle, an empty ending) and costs about a
+#: second; more would be a second each for a verdict that rarely changes.
+PROBE_POINTS = (0.12, 0.5, 0.88)
+
+
+def probe_frames(duration_seconds: float, fps: int) -> list[int]:
+    """Which frames to look at, spread across the video."""
+    last = max(0, round(duration_seconds * fps) - 1)
+    return sorted({min(last, max(0, round(last * point))) for point in PROBE_POINTS})
+
+
+def _grey(png: bytes):
+    from PIL import Image
+
+    return Image.open(io.BytesIO(png)).convert("L")
+
+
+def frame_spread(png: bytes) -> float:
+    """How much the pixels in a frame differ from each other.
+
+    Zero is a single flat colour. A frame with type on it is well above the
+    threshold; a gradient alone sits just under it, which is exactly the case
+    worth catching.
     """
-    return [f"missing {description}" for marker, description in _REQUIRED if marker not in html]
+    from PIL import ImageStat
+
+    return float(ImageStat.Stat(_grey(png)).stddev[0])
 
 
-def hyperframes_command() -> list[str]:
-    """How to invoke the renderer here.
+def frame_difference(first: bytes, second: bytes) -> float:
+    """How much two frames differ, on average, per pixel.
 
-    Ordered by how much the operator has said: an explicit binary wins, then a
-    `hyperframes` already on PATH (what a worker image installs), and only then
-    `npx`, which downloads on first use and is the developer-laptop path.
+    Compared at a small size on purpose: the question is whether the picture
+    changed, not whether a pixel did, and a thumbnail answers it in a
+    millisecond.
     """
-    explicit = os.environ.get("BASIVO_HYPERFRAMES_BIN", "").strip()
-    if explicit:
-        return shlex.split(explicit)
-    installed = shutil.which("hyperframes")
-    if installed:
-        return [installed]
-    return ["npx", "--yes", HYPERFRAMES_PACKAGE]
+    from PIL import ImageChops, ImageStat
+
+    a = _grey(first).resize((64, 36))
+    b = _grey(second).resize((64, 36))
+    return float(ImageStat.Stat(ImageChops.difference(a, b)).mean[0])
+
+
+def review_frames(frames: list[bytes], *, seconds: list[float]) -> list[str]:
+    """What is wrong with what the video actually shows."""
+    problems: list[str] = []
+    if not frames:
+        return ["Nothing could be rendered from this composition."]
+
+    spreads = [frame_spread(frame) for frame in frames]
+    blank_at = [
+        seconds[index] if index < len(seconds) else float(index)
+        for index, spread in enumerate(spreads)
+        if spread < FLAT_FRAME_STDDEV
+    ]
+    if len(blank_at) == len(frames):
+        problems.append(
+            "Every frame is a flat colour. Nothing is drawn, or everything drawn is still "
+            "invisible when the video is over. Make the first element visible within the "
+            "first half second."
+        )
+    elif blank_at:
+        moments = ", ".join(f"{moment:.1f}s" for moment in blank_at)
+        problems.append(
+            f"The frame at {moments} is empty. Something must be on screen at every moment, "
+            "so overlap the scenes rather than leaving a gap between them."
+        )
+
+    if len(frames) > 1:
+        changes = [frame_difference(frames[i], frames[i + 1]) for i in range(len(frames) - 1)]
+        if max(changes) < IDENTICAL_FRAME_DIFFERENCE:
+            problems.append(
+                "The picture never changes. This is a still image with a running time. "
+                "Move, fade or scale something across the whole length of the video."
+            )
+
+    return problems
+
+
+# ---------------------------------------------------------------------------
+# video.render — a composition in, an MP4 out
+# ---------------------------------------------------------------------------
 
 
 class VideoRenderConfig(BaseModel):
     model_config = {"extra": "forbid"}
 
-    template: Literal["product_promo", "announcement", "stat_reveal", "anime_title", "custom"] = (
-        "product_promo"
+    template: Literal[
+        "brand_intro",
+        "product_demo",
+        "workflow_explainer",
+        "feature_launch",
+        "announcement",
+        "stat_reveal",
+        "quote",
+        "title_card",
+        "custom",
+    ] = Field(default="feature_launch", title="Template")
+    #: Only read when the template is "custom": a React component, exported as
+    #: the default, using nothing but react and remotion.
+    scene: str = Field(
+        default="",
+        max_length=400_000,
+        title="Your own composition",
+        description="A React component, exported as the default. Only used for a custom video.",
     )
-    #: Only read when template is "custom". A full HyperFrames composition.
-    html: str = Field(default="", max_length=800_000, description="Your own composition HTML.")
-    #: Values for the chosen template, as JSON. Templated, so an agent upstream
+    #: Values the composition reads as props. Templated, so an upstream node
     #: can write the copy: {"headline": "{{ nodes.writer.output.text }}"}.
-    variables: str = Field(
-        default="{}",
-        max_length=20_000,
-        description='JSON of values, e.g. {"headline": "{{ nodes.copy.output.text }}"}.',
+    props: str = Field(
+        default="",
+        max_length=40_000,
+        title="Values",
+        description='JSON of values, e.g. {"headline": "{{ nodes.writer.output.text }}"}.',
     )
+    #: Artifact ids of images the composition may show, in order. They arrive
+    #: beside the composition as p0.png, p1.png and so on.
+    images: str = Field(
+        default="",
+        title="Images",
+        max_length=4_000,
+        description="Artifact ids of images to use, newest first. They become p0.png, p1.png.",
+    )
+    size: Literal["landscape", "square", "story"] = Field(
+        default="landscape", title="Size", json_schema_extra={"x-enum-labels": SIZE_LABELS}
+    )
+    duration_seconds: float = Field(default=0, ge=0, le=MAX_DURATION_SECONDS, title="Length")
     format: Literal["mp4", "webm", "gif"] = "mp4"
     quality: Literal["draft", "standard", "high"] = "standard"
     fps: int = Field(default=30, ge=1, le=60)
-    #: Each worker is a separate Chrome (~256MB). Two is a sane default for a
-    #: container that is also running everything else.
-    #: Chromium processes the renderer may run in parallel. Each is roughly
-    #: 256MB and one core, so the deployment decides the default
-    #: (BASIVO_RENDER_WORKERS) rather than the flow author: two containers each
-    #: launching four browsers on a four-core box is slower than either doing
-    #: it alone, and much closer to the memory limit.
-    workers: int = Field(
-        default_factory=lambda: max(1, min(8, int(os.environ.get("BASIVO_RENDER_WORKERS", "2")))),
-        ge=1,
-        le=8,
-    )
+    background: str = Field(default="#0b1020", max_length=32, title="Background")
     filename: str = Field(default="video", max_length=100)
 
     @model_validator(mode="after")
-    def _custom_needs_html(self) -> VideoRenderConfig:
-        if self.template == "custom" and not self.html.strip():
-            raise ValueError("A custom video needs its composition HTML.")
+    def _custom_needs_a_composition(self) -> VideoRenderConfig:
+        if self.template == "custom" and not self.scene.strip():
+            raise ValueError("A custom video needs its composition.")
         return self
 
     @model_validator(mode="after")
-    def _variables_must_be_json(self) -> VideoRenderConfig:
-        raw = self.variables.strip()
-        if not raw:
-            return self
-        # `{{ template }}` markers are not JSON until they are rendered, so a
-        # value containing one is checked at run time instead of here.
-        if "{{" in raw:
+    def _props_must_be_json(self) -> VideoRenderConfig:
+        raw = self.props.strip()
+        if not raw or "{{" in raw:
+            # A value holding a `{{ reference }}` is not JSON until it has been
+            # filled in, so it is checked at run time instead.
             return self
         try:
             parsed = json.loads(raw)
         except ValueError as exc:
-            raise ValueError(f"Variables must be a JSON object: {exc}") from exc
+            raise ValueError(f"Values must be a JSON object: {exc}") from exc
         if not isinstance(parsed, dict):
-            raise ValueError("Variables must be a JSON object, not a list or a bare value.")
+            raise ValueError("Values must be a JSON object, not a list or a bare value.")
         return self
 
-    def composition(self) -> str:
-        return self.html if self.template == "custom" else TEMPLATES[self.template]
+    def dimensions(self) -> tuple[int, int]:
+        return SIZES[self.size]
 
 
 class VideoRenderNode(Node):
-    """A composition in, an MP4 out."""
+    """A composition in, a video file out."""
 
     type = "video.render"
-    label = "HTML to Video"
-    description = "Turn an animated HTML composition into an MP4."
+    label = "Make a Video"
+    description = "Render a template, or your own React composition, into a video file."
     when = (
-        "You already have an animated HTML composition, from a template or your own, and want "
-        "the video file."
+        "You know what the video should look like and only the words change. Pick a template, "
+        "wire the copy in from an earlier node, and this renders it every time it runs."
     )
     needs = ("A trigger before it, or any node whose output it should work on",)
-    example = "Set Variables -> HTML to Video -> Telegram Reply"
+    example = "Schedule -> Write with AI -> Make a Video -> Post to Social"
     tier = 2
     category = "design"
     config_model = VideoRenderConfig
     output_paths = ("artifact_id", "url", "duration_seconds", "size_bytes", "format")
 
-    #: A browser capturing every frame, then an encode. The heaviest thing
-    #: this product does.
+    #: A browser drawing every frame, then an encode. The heaviest thing this
+    #: product does.
     heavy: ClassVar[bool] = True
-    #: One attempt: a retry means another several minutes of the same work, and
-    #: a render that failed on the composition will fail again identically.
+    #: One attempt: a retry is another several minutes of identical work, and a
+    #: composition that failed will fail the same way again.
     max_attempts = 1
     timeout_seconds = float(RENDER_TIMEOUT_SECONDS + 60)
 
     async def run(self, config: VideoRenderConfig, ctx: NodeContext) -> NodeResult:
         template_context = ctx.template_context()
-        variables = _resolve_variables(config.variables, template_context)
-        html = strip_code_fences(str(render_value(config.composition(), template_context)))
+        chosen = TEMPLATES.get(config.template)
 
-        if problems := composition_problems(html):
-            raise NodeError(
-                "This composition will not render as video: "
-                + "; ".join(problems)
-                + ". It needs a root #stage with data-duration and a paused GSAP timeline on "
-                "window.__timelines. If an agent wrote it, put the composition instructions "
-                "in that agent's system prompt."
-            )
+        scene = (
+            strip_code_fences(str(render_value(config.scene, template_context)))
+            if config.template == "custom"
+            else chosen.scene
+        )
+        props = _resolve_props(config.props, template_context)
+        if chosen is not None:
+            # The template's own example values fill any gap, so a template
+            # rendered with nothing configured is still a finished video rather
+            # than a frame of undefined.
+            props = {**chosen.props, **props}
 
-        duration = _declared_duration(html)
-        if duration > MAX_DURATION_SECONDS:
+        duration = config.duration_seconds or (chosen.duration_seconds if chosen else 8.0)
+        background = config.background or (chosen.background if chosen else "#0b1020")
+        width, height = config.dimensions()
+
+        assets = await _load_images(config.images, ctx)
+        if problems := scene_problems(scene, assets=set(assets)):
             raise NodeError(
-                f"This composition is {duration:g}s and the limit is {MAX_DURATION_SECONDS}s. "
-                "Render it in parts, or shorten it."
+                "This composition will not render: "
+                + " ".join(problems)
+                + (
+                    " If an agent wrote it, put the composition rules in that agent's prompt."
+                    if config.template == "custom"
+                    else ""
+                )
             )
 
         await ctx.step(
@@ -281,16 +428,29 @@ class VideoRenderNode(Node):
                 "format": config.format,
                 "quality": config.quality,
                 "fps": config.fps,
+                "size": config.size,
                 "duration_seconds": duration,
-                "variables": list(variables),
+                "images": len(assets),
+                "props": sorted(props),
             },
         )
         await ctx.progress(f"Rendering {duration:g}s of {config.format}. This takes a while")
 
-        data, logs = await _render(html, variables=variables, config=config)
-
+        job = RenderJob(
+            scene_tsx=scene,
+            width=width,
+            height=height,
+            fps=config.fps,
+            duration_seconds=duration,
+            props=props,
+            background=background,
+            fmt=config.format,
+            quality=config.quality,
+            assets=assets,
+        )
+        data, info = await render(job)
         if not data:
-            raise NodeError(f"The renderer produced no file. Its last words:\n{logs[-1200:]}")
+            raise NodeError("The renderer finished but produced no file.")
 
         saved = await ctx.save_artifact(
             data,
@@ -301,707 +461,128 @@ class VideoRenderNode(Node):
             node_id=ctx.node_id,
         )
         await ctx.step("video.finished", {**saved, "duration_seconds": duration})
-
         return NodeResult(
-            output={**saved, "duration_seconds": duration, "format": config.format},
+            output={
+                **saved,
+                "duration_seconds": duration,
+                "format": config.format,
+                "width": info.get("width", width),
+                "height": info.get("height", height),
+            }
         )
 
 
-def _resolve_variables(raw: str, template_context: dict[str, Any]) -> dict[str, Any]:
-    """Render `{{ … }}` inside the variables, then parse them as JSON."""
-    rendered = str(render_value(raw, template_context)) if raw.strip() else "{}"
+def _resolve_props(raw: str, template_context: dict[str, Any]) -> dict[str, Any]:
+    """Fill in `{{ references }}`, then read the result as JSON."""
+    if not raw.strip():
+        return {}
+    rendered = str(render_value(raw, template_context))
     try:
         parsed = json.loads(rendered)
     except ValueError as exc:
         raise NodeError(
-            f"The variables did not come out as JSON after filling in references: {exc}. "
-            "A value containing quotes or newlines needs escaping. Ask the agent for plain text."
+            f"The values did not come out as JSON after filling in the references: {exc}. "
+            "A value containing quotes or newlines needs escaping. Ask the agent that wrote "
+            "it for plain text."
         ) from exc
     if not isinstance(parsed, dict):
-        raise NodeError("Variables must be a JSON object.")
+        raise NodeError("The values must be a JSON object, not a list or a bare value.")
     return parsed
 
 
-def _declared_duration(html: str) -> float:
-    """The composition's own `data-duration`, or a conservative default."""
-    match = re.search(r'data-duration=["\']([0-9.]+)["\']', html)
-    return float(match.group(1)) if match else 10.0
+#: How many images one video may use. Past this the render is long enough that
+#: the wait stops being reasonable, and the composition stops being readable.
+MAX_IMAGES = 12
 
 
-#: A render will not start with less than this much free disk. Frames for a
-#: 30-second 1080p video are hundreds of megabytes before they are encoded and
-#: thrown away, and on a box where the database shares the volume, filling the
-#: disk does not fail a render — it stops Postgres accepting writes, which
-#: takes the whole product down. Failing one node with a clear message is the
-#: cheaper outcome by a wide margin.
-MIN_FREE_DISK_GB = float(os.environ.get("BASIVO_MIN_FREE_DISK_GB", "3"))
+async def _load_images(reference: str, ctx: NodeContext) -> dict[str, bytes]:
+    """Fetch the images a composition may show, named p0, p1, p2.
 
+    Named by position rather than by artifact id, because the composition has
+    to be written before the ids are known, and a model asked to remember a
+    UUID will invent one.
+    """
+    if not reference.strip():
+        return {}
 
-def free_disk_gb(path: str | None = None) -> float:
-    usage = shutil.disk_usage(path or tempfile.gettempdir())
-    return usage.free / 1_073_741_824
+    from basivo_orch.flows.nodes.montage import _photo_ids
 
-
-def ensure_disk_space(minimum_gb: float = MIN_FREE_DISK_GB) -> None:
-    free = free_disk_gb()
-    if free < minimum_gb:
-        raise NodeError(
-            f"Only {free:.1f}GB of disk is free and a render needs at least "
-            f"{minimum_gb:g}GB of scratch space. Nothing was rendered. The "
-            "alternative is filling the disk the database is on. Free some space "
-            "or lower BASIVO_MIN_FREE_DISK_GB if you know better.",
-            retryable=False,
-        )
-
-
-async def _render(
-    html: str,
-    *,
-    variables: dict[str, Any],
-    config: VideoRenderConfig,
-    assets: dict[str, bytes] | None = None,
-) -> tuple[bytes, str]:
-    """Run the renderer in a scratch project. Returns (bytes, combined logs)."""
-    ensure_disk_space()
-    command = hyperframes_command()
-
-    with tempfile.TemporaryDirectory(prefix="basivo-video-") as workdir:
-        project = Path(workdir)
-        (project / "index.html").write_text(html, encoding="utf-8")
-        # Narration and any other local media the composition refers to by
-        # relative name. They have to be real files beside index.html: the
-        # renderer mixes audio with ffmpeg from the path on disk, not from
-        # whatever the browser managed to play.
-        for name, blob in (assets or {}).items():
-            (project / Path(name).name).write_bytes(blob)
-        output = project / f"out.{config.format}"
-
-        argv = [
-            *command,
-            "render",
-            str(project),
-            "-o",
-            str(output),
-            "-q",
-            config.quality,
-            "-f",
-            str(config.fps),
-            "--format",
-            config.format,
-            "-w",
-            str(config.workers),
-            "--quiet",
-        ]
-        if variables:
-            argv += ["--variables", json.dumps(variables)]
-
-        # A stripped environment: the renderer runs somebody's JavaScript, and
-        # it has no business seeing SECRET_KEY, DATABASE_URL, or a model key.
-        env = {
-            "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"),
-            "HOME": os.environ.get("HOME", workdir),
-            "TMPDIR": workdir,
-            "CI": "1",
-            "NO_COLOR": "1",
-        }
-
-        try:
-            process = await asyncio.create_subprocess_exec(
-                *argv,
-                cwd=workdir,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
-                env=env,
-            )
-        except FileNotFoundError as exc:
-            raise NodeError(
-                "The video renderer is not installed. Install it with "
-                f"`npm install -g {HYPERFRAMES_PACKAGE}` (Node 22+ and FFmpeg are required), "
-                "or set BASIVO_HYPERFRAMES_BIN to its path."
-            ) from exc
-
-        try:
-            stdout, _ = await asyncio.wait_for(
-                process.communicate(), timeout=RENDER_TIMEOUT_SECONDS
-            )
-        except TimeoutError:
-            process.kill()
-            await process.wait()
-            raise NodeError(
-                f"The render did not finish within {RENDER_TIMEOUT_SECONDS}s. Shorten the "
-                "composition, lower the quality, or reduce the frame rate."
-            ) from None
-
-        logs = (stdout or b"").decode("utf-8", errors="replace")
-        if process.returncode != 0:
-            raise NodeError(
-                f"The renderer failed (exit {process.returncode}). Its output:\n{logs[-1500:]}"
-            )
-        if not output.exists():
-            return b"", logs
-        return output.read_bytes(), logs
+    wanted = _photo_ids(render_value(reference, ctx.template_context()))
+    images: dict[str, bytes] = {}
+    for index, artifact_id in enumerate(wanted[:MAX_IMAGES]):
+        if ctx.load_artifact and (blob := await ctx.load_artifact(artifact_id)):
+            images[f"p{index}.png"] = blob
+    await ctx.step("video.images", {"count": len(images), "asked_for": len(wanted)})
+    return images
 
 
 # ---------------------------------------------------------------------------
-# video.generate — the agent writes, we check, it fixes, then we render
+# video.generate — the agent writes, we look, it fixes, then we render
 # ---------------------------------------------------------------------------
 #
 # One node rather than two wired together, because the interesting part is the
-# loop: a model cannot see what it wrote, so left alone it hands over a
-# composition that renders successfully as six seconds of empty gradient — the
-# worst outcome, since nothing failed. Between the model and the renderer this
-# node opens the composition in a browser, seeks the timeline, and asks the
-# page what is actually visible. If nothing is, the model is told so and tries
-# again. That check costs about a second; a wasted render costs minutes.
+# loop. A model cannot see what it wrote, so left alone it hands over a
+# composition that renders successfully as eight seconds of empty gradient.
+# Between the model and the encode this node renders three small frames and
+# looks at them, and tells the model what was actually on screen.
 
-#: When to look. Early, middle and late catches the common failures: a scene
-#: that never appears, one that leaves and never returns, an empty ending.
-#: Fractions of the composition to look at, for a short clip. Kept for the
-#: 6-second case where three points really is the whole video.
-PROBE_POINTS = (0.15, 0.5, 0.85)
+COMPOSITION_INSTRUCTIONS = """You write Remotion compositions: one React
+component that renders a video, frame by frame.
 
-#: How far apart to look, in seconds, once a composition is long enough for
-#: three points to miss things.
-PROBE_EVERY_SECONDS = 2.0
-#: A ceiling on the sampling. Each point is one JS evaluation on an
-#: already-loaded page, so they are cheap — but not free.
-MAX_PROBE_POINTS = 16
+Reply with ONLY the code. No explanation, no markdown fence.
 
+THE SHAPE, exactly:
 
-def probe_moments(duration: float) -> list[float]:
-    """Which seconds to inspect.
+    import React from "react";
+    import {AbsoluteFill, useCurrentFrame, useVideoConfig, interpolate,
+            spring, Sequence, Img, staticFile, Easing} from "remotion";
 
-    Three points caught a composition that was blank from start to finish, and
-    missed one that was blank for its last eight seconds — 0.85 of 30s is 25.5s,
-    and the dead zone sat between the samples. A 30-second video gets fourteen
-    looks instead of three, which is what it takes to notice a gap rather than
-    a total failure.
-
-    The last look is deliberately close to the end: the most common dead zone
-    is the tail, where the narration has finished and the animation has run
-    out of scenes.
-    """
-    if duration <= 8:
-        return [round(duration * fraction, 2) for fraction in PROBE_POINTS]
-
-    count = min(MAX_PROBE_POINTS, max(5, int(duration / PROBE_EVERY_SECONDS)))
-    step = duration / (count + 1)
-    moments = [round(step * (index + 1), 2) for index in range(count)]
-    tail = round(duration * 0.97, 2)
-    if tail - moments[-1] > 0.3:
-        moments.append(tail)
-    return moments
-
-
-#: Asks the page what a viewer would actually see at time `t`.
-_PROBE_JS = """(t) => {
-  const timelines = window.__timelines || {};
-  const timeline = Object.values(timelines)[0];
-  if (timeline && timeline.seek) timeline.seek(t);
-  const seen = [];
-  for (const el of document.querySelectorAll('h1,h2,h3,h4,p,span,div,li')) {
-    const first = el.childNodes.length ? el.childNodes[0].nodeValue : '';
-    const text = (first || '').trim();
-    if (!text) continue;
-    const style = getComputedStyle(el);
-    const box = el.getBoundingClientRect();
-    // Opacity does NOT inherit as a computed value: a heading inside a
-    // `.clip` at opacity 0 still computes to opacity 1, and reading only its
-    // own style passed a composition that rendered thirty seconds of black.
-    // So the whole ancestor chain is multiplied out.
-    let effective = 1;
-    for (let node = el; node && node.nodeType === 1; node = node.parentElement) {
-      const nodeStyle = node === el ? style : getComputedStyle(node);
-      if (nodeStyle.visibility === 'hidden' || nodeStyle.display === 'none') {
-        effective = 0; break;
-      }
-      effective *= parseFloat(nodeStyle.opacity);
-      if (effective <= 0.05) break;
+    export default function Scene({headline}) {
+      const frame = useCurrentFrame();
+      const {fps, durationInFrames, width, height} = useVideoConfig();
+      ...
+      return <AbsoluteFill style={{...}}>...</AbsoluteFill>;
     }
-    if (effective > 0.05 && box.width > 0 && box.height > 0) {
-      seen.push(text.slice(0, 60));
-    }
-  }
-  return seen;
-}"""
 
+RULES, each of which is a way a video comes out broken:
 
-async def probe_composition(
-    html: str, *, width: int, height: int, duration: float
-) -> tuple[dict[float, list[str]], list[str]]:
-    """What is visible at a few moments, and any JavaScript that broke.
+1. Import from "react" and "remotion" and nothing else. There is no other
+   package, and no network.
+2. Everything is a function of `frame`. A CSS animation or a transition does
+   not exist here: every frame is drawn on its own, so anything not derived
+   from `frame` is frozen for the whole video.
+3. Read every size from useVideoConfig(). Never write a pixel size that
+   assumes 1920 by 1080; the same composition is rendered vertically.
+4. Derive timings from durationInFrames, never from a number of seconds you
+   assumed. A composition asked for 20 seconds that animates for 6 leaves 14
+   seconds of nothing.
+5. Something is visible from frame 0 and something is still moving at the end.
+   Fade the first element in over the first 12 frames, not after a second.
+6. No <Audio>, <Video> or <OffthreadVideo>, and no captions. Narration and
+   subtitles are added around your composition. Adding your own gives the
+   viewer two of them.
+7. Images, when you are given them, are shown with
+   <Img src={staticFile("p0.png")} /> using exactly the names you are given.
+   Any other name renders as nothing at all.
+8. Fonts: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial,
+   sans-serif. There are no web fonts.
+9. Type is large. A headline is at least height/12; body text at least
+   height/26. This is watched on a phone.
+10. Contrast is not optional: light type on a dark ground or the reverse,
+    never mid-grey on mid-grey.
 
-    Returns ({time: [visible text]}, [js errors]). A composition whose script
-    threw has no timeline at all, which is worth saying in those words rather
-    than reporting as "nothing visible".
-    """
-    from playwright.async_api import async_playwright
+USEFUL PATTERNS:
 
-    errors: list[str] = []
-    visible: dict[float, list[str]] = {}
+    const enter = interpolate(frame, [0, 12], [0, 1], {extrapolateRight: "clamp"});
+    const pop = spring({frame: frame - 10, fps, config: {damping: 14}});
+    <Sequence from={fps * 2} durationInFrames={fps * 3}>...</Sequence>
+    const drift = interpolate(frame, [0, durationInFrames], [1.05, 1.15]);"""
 
-    async with async_playwright() as playwright:
-        browser = await playwright.chromium.launch(args=["--no-sandbox"])
-        try:
-            page = await (
-                await browser.new_context(viewport={"width": width, "height": height})
-            ).new_page()
-            page.on("pageerror", lambda exc: errors.append(str(exc)[:200]))
-            await page.set_content(html, wait_until="load")
-            # GSAP arrives from a CDN; the timeline does not exist until it has.
-            await page.wait_for_timeout(900)
-            for moment in probe_moments(duration):
-                try:
-                    visible[moment] = await page.evaluate(_PROBE_JS, moment)
-                except Exception as exc:  # noqa: BLE001 — a broken page is data
-                    errors.append(str(exc)[:200])
-                    visible[moment] = []
-        finally:
-            await browser.close()
-
-    return visible, errors
-
-
-def review(
-    html: str,
-    visible: dict[float, list[str]],
-    errors: list[str],
-    available_images: set[str] | None = None,
-) -> list[str]:
-    """Everything wrong with this composition, phrased for the model that wrote it."""
-    problems = composition_problems(html)
-    problems += missing_images(html, available_images or set())
-    problems += [f"JavaScript error: {error}" for error in errors]
-
-    empty = [str(moment) for moment, texts in visible.items() if not texts]
-    if len(empty) == len(visible) and visible:
-        problems.append(
-            "nothing at all is visible at any point — the most likely cause is animating "
-            "`from` a value the element already has (tl.from(el, {opacity: 0}) when the CSS "
-            "already sets opacity: 0 animates from 0 to 0). Set the resting state to visible "
-            "and animate `from` the hidden state, or use tl.fromTo with both ends explicit"
-        )
-    elif empty:
-        problems.append(
-            f"nothing is visible at {', '.join(empty)}s — a scene either never appears or "
-            "leaves a gap. Every moment of the video should show something"
-        )
-    return problems
-
-
-class VideoGeneratorConfig(BaseModel):
-    """Describe the video; the agent writes it and this node checks its work."""
-
-    model_config = {"extra": "forbid"}
-
-    brief: str = Field(
-        min_length=1,
-        max_length=8000,
-        description="What the video should say and feel like. Supports {{ references }}.",
-    )
-    style: str = Field(
-        default="",
-        max_length=2000,
-        description="Art direction: colours, mood, brand. Optional.",
-    )
-    duration_seconds: int = Field(default=6, ge=2, le=60)
-    size: Literal["landscape", "square", "story"] = Field(
-        default="landscape",
-        title="Size",
-        json_schema_extra={
-            "x-enum-labels": {
-                "landscape": "Landscape, YouTube (1920 x 1080)",
-                "square": "Square, Instagram post (1080 x 1080)",
-                "story": "Vertical, Story or Reel (1080 x 1920)",
-            }
-        },
-    )
-
-    #: Photographs the composition may use, as artifact ids or a reference —
-    #: usually {{ input.photo_ids }} from a conversation. Without these an
-    #: agent-written video can only be type and colour, which for a photography
-    #: studio is the whole thing missing.
-    photos: str = Field(default="", title="Photos", max_length=4_000)
-
-    provider: str = Field(default="openai", max_length=48)
-    model: str = Field(default="", max_length=160)
-    credential_id: str = Field(
-        default="", title="Model credential", description="The saved key the model is called with."
-    )
-
-    #: How many times the agent may revise before this gives up. Each round is
-    #: one model call plus about a second of checking — cheap next to a render.
-    max_attempts: int = Field(default=3, ge=1, le=6)
-    format: Literal["mp4", "webm", "gif"] = "mp4"
-    quality: Literal["draft", "standard", "high"] = "standard"
-    fps: int = Field(default=30, ge=1, le=60)
-    filename: str = Field(default="video", max_length=100)
-    #: Keep a still from the accepted composition, so the run shows what was
-    #: made without anyone downloading the video.
-    save_preview: bool = True
-
-    # -- voice ---------------------------------------------------------------
-    #: Narrate the video. The agent writes a script first, it is spoken, and
-    #: the animation is then authored to the length the voice actually took —
-    #: the other order cuts the tail off every line.
-    narration: bool = Field(
-        default=False,
-        title="Add a voice-over",
-        description=(
-            "The agent writes a short script from the brief, a voice reads it, and the "
-            "animation is timed to the speech. No speech API or key needed."
-        ),
-    )
-    voice: str = Field(default="af_heart", max_length=40, title="Voice")
-    voice_speed: float = Field(default=1.0, ge=0.5, le=2.0, title="Voice speed")
-    #: Word-level captions, timed from the model's own phoneme durations.
-    #: On by default when narrating: short-form video is mostly watched muted,
-    #: so a narrated video without captions says nothing to half its audience.
-    captions: bool = Field(
-        default=True,
-        title="Captions",
-        description=(
-            "Word-timed captions when a voice-over is on. Most short video is watched muted."
-        ),
-    )
-
-    def dimensions(self) -> tuple[int, int]:
-        return {"landscape": (1920, 1080), "square": (1080, 1080), "story": (1080, 1920)}[self.size]
-
-
-class VideoGeneratorNode(Node):
-    """Brief in, finished video out — with the agent's revisions on the log."""
-
-    type = "video.generate"
-    label = "Describe a Video"
-    description = "Describe the video you want; an agent writes the animation and this renders it."
-    when = (
-        "A customer describes a video in words, optionally with photos, and should get an MP4 "
-        "back. This is the general path for any occasion."
-    )
-    needs = (
-        (
-            "An LLM credential (OpenAI, Anthropic, Gemini, Groq or another provider) saved under "
-            "Credentials"
-        ),
-        "Photos from the trigger or Prepare Photo, when the video should include them.",
-    )
-    example = "Telegram Bot -> Chat Memory -> Describe a Video -> Telegram Reply"
-    tier = 2
-    category = "design"
-    config_model = VideoGeneratorConfig
-    output_paths = (
-        "artifact_id",
-        "url",
-        "attempts",
-        "duration_seconds",
-        "preview_artifact_id",
-        "narration_artifact_id",
-        "script",
-        "words",
-    )
-    #: Speech, a browser probe per attempt, a still, then the render.
-    heavy: ClassVar[bool] = True
-    max_attempts = 1
-    timeout_seconds = float(RENDER_TIMEOUT_SECONDS + 300)
-
-    async def run(self, config: VideoGeneratorConfig, ctx: NodeContext) -> NodeResult:
-        from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
-
-        from basivo_orch.flows.nodes.models import build_chat_model
-
-        template_context = ctx.template_context()
-        brief = str(render_value(config.brief, template_context))
-        style = str(render_value(config.style, template_context)) if config.style else ""
-        width, height = config.dimensions()
-
-        model = await build_chat_model(
-            ctx,
-            provider=config.provider,
-            model=config.model,
-            credential_id=config.credential_id,
-            max_tokens=8000,
-            temperature=0.4,
-        )
-
-        # The voice comes first. Everything after this — the target duration,
-        # the scene timings offered to the agent — is derived from how long the
-        # narration actually turned out to be.
-        script, narration_audio, spoken_seconds, words = "", b"", 0.0, []
-        if config.narration:
-            script, narration_audio, spoken_seconds, words = await _narrate(
-                config, ctx, model=model, brief=brief, style=style
-            )
-
-        target_seconds = (
-            round(max(float(config.duration_seconds), spoken_seconds + 0.4), 1)
-            if config.narration
-            else float(config.duration_seconds)
-        )
-
-        # Photographs become real files beside index.html, and the model is
-        # told their names. It cannot be allowed to invent one: a filename that
-        # does not exist renders as an empty box, silently, in the middle of
-        # someone's wedding video.
-        from basivo_orch.flows.nodes.montage import _photo_ids
-
-        photo_assets: dict[str, bytes] = {}
-        if config.photos.strip():
-            wanted = _photo_ids(render_value(config.photos, ctx.template_context()))
-            for index, artifact_id in enumerate(wanted[:12]):
-                if ctx.load_artifact and (blob := await ctx.load_artifact(artifact_id)):
-                    photo_assets[f"p{index}.jpg"] = blob
-            await ctx.step("video.photos", {"count": len(photo_assets)})
-
-        instructions = (
-            f"{COMPOSITION_INSTRUCTIONS}\n\n"
-            f"This composition is {width}x{height}, exactly {target_seconds:g} seconds, "
-            f"{config.fps}fps."
-        )
-        if photo_assets:
-            instructions += (
-                "\n\nPHOTOGRAPHS ARE PROVIDED, sitting beside your HTML file. Reference "
-                "them by these exact names and no others: " + ", ".join(photo_assets) + ".\n"
-                "- Use every one of them, in order, unless the brief says otherwise.\n"
-                '- Full bleed: <img src="p0.jpg"> with width:100%; height:100%; '
-                "object-fit:cover.\n"
-                "- Give each one slow movement (a scale from 1.05 to 1.15 over its whole "
-                "time on screen) and cross-fade between them. A photograph held perfectly "
-                "still reads as a broken video.\n"
-                "- Put text over a darkened band or below the picture, never across a "
-                "face.\n"
-                "- Do not invent any other filename, and do not use an external URL: "
-                "there is no network and the frame would render empty."
-            )
-        if config.narration:
-            instructions += (
-                "\n\nA VOICE IS ALREADY RECORDED for this video and will play over it. "
-                f"It is {spoken_seconds:g} seconds long. The words, and the second each is "
-                "spoken:\n"
-                + _spoken_outline(words)
-                + "\n\nChange scene ON those moments, not on a round number — a cut that "
-                "lands on the word being said is the difference between a video and a "
-                "slideshow with sound. Do not add your own text captions at the bottom of "
-                "the frame; captions are added after you, and two sets would overlap."
-            )
-        conversation: list[Any] = [
-            SystemMessage(content=instructions),
-            HumanMessage(content=brief + (f"\n\nArt direction: {style}" if style else "")),
-        ]
-
-        await ctx.step(
-            "video.brief",
-            {
-                "model": config.model,
-                "size": config.size,
-                "duration_seconds": config.duration_seconds,
-                "max_attempts": config.max_attempts,
-            },
-        )
-
-        html = ""
-        accepted = False
-        for attempt in range(1, config.max_attempts + 1):
-            await ctx.progress(f"Attempt {attempt}: writing the animation")
-            reply = await model.ainvoke(conversation)
-            html = strip_code_fences(message_text_of(reply))
-
-            problems = review(
-                html,
-                *await probe_composition(
-                    html, width=width, height=height, duration=float(config.duration_seconds)
-                ),
-                available_images=set(photo_assets),
-            )
-            await ctx.step(
-                "video.attempt",
-                {"attempt": attempt, "characters": len(html), "problems": problems},
-            )
-
-            if not problems:
-                accepted = True
-                break
-
-            await ctx.progress(f"Attempt {attempt} had {len(problems)} problem(s). Revising")
-            conversation.append(AIMessage(content=html))
-            conversation.append(
-                HumanMessage(
-                    content=(
-                        "That composition does not work. Problems found by rendering it:\n"
-                        + "\n".join(f"- {problem}" for problem in problems)
-                        + "\n\nRewrite the whole composition, fixing these. "
-                        "Reply with ONLY the HTML."
-                    )
-                )
-            )
-
-        if not accepted:
-            raise NodeError(
-                f"The agent could not produce a working composition in {config.max_attempts} "
-                "attempts. The last problems were logged on this run. Raising the attempt "
-                "limit or simplifying the brief usually helps."
-            )
-
-        preview_id = ""
-        if config.save_preview:
-            # Aliased, not imported as `_render`: a local import inside this
-            # branch shadows the module-level `_render` for the WHOLE function,
-            # so with save_preview off the render below hit an unbound local.
-            from basivo_orch.flows.nodes.design import RenderConfig
-            from basivo_orch.flows.nodes.design import _render as render_still
-
-            frame = await render_still(
-                html,
-                width=width,
-                height=height,
-                config=RenderConfig(
-                    html="x",
-                    size="custom",
-                    width=width,
-                    height=height,
-                    scale=1,
-                    wait_for_fonts=False,
-                ),
-            )
-            saved_preview = await ctx.save_artifact(
-                frame,
-                filename=f"{config.filename}-preview.png",
-                content_type="image/png",
-                node_id=ctx.node_id,
-            )
-            preview_id = saved_preview["artifact_id"]
-            await ctx.step("video.preview", saved_preview)
-
-        assets: dict[str, bytes] = dict(photo_assets)
-        narration_id = ""
-        if config.narration and narration_audio:
-            lines = caption_lines(words) if config.captions else []
-            html, widened = ensure_duration(html, spoken_seconds + 0.3)
-            if widened:
-                # The agent was told the length and wrote something shorter.
-                # Rendering it would cut the voice off mid-word.
-                await ctx.step(
-                    "video.duration_widened",
-                    {"to_seconds": round(spoken_seconds + 0.3, 2), "reason": "narration is longer"},
-                )
-            html, captioned, dropped_audio = inject_narration(
-                html,
-                audio_name="narration.wav",
-                audio_seconds=spoken_seconds,
-                lines=lines,
-                width=width,
-                height=height,
-            )
-            if dropped_audio:
-                # Worth a line in the log: the composition tried to bring its
-                # own soundtrack, which would have failed the render outright.
-                await ctx.step(
-                    "video.audio_replaced",
-                    {
-                        "dropped": dropped_audio,
-                        "note": "The composition declared its own audio; the narration is used.",
-                    },
-                )
-            assets["narration.wav"] = narration_audio
-            saved_voice = await ctx.save_artifact(
-                narration_audio,
-                filename=f"{config.filename}-narration.wav",
-                content_type="audio/wav",
-                node_id=ctx.node_id,
-            )
-            narration_id = saved_voice["artifact_id"]
-            await ctx.step(
-                "video.narration_attached",
-                {
-                    **saved_voice,
-                    "seconds": spoken_seconds,
-                    "caption_lines": len(lines),
-                    "captions_rendered": captioned,
-                },
-            )
-            if config.captions and not captioned:
-                # Said out loud rather than left as a silent difference between
-                # what was asked for and what came out.
-                await ctx.progress(
-                    "Captions were skipped: the composition has no recognisable #stage to "
-                    "attach them to. The voice is still in the video."
-                )
-
-        await ctx.progress(f"Rendering {target_seconds:g}s of video")
-        data, logs = await _render(
-            html,
-            variables={},
-            config=VideoRenderConfig(
-                template="custom",
-                html=html,
-                format=config.format,
-                quality=config.quality,
-                fps=config.fps,
-                filename=config.filename,
-            ),
-            assets=assets,
-        )
-        if not data:
-            raise NodeError(f"The renderer produced no file. Its last words:\n{logs[-1200:]}")
-
-        saved = await ctx.save_artifact(
-            data,
-            filename=f"{config.filename}.{config.format}",
-            content_type={"mp4": "video/mp4", "webm": "video/webm", "gif": "image/gif"}[
-                config.format
-            ],
-            node_id=ctx.node_id,
-        )
-        await ctx.step("video.finished", {**saved, "attempts": attempt})
-
-        return NodeResult(
-            output={
-                **saved,
-                "attempts": attempt,
-                # The real length, which with narration is the voice's length
-                # rounded up — not the number that was asked for.
-                "duration_seconds": target_seconds,
-                "preview_artifact_id": preview_id,
-                "narration_artifact_id": narration_id,
-                "script": script,
-                "words": words,
-                "format": config.format,
-            }
-        )
-
-
-def message_text_of(message: Any) -> str:
-    from basivo_orch.flows.nodes.agent_runtime import message_text
-
-    return message_text(message)
-
-
-# ---------------------------------------------------------------------------
-# Narration
-# ---------------------------------------------------------------------------
-#
-# A silent product video is half a product video, and the hard part is not the
-# voice — it is that a scene lasts five seconds while a sentence lasts however
-# long the words take. Two orders are possible and only one of them works:
-#
-#   write the animation, then narrate it  →  the tail of every line gets cut
-#   narrate it, then write the animation  →  the animation fits the voice
-#
-# So the script is written and spoken FIRST, and the composition is authored
-# against a duration that is already known — with the word timings handed to the
-# agent, so it can change scene on the word rather than on a guess.
-#
-# HyperFrames does the mixing. An `<audio src>` inside the stage is collected
-# into the render's ffmpeg graph (verified: `hasAudio: true`, an AAC stream in
-# the output at -22.8 dB mean), so nothing here shells out to mux.
-
-#: The script pass. Deliberately not "write a video" — asking for prose and
-#: markup in one reply gets a worse version of both.
 NARRATION_INSTRUCTIONS = """You write narration for short product videos: the words a voice
 will read aloud, nothing else.
 
 RULES:
-1. Stay inside the word range. It is not advice — the voice takes about
+1. Stay inside the word range. It is not advice, because the voice takes about
    {pace} words per second, so going over means the video ends mid-sentence,
    and coming in far under leaves the end of the video in silence.
 2. Short sentences. A clause a listener has to hold in their head does not
@@ -1025,8 +606,8 @@ def caption_lines(
     """Group timed words into caption lines.
 
     Broken on sentence endings first and on the word count second, so a line
-    never straddles a full stop — a caption that reads "...it yourself. Connect
-    a" is harder to read than one that stops where the speaker stopped.
+    never straddles a full stop: a caption reading "...it yourself. Connect a"
+    is harder to read than one that stops where the speaker stopped.
     """
     lines: list[dict[str, Any]] = []
     current: list[dict[str, Any]] = []
@@ -1036,244 +617,352 @@ def caption_lines(
             return
         lines.append(
             {
-                "start": current[0]["start"],
-                "end": current[-1]["end"],
-                "words": list(current),
+                "text": " ".join(str(word["word"]).strip() for word in current).strip(),
+                "from": float(current[0]["start"]),
+                "to": float(current[-1]["end"]),
             }
         )
         current.clear()
 
     for word in words:
         current.append(word)
-        ends_sentence = word["word"].rstrip("\"'”’)").endswith((".", "!", "?"))
+        ends_sentence = str(word["word"]).rstrip("\"'”’)").endswith((".", "!", "?"))
         if ends_sentence or len(current) >= per_line:
             flush()
     flush()
     return lines
 
 
-#: A paired `<audio>…</audio>`, tempered so one tag cannot swallow the next:
-#: `.*?` across two elements counted them as one and quietly changed what
-#: "how many did we drop" means.
-_AUDIO_PAIR = re.compile(r"<audio\b[^>]*>(?:(?!</audio\b).)*</audio\s*>", re.DOTALL | re.IGNORECASE)
-#: Whatever is left: a self-closed or unclosed tag.
-_AUDIO_LONE = re.compile(r"<audio\b[^>]*/?>", re.IGNORECASE)
-#: Self-closed tags are removed FIRST, and not only for a tidy count: a
-#: `<audio/>` earlier in the document would otherwise act as the opening tag of
-#: the next `</audio>`, and everything between them — real composition markup —
-#: would be deleted with it.
-_AUDIO_SELF = re.compile(r"<audio\b[^>]*/\s*>", re.IGNORECASE)
+def _spoken_outline(words: list[dict[str, Any]], *, every: int = 3) -> str:
+    """The narration as a timing sheet the composition can cut against.
 
-
-def strip_audio(html: str) -> tuple[str, int]:
-    """Remove `<audio>` elements the composition brought with it.
-
-    Not defensive programming for its own sake — this is the failure it was
-    written for: told "a voice is already recorded for this video", an agent
-    added `<audio src="voice.mp3">` to be helpful. There is no voice.mp3, and
-    the renderer treats a missing media source as a correctness error and
-    refuses to produce anything at all. One hallucinated filename, no video.
-
-    So the narration track is ours alone: whatever the composition declared is
-    dropped, and the element that actually points at the file we wrote is
-    injected afterwards.
+    Every word would be thousands of characters of prompt for a 30-second
+    script and more precision than a scene change needs; every third word
+    places a cut within a third of a second.
     """
-    stripped, self_closed = _AUDIO_SELF.subn("", html)
-    stripped, paired = _AUDIO_PAIR.subn("", stripped)
-    stripped, lone = _AUDIO_LONE.subn("", stripped)
-    return stripped, self_closed + paired + lone
-
-
-def _stage_span(html: str) -> tuple[int, int] | None:
-    """Where the root element opens and closes, by counting nested divs.
-
-    A regex for the closing tag would find the first `</div>` in the document,
-    which is almost never the stage's — the stage contains every clip.
-    """
-    opening = re.search(r"<div\b[^>]*id=[\"']stage[\"'][^>]*>", html)
-    if not opening:
-        return None
-
-    depth = 0
-    for match in re.finditer(r"<div\b[^>]*>|</div\s*>", html[opening.start() :]):
-        if match.group(0).startswith("</"):
-            depth -= 1
-            if depth == 0:
-                return opening.end(), opening.start() + match.start()
-        else:
-            depth += 1
-    return None
-
-
-def composition_id(html: str) -> str:
-    match = re.search(r"data-composition-id=[\"']([^\"']+)[\"']", html)
-    return match.group(1) if match else ""
-
-
-def ensure_duration(html: str, seconds: float) -> tuple[str, bool]:
-    """Widen the root `data-duration` if the narration outlasts it.
-
-    The agent is told the exact length and mostly honours it. When it does not,
-    the render silently cuts the voice off — so the declared duration is
-    checked against the audio we actually have, and the audio wins.
-    """
-    match = re.search(
-        r'(<div\b[^>]*id=["\']stage["\'][^>]*?)data-duration=["\']([0-9.]+)["\']', html
-    )
-    if not match:
-        return html, False
-    declared = float(match.group(2))
-    if declared >= seconds - 0.05:
-        return html, False
-    return (
-        html[: match.start(2)] + f"{seconds:g}" + html[match.end(2) :],
-        True,
-    )
-
-
-def narration_markup(
-    *,
-    audio_name: str,
-    audio_seconds: float,
-    lines: list[dict[str, Any]],
-    width: int,
-    height: int,
-) -> str:
-    """The `<audio>` element, and the caption layer if there are words for it.
-
-    Captions are not decoration: most short-form video is watched with the
-    sound off, so a narrated video without them communicates nothing to a
-    large part of its audience.
-    """
-    audio = (
-        f'\n<audio src="{audio_name}" data-start="0" '
-        f'data-end="{audio_seconds:g}" data-volume="1"></audio>'
-    )
-    if not lines:
-        return audio
-
-    # Sized from the frame rather than fixed, so a 1080x1920 story caption is
-    # not the same 40px as a 1920x1080 landscape one.
-    font = max(20, round(height * 0.042))
-    band = round(height * 0.07)
-    # A scrim behind the band, for two reasons. Legibility over a light or busy
-    # background is the obvious one. The other was found by looking at a real
-    # render: an agent told not to write its own subtitles wrote them anyway,
-    # in the same place, and the frame showed both sets of words superimposed
-    # into nonsense. The scrim covers whatever sits behind ours, so the worst
-    # case is a hidden line rather than an unreadable one.
-    parts = [
-        audio,
-        f'\n<div id="hf-captions" style="position:absolute;left:0;right:0;bottom:0;'
-        f"height:{round(font * 3.4)}px;pointer-events:none;z-index:2147483000;"
-        f"background:linear-gradient(to top,rgba(0,0,0,0.86) 0%,"
-        f'rgba(0,0,0,0.74) 60%,rgba(0,0,0,0) 100%)">',
-        f'<div id="hf-caption-text" style="position:absolute;left:6%;right:6%;'
-        f"bottom:{band}px;text-align:center;"
-        f"font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;"
-        f'font-weight:800;font-size:{font}px;line-height:1.25;letter-spacing:-0.01em">',
-    ]
-    for index, line in enumerate(lines):
-        spans = "".join(
-            f'<span id="hf-w-{index}-{position}" style="opacity:.45;color:#fff;'
-            f'text-shadow:0 2px 12px rgba(0,0,0,.85),0 0 2px rgba(0,0,0,.9)"> '
-            f"{_escape(word['word'])}</span>"
-            for position, word in enumerate(line["words"])
-        )
-        parts.append(
-            f'<div id="hf-line-{index}" style="position:absolute;left:0;right:0;'
-            f'bottom:0;opacity:0">{spans}</div>'
-        )
-    parts.append("</div></div>")
-    return "".join(parts)
-
-
-def caption_script(composition: str, lines: list[dict[str, Any]]) -> str:
-    """Drive the caption layer from the composition's own timeline.
-
-    Appending to `window.__timelines[id]` rather than using CSS animation,
-    because the renderer produces frames by *seeking* that timeline. A CSS
-    animation would sit at whatever state it was in when the page loaded and
-    every frame would look identical.
-    """
-    if not lines or not composition:
+    if not words:
         return ""
+    picked = [
+        f"{word['start']:.1f}s {word['word']}"
+        for index, word in enumerate(words)
+        if index % every == 0
+    ]
+    last = words[-1]
+    picked.append(f"{last['end']:.1f}s (end)")
+    return "  ".join(picked)
 
-    operations: list[str] = []
-    for index, line in enumerate(lines):
-        # A line lingers 0.08s past its last word so it does not blink out on
-        # the final syllable — but never past the moment the next line appears,
-        # or both are drawn on the same frame and the words interleave.
-        following = lines[index + 1]["start"] if index + 1 < len(lines) else None
-        hide = line["end"] + 0.08
-        if following is not None:
-            hide = min(hide, following - 0.001)
-        operations.append(
-            f'tl.set("#hf-line-{index}",{{opacity:1}},{line["start"]:g});'
-            f'tl.set("#hf-line-{index}",{{opacity:0}},{hide:g});'
+
+class VideoGeneratorConfig(BaseModel):
+    """Describe the video; the agent writes it and this node checks its work."""
+
+    model_config = {"extra": "forbid"}
+
+    brief: str = Field(
+        min_length=1,
+        max_length=8000,
+        description="What the video should say and feel like. Supports {{ references }}.",
+    )
+    style: str = Field(
+        default="",
+        max_length=2000,
+        description="Art direction: colours, mood, brand. Optional.",
+    )
+    duration_seconds: int = Field(default=8, ge=2, le=MAX_DURATION_SECONDS)
+    size: Literal["landscape", "square", "story"] = Field(
+        default="landscape", title="Size", json_schema_extra={"x-enum-labels": SIZE_LABELS}
+    )
+
+    #: Images the composition may use, as artifact ids or a reference, usually
+    #: {{ trigger.photo_ids }} or the output of an earlier node. Without these
+    #: an agent-written video can only be type and colour, which for a product
+    #: demo is the whole thing missing.
+    photos: str = Field(default="", title="Images", max_length=4_000)
+
+    provider: str = Field(default="openai", max_length=48)
+    model: str = Field(default="", max_length=160)
+    credential_id: str = Field(
+        default="", title="Model credential", description="The saved key the model is called with."
+    )
+
+    #: How many times the agent may revise before this gives up. Each round is
+    #: one model call plus a few seconds of looking, which is cheap next to a
+    #: render.
+    max_attempts: int = Field(default=3, ge=1, le=6)
+    format: Literal["mp4", "webm", "gif"] = "mp4"
+    quality: Literal["draft", "standard", "high"] = "standard"
+    fps: int = Field(default=30, ge=1, le=60)
+    background: str = Field(default="#0b1020", max_length=32, title="Background")
+    filename: str = Field(default="video", max_length=100)
+    #: Keep a still from the accepted composition, so the run shows what was
+    #: made without anyone downloading the video.
+    save_preview: bool = True
+
+    # -- voice ---------------------------------------------------------------
+    narration: bool = Field(
+        default=False,
+        title="Add a voice-over",
+        description=(
+            "The agent writes a short script from the brief, a voice reads it, and the "
+            "video is made as long as the voice actually took. No speech key needed."
+        ),
+    )
+    voice: str = Field(default="af_heart", max_length=40, title="Voice")
+    voice_speed: float = Field(default=1.0, ge=0.5, le=2.0, title="Voice speed")
+    captions: bool = Field(
+        default=True,
+        title="Captions",
+        description=(
+            "Word-timed captions when a voice-over is on. Most short video is watched muted."
+        ),
+    )
+
+    def dimensions(self) -> tuple[int, int]:
+        return SIZES[self.size]
+
+
+class VideoGeneratorNode(Node):
+    """Brief in, finished video out, with the agent's revisions on the log."""
+
+    type = "video.generate"
+    label = "Describe a Video"
+    description = "Describe the video you want; an agent writes the animation and this renders it."
+    when = (
+        "The video is different every time: an intro for a site, a demo of a feature, a clip "
+        "from whatever the flow just produced. Describe it in words and get a file back."
+    )
+    needs = (
+        (
+            "An LLM credential (OpenAI, Anthropic, Gemini, Groq or another provider) saved under "
+            "Credentials"
+        ),
+        "Images from the trigger or an earlier node, when the video should show them.",
+    )
+    example = "Schedule -> Write with AI -> Describe a Video -> Post to Social"
+    tier = 2
+    category = "design"
+    config_model = VideoGeneratorConfig
+    output_paths = (
+        "artifact_id",
+        "url",
+        "attempts",
+        "duration_seconds",
+        "preview_artifact_id",
+        "narration_artifact_id",
+        "script",
+        "words",
+    )
+    #: Speech, a few frames per attempt, a still, then the render.
+    heavy: ClassVar[bool] = True
+    max_attempts = 1
+    timeout_seconds = float(RENDER_TIMEOUT_SECONDS + 300)
+
+    async def run(self, config: VideoGeneratorConfig, ctx: NodeContext) -> NodeResult:
+        from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+
+        from basivo_orch.flows.nodes.models import build_chat_model
+
+        template_context = ctx.template_context()
+        brief = str(render_value(config.brief, template_context))
+        style = str(render_value(config.style, template_context)) if config.style else ""
+        width, height = config.dimensions()
+
+        model = await build_chat_model(
+            ctx,
+            provider=config.provider,
+            model=config.model,
+            credential_id=config.credential_id,
+            max_tokens=8000,
+            temperature=0.4,
         )
-        for position, word in enumerate(line["words"]):
-            # The spoken word brightens; the rest of the line stays readable at
-            # 45%, which is what makes a caption feel spoken rather than typed.
-            operations.append(
-                f'tl.set("#hf-w-{index}-{position}",{{opacity:1}},{word["start"]:g});'
+
+        # The voice comes first. The length of the video, and the moments the
+        # composition is asked to cut on, are both derived from how long the
+        # narration actually turned out to be.
+        script, narration_audio, spoken_seconds, words = "", b"", 0.0, []
+        if config.narration:
+            script, narration_audio, spoken_seconds, words = await _narrate(
+                config, ctx, model=model, brief=brief, style=style
             )
-    # The timeline may not exist yet: a composition is free to build it on
-    # `load` rather than inline, and a caption layer that gave up in that case
-    # silently produced a video with a voice and no words on screen. So it
-    # waits — and applies once, whichever path gets there first.
-    return (
-        "\n<script>(function(){var done=false;var key="
-        + json.dumps(composition)
-        + ";function apply(){if(done)return true;var tl=(window.__timelines||{})[key];"
-        "if(!tl||!tl.set)return false;done=true;" + "".join(operations) + "return true;}"
-        "if(!apply()){var n=0;var id=setInterval(function(){"
-        "if(apply()||++n>150)clearInterval(id);},20);"
-        "window.addEventListener('load',apply);"
-        "document.addEventListener('DOMContentLoaded',apply);}"
-        "})();</script>"
-    )
 
-
-def inject_narration(
-    html: str,
-    *,
-    audio_name: str,
-    audio_seconds: float,
-    lines: list[dict[str, Any]],
-    width: int,
-    height: int,
-) -> tuple[str, bool, int]:
-    """Put the voice and the captions into a finished composition.
-
-    Returns (html, captions_added, audio_elements_dropped). The markup goes at
-    the END of the stage so captions paint over the scenes, and the script goes
-    after the composition's own so the timeline it appends to already exists.
-    """
-    html, dropped = strip_audio(html)
-    span = _stage_span(html)
-    if span is None:
-        # No recognisable stage: keep the voice (which needs no anchor) and say
-        # in the log that captions were skipped. A silent-but-rendered video is
-        # a better outcome than failing the run over a caption layer.
-        audio_only = narration_markup(
-            audio_name=audio_name, audio_seconds=audio_seconds, lines=[], width=width, height=height
+        duration = (
+            round(max(float(config.duration_seconds), spoken_seconds + 0.4), 1)
+            if config.narration
+            else float(config.duration_seconds)
         )
-        return html.replace("</body>", audio_only + "\n</body>", 1), False, dropped
 
-    _, closing = span
-    markup = narration_markup(
-        audio_name=audio_name,
-        audio_seconds=audio_seconds,
-        lines=lines,
-        width=width,
-        height=height,
-    )
-    with_markup = html[:closing] + markup + html[closing:]
-    script = caption_script(composition_id(html), lines)
-    if script and "</body>" in with_markup:
-        with_markup = with_markup.replace("</body>", script + "\n</body>", 1)
-    return with_markup, bool(script), dropped
+        assets = await _load_images(config.photos, ctx)
+        instructions = (
+            f"{COMPOSITION_INSTRUCTIONS}\n\n"
+            f"This video is {width} by {height}, {duration:g} seconds, {config.fps} frames "
+            f"per second, on a {config.background} background."
+        )
+        if assets:
+            instructions += (
+                "\n\nIMAGES ARE PROVIDED. Use these exact names and no others: "
+                + ", ".join(sorted(assets))
+                + ".\n"
+                "- Use every one of them, in order, unless the brief says otherwise.\n"
+                "- Full bleed: <Img src={staticFile('p0.png')} style={{width: '100%', "
+                "height: '100%', objectFit: 'cover'}} />.\n"
+                "- Give each one slow movement, a scale from 1.05 to 1.15 across its time on "
+                "screen, and cross-fade between them. An image held perfectly still reads as "
+                "a broken video.\n"
+                "- Put text over a darkened band or beside the image, never across a face."
+            )
+        if config.narration:
+            instructions += (
+                "\n\nA VOICE IS ALREADY RECORDED and will play over this video. It is "
+                f"{spoken_seconds:g} seconds long. The words, and the second each is spoken:\n"
+                + _spoken_outline(words)
+                + "\n\nChange scene ON those moments, not on a round number. A cut that lands "
+                "on the word being said is the difference between a video and a slideshow "
+                "with sound. Leave the bottom fifth of the frame clear: captions go there."
+            )
+
+        conversation: list[Any] = [
+            SystemMessage(content=instructions),
+            HumanMessage(content=brief + (f"\n\nArt direction: {style}" if style else "")),
+        ]
+
+        await ctx.step(
+            "video.brief",
+            {
+                "model": config.model,
+                "size": config.size,
+                "duration_seconds": duration,
+                "max_attempts": config.max_attempts,
+                "images": len(assets),
+            },
+        )
+
+        lines = caption_lines(words) if (config.narration and config.captions) else []
+        if config.narration and narration_audio:
+            assets = {**assets, "narration.wav": narration_audio}
+
+        def job_for(scene: str) -> RenderJob:
+            return RenderJob(
+                scene_tsx=scene,
+                width=width,
+                height=height,
+                fps=config.fps,
+                duration_seconds=duration,
+                props={},
+                background=config.background,
+                fmt=config.format,
+                quality=config.quality,
+                assets=assets,
+                audio="narration.wav" if (config.narration and narration_audio) else "",
+                captions=lines,
+            )
+
+        scene = ""
+        accepted = False
+        wanted_frames = probe_frames(duration, config.fps)
+        moments = [frame / config.fps for frame in wanted_frames]
+
+        for attempt in range(1, config.max_attempts + 1):
+            await ctx.progress(f"Attempt {attempt}: writing the animation")
+            reply = await model.ainvoke(conversation)
+            scene = strip_code_fences(message_text_of(reply))
+
+            problems = scene_problems(scene, assets=set(assets) - {"narration.wav"})
+            if not problems:
+                # Only worth rendering frames from something that at least
+                # compiles on paper. A file with no default export produces a
+                # bundler error, not a picture.
+                try:
+                    frames = await probe(job_for(scene), frames=wanted_frames)
+                except NodeError as error:
+                    problems = [str(error)]
+                else:
+                    problems = review_frames(frames, seconds=moments)
+
+            await ctx.step(
+                "video.attempt",
+                {"attempt": attempt, "characters": len(scene), "problems": problems},
+            )
+            if not problems:
+                accepted = True
+                break
+
+            await ctx.progress(f"Attempt {attempt} had {len(problems)} problem(s). Revising")
+            conversation.append(AIMessage(content=scene))
+            conversation.append(
+                HumanMessage(
+                    content=(
+                        "That composition does not work. This is what happened when it was "
+                        "rendered:\n"
+                        + "\n".join(f"- {problem}" for problem in problems)
+                        + "\n\nRewrite the whole composition, fixing these. Reply with ONLY "
+                        "the code."
+                    )
+                )
+            )
+
+        if not accepted:
+            raise NodeError(
+                f"The agent could not produce a working composition in {config.max_attempts} "
+                "attempts. The problems from each attempt are on this run. Raising the attempt "
+                "limit or simplifying the brief usually helps."
+            )
+
+        preview_id = ""
+        if config.save_preview:
+            # Taken from the accepted composition at full size, which costs one
+            # still rather than a second render.
+            stills = await probe(
+                job_for(scene), frames=[round(duration * config.fps * 0.5)], scale=1.0
+            )
+            if stills:
+                saved_preview = await ctx.save_artifact(
+                    stills[0],
+                    filename=f"{config.filename}-preview.png",
+                    content_type="image/png",
+                    node_id=ctx.node_id,
+                )
+                preview_id = saved_preview["artifact_id"]
+                await ctx.step("video.preview", saved_preview)
+
+        narration_id = ""
+        if config.narration and narration_audio:
+            saved_voice = await ctx.save_artifact(
+                narration_audio,
+                filename=f"{config.filename}-narration.wav",
+                content_type="audio/wav",
+                node_id=ctx.node_id,
+            )
+            narration_id = saved_voice["artifact_id"]
+            await ctx.step("video.narration", {**saved_voice, "seconds": spoken_seconds})
+
+        await ctx.progress(f"Rendering {duration:g}s of {config.format}. This takes a while")
+        data, info = await render(job_for(scene))
+        if not data:
+            raise NodeError("The renderer finished but produced no file.")
+
+        saved = await ctx.save_artifact(
+            data,
+            filename=f"{config.filename}.{config.format}",
+            content_type={"mp4": "video/mp4", "webm": "video/webm", "gif": "image/gif"}[
+                config.format
+            ],
+            node_id=ctx.node_id,
+        )
+        await ctx.step("video.finished", {**saved, "duration_seconds": duration})
+
+        return NodeResult(
+            output={
+                **saved,
+                "attempts": attempt,
+                "duration_seconds": duration,
+                "format": config.format,
+                "preview_artifact_id": preview_id,
+                "narration_artifact_id": narration_id,
+                "script": script,
+                "words": words,
+                "width": info.get("width", width),
+                "height": info.get("height", height),
+            }
+        )
 
 
 async def _narrate(
@@ -1281,9 +970,9 @@ async def _narrate(
 ) -> tuple[str, bytes, float, list[dict[str, Any]]]:
     """Write the script, speak it, and report how long it really took.
 
-    The word budget is given to the agent and then *checked*, because a model
-    told "about seventy words" will cheerfully write ninety. Overrunning is not
-    a style problem: the video would end while the voice is still talking.
+    The word budget is given to the agent and then checked, because a model
+    told "about seventy words" will cheerfully write ninety. Overrunning is
+    not a style problem: the video would end while the voice is still talking.
     """
     from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -1291,7 +980,7 @@ async def _narrate(
 
     budget = word_budget(config.duration_seconds)
     # A floor as well as a ceiling. Asked only for a maximum, a model reliably
-    # writes well under it — the first 30-second video came back with 51 words
+    # writes well under it: the first 30-second video came back with 51 words
     # of a 75-word budget and ended with nine seconds of silence.
     floor = max(1, int(budget * 0.85))
     system = NARRATION_INSTRUCTIONS.format(pace=WORDS_PER_SECOND)
@@ -1299,7 +988,7 @@ async def _narrate(
         f"{brief}\n\n"
         + (f"Art direction (for tone, not for the words): {style}\n\n" if style else "")
         + f"The video is {config.duration_seconds} seconds, so write between {floor} and "
-        f"{budget} words. Use the room — a script well under {floor} words leaves the video "
+        f"{budget} words. Use the room: a script well under {floor} words leaves the video "
         "silent at the end."
     )
     conversation: list[Any] = [SystemMessage(content=system), HumanMessage(content=ask)]
@@ -1315,9 +1004,7 @@ async def _narrate(
         )
         if count <= budget * 1.15 or attempt == 2:
             break
-        conversation.append(
-            HumanMessage(content=reply.content if hasattr(reply, "content") else script)
-        )
+        conversation.append(AIMessageLike(script))
         conversation.append(
             HumanMessage(
                 content=(
@@ -1345,26 +1032,12 @@ async def _narrate(
     return script, audio, seconds, words
 
 
-def _spoken_outline(words: list[dict[str, Any]], *, every: int = 3) -> str:
-    """The narration as a timing sheet the agent can cut against.
+def AIMessageLike(text: str) -> Any:  # noqa: N802 - reads as the class it stands in for
+    """The model's own reply, put back into the conversation.
 
-    Every word would be thousands of characters of prompt for a 30-second
-    script and more precision than a scene change needs; every third word is
-    enough to place a cut within a third of a second.
+    A local import because langchain is only loaded when a node actually calls
+    a model, and this file is imported to build the palette on every request.
     """
-    if not words:
-        return ""
-    picked = [
-        f"{word['start']:.1f}s {word['word']}"
-        for index, word in enumerate(words)
-        if index % every == 0
-    ]
-    last = words[-1]
-    picked.append(f"{last['end']:.1f}s (end)")
-    return "  ".join(picked)
+    from langchain_core.messages import AIMessage
 
-
-def _escape(text: str) -> str:
-    return (
-        text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
-    )
+    return AIMessage(content=text)

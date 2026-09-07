@@ -893,29 +893,40 @@ async def test_a_narrated_video_is_authored_to_the_voice_and_captioned(
             if len(prompts) == 1:  # the script pass
                 return says("Ship your workflows today. Nothing else needed.")
             return says(
-                "<!doctype html><html><body>"
-                '<div id="stage" data-composition-id="promo" data-start="0" '
-                'data-duration="4" data-width="1920" data-height="1080" data-fps="30">'
-                '<div class="clip" data-start="0" data-duration="4" data-track-index="0">'
-                "<h1>Visible</h1></div></div>"
-                "<script>window.__timelines={promo:1};</script></body></html>"
+                'import React from "react";\n'
+                'import {AbsoluteFill, useCurrentFrame, interpolate} from "remotion";\n'
+                "export default function Scene() {\n"
+                "  const frame = useCurrentFrame();\n"
+                "  const enter = interpolate(frame, [0, 12], [0, 1]);\n"
+                "  return <AbsoluteFill style={{opacity: enter}}><h1>Visible</h1>"
+                "</AbsoluteFill>;\n"
+                "}\n"
             )
 
         return FakeChatModel(respond=respond)
 
     monkeypatch.setattr("basivo_orch.flows.nodes.models.build_chat_model", fake_build_model)
 
-    async def fake_probe(html, *, width, height, duration):
-        return {1.0: ["Visible"]}, []
+    # The renderer is substituted, because a real render is minutes of CPU and
+    # lives in test_video.py behind its own flag. Everything around it is real:
+    # the order of the passes, the job the renderer is handed, and the artifact
+    # that comes out.
+    async def fake_probe(job, *, frames, scale=0.25):
+        rendered["probe_job"] = job
+        return [b"frame" for _ in frames]
 
-    monkeypatch.setattr(video_module, "probe_composition", fake_probe)
+    monkeypatch.setattr(video_module, "probe", fake_probe)
 
-    async def fake_render(html, *, variables, config, assets=None):
-        rendered["html"] = html
-        rendered["assets"] = assets or {}
-        return b"\x00\x00\x00\x18ftypmp42" + b"0" * 200, "ok"
+    async def fake_review(frames, *, seconds):
+        return []
 
-    monkeypatch.setattr(video_module, "_render", fake_render)
+    monkeypatch.setattr(video_module, "review_frames", lambda frames, *, seconds: [])
+
+    async def fake_render(job):
+        rendered["job"] = job
+        return b"\x00\x00\x00\x18ftypmp42" + b"0" * 200, {"durationInFrames": 189}
+
+    monkeypatch.setattr(video_module, "render", fake_render)
 
     graph = Graph.model_validate(
         {
@@ -952,25 +963,23 @@ async def test_a_narrated_video_is_authored_to_the_voice_and_captioned(
     assert "6 seconds long" in prompts[1]
     assert "0.0s Ship" in prompts[1]
 
-    html = rendered["html"]
-    # The voice is in the project, and referenced from inside the stage.
-    assert rendered["assets"]["narration.wav"] == b"RIFFnarration"
-    assert '<audio src="narration.wav"' in html
-    assert html.index("<audio") < html.index("</div></body>") if "</div></body>" in html else True
-    # Captions exist, and are driven by the composition's timeline rather than
-    # by CSS — a CSS animation renders as one frozen frame.
-    assert 'id="hf-captions"' in html
-    assert "window.__timelines" in html and 'tl.set("#hf-w-0-0"' in html
-    # The composition declared 4s; the voice is 6s, so the render was widened.
-    assert 'data-duration="6.3"' in html
+    job = rendered["job"]
+    # The voice is a file beside the composition, and the renderer plays it.
+    assert job.assets["narration.wav"] == b"RIFFnarration"
+    assert job.audio == "narration.wav"
+    # Captions are the product's, carried as data rather than spliced into the
+    # composition, so nothing the agent wrote can collide with them.
+    assert job.captions and job.captions[0]["text"].startswith("Ship")
+    assert "Audio" not in job.scene_tsx, "the composition must not bring its own voice"
+    # The brief asked for 4 seconds and the voice is 6, so the video is as long
+    # as the voice. The other way round cuts it off mid-word.
+    assert job.duration_seconds == 6.4
 
     events = await replay(session, run.id)
     steps = [e.data.get("step") for e in events if e.type == "node.step"]
     assert steps.index("video.script") < steps.index("video.spoken") < steps.index("video.attempt")
-    assert "video.duration_widened" in steps
-    attached = [e.data for e in events if e.data.get("step") == "video.narration_attached"][0]
-    assert attached["captions_rendered"] is True
-    assert attached["seconds"] == 6.0
+    spoken = [e.data for e in events if e.data.get("step") == "video.spoken"][0]
+    assert spoken["seconds"] == 6.0
 
     assert run.output["result"]["duration_seconds"] == 6.4
     assert run.output["result"]["narration_artifact_id"]
@@ -1366,6 +1375,68 @@ def _update_with_photo(unique: str) -> dict:
     }
 
 
+# ---------------------------------------------------------------------------
+# One model call, no agent
+# ---------------------------------------------------------------------------
+
+
+async def test_write_with_ai_feeds_its_json_to_the_next_node(session, make_run, monkeypatch):
+    """The scheduled content pipeline in miniature: a plain generation writes
+    the post, and the node after it templates a field straight out of it. Proves
+    the JSON contract and the cost row over the real engine, not a stub."""
+
+    def fake_model(messages):
+        # Fenced, because that is what providers actually return.
+        return says(
+            '```json\n{"headline": "Otters hold hands", "body": "So they do not drift."}\n```',
+            input_tokens=90,
+            output_tokens=25,
+        )
+
+    async def fake_build_model(ctx, **kwargs):
+        return FakeChatModel(respond=fake_model)
+
+    monkeypatch.setattr("basivo_orch.flows.nodes.llm.build_chat_model", fake_build_model)
+
+    graph = Graph.model_validate(
+        {
+            "nodes": [
+                {"id": "t", "type": "trigger.schedule", "config": {"cron": "0 9 * * *"}},
+                {
+                    "id": "write",
+                    "type": "llm.generate",
+                    "config": {"prompt": "Write a post about otters.", "output": "json"},
+                },
+                {
+                    "id": "headline",
+                    "type": "data.set",
+                    "config": {
+                        "assignments": [{"name": "headline", "value": "{{ input.json.headline }}"}]
+                    },
+                },
+            ],
+            "edges": [
+                {"source": "t", "target": "write"},
+                {"source": "write", "target": "headline"},
+            ],
+        }
+    )
+
+    run = await run_graph(session, make_run, graph)
+
+    assert run.status is RunStatus.SUCCEEDED
+    assert run.output["result"]["headline"] == "Otters hold hands"
+
+    # The cost row the run detail page reads, on this node's own execution.
+    executions = await nodes_for(session, run.id)
+    assert executions["write"].tokens_in == 90
+    assert executions["write"].tokens_out == 25
+
+    events = await replay(session, run.id)
+    steps = {e.data["step"]: e.data for e in events if e.type == "node.step"}
+    assert steps["llm.response"]["output"] == "json"
+
+
 EXERCISED_NODE_TYPES = {
     # Covered in their own suites rather than here: preparing a photograph and
     # composing a montage are pixel work, and proving them through the engine
@@ -1390,6 +1461,7 @@ EXERCISED_NODE_TYPES = {
     "data.set",
     "http.request",
     "agent.llm",
+    "llm.generate",
     "git.ticket",
     "git.autofix",
 }
@@ -1699,12 +1771,12 @@ async def test_a_video_node_takes_its_copy_from_an_agent_and_stores_the_file(
 
     captured: dict[str, object] = {}
 
-    async def fake_render(html, *, variables, config, assets=None):
-        captured["variables"] = variables
-        captured["template_applied"] = "Auto-fix shipped" in json.dumps(variables)
-        return b"\x00\x00\x00\x18ftypmp42" + b"0" * 400, "ok"
+    async def fake_render(job):
+        captured["props"] = job.props
+        captured["scene"] = job.scene_tsx
+        return b"\x00\x00\x00\x18ftypmp42" + b"0" * 400, {"width": job.width}
 
-    monkeypatch.setattr(video_module, "_render", fake_render)
+    monkeypatch.setattr(video_module, "render", fake_render)
 
     def copywriter(messages):
         return says("Auto-fix shipped")
@@ -1729,7 +1801,7 @@ async def test_a_video_node_takes_its_copy_from_an_agent_and_stores_the_file(
                     "name": "Promo",
                     "config": {
                         "template": "announcement",
-                        "variables": '{"headline": "{{ nodes.copy.output.text }}"}',
+                        "props": '{"headline": "{{ nodes.copy.output.text }}"}',
                         "quality": "draft",
                     },
                 },
@@ -1744,8 +1816,10 @@ async def test_a_video_node_takes_its_copy_from_an_agent_and_stores_the_file(
     run = await run_graph(session, make_run, graph)
     assert run.status is RunStatus.SUCCEEDED, run.error
 
-    # The agent's line reached the composition's variables.
-    assert captured["variables"] == {"headline": "Auto-fix shipped"}
+    # The agent's line reached the composition as a prop, and the template
+    # filled in everything the user did not set.
+    assert captured["props"]["headline"] == "Auto-fix shipped"
+    assert len(captured["props"]) > 1, "the template's own example values fill the gaps"
 
     from basivo_orch.flows.models import Artifact
 
@@ -1774,12 +1848,21 @@ async def test_the_video_generator_revises_until_the_composition_actually_shows_
     """
     from basivo_orch.flows.nodes import video as video_module
 
-    blank = (
-        '<div id="stage" data-composition-id="p" data-duration="4" '
-        'data-width="100" data-height="100"><h1 id="a">Hi</h1>'
-        "<script>window.__timelines={p:1}</script></div>"
-    )
-    good = blank.replace('<h1 id="a">Hi</h1>', '<h1 id="a">Visible</h1>')
+    def composition(body: str) -> str:
+        return (
+            'import React from "react";\n'
+            'import {AbsoluteFill, useCurrentFrame, interpolate} from "remotion";\n'
+            "export default function Scene() {\n"
+            "  const frame = useCurrentFrame();\n"
+            "  const enter = interpolate(frame, [0, 12], [0, 1]);\n"
+            f"  return <AbsoluteFill style={{{{opacity: enter}}}}>{body}</AbsoluteFill>;\n"
+            "}\n"
+        )
+
+    # The first attempt animates from a value the element already has, so it
+    # renders as an empty video: nothing errors and nothing is logged.
+    blank = composition("<span />")
+    good = composition("<h1>Visible</h1>")
 
     attempts: list[str] = []
 
@@ -1793,20 +1876,23 @@ async def test_the_video_generator_revises_until_the_composition_actually_shows_
     monkeypatch.setattr("basivo_orch.flows.nodes.models.build_chat_model", fake_build)
     monkeypatch.setattr("basivo_orch.flows.nodes.video.build_chat_model", fake_build, raising=False)
 
-    # The browser probe is the node's own eyes; here it reports the first
-    # composition as blank and the second as fine.
-    async def fake_probe(html, *, width, height, duration):
-        if "Visible" in html:
-            return {1.0: ["Visible"]}, []
-        return {1.0: []}, []
+    # The frames are the node's own eyes. Here the first composition comes
+    # back blank and the second does not.
+    async def fake_probe(job, *, frames, scale=0.25):
+        return [b"blank" if "Visible" not in job.scene_tsx else b"drawn" for _ in frames]
 
-    monkeypatch.setattr(video_module, "probe_composition", fake_probe)
+    monkeypatch.setattr(video_module, "probe", fake_probe)
 
-    async def fake_render(html, *, variables, config, assets=None):
-        assert "Visible" in html, "the blank composition was rendered anyway"
-        return b"\x00\x00\x00\x18ftypmp42" + b"0" * 200, "ok"
+    def fake_review(frames, *, seconds):
+        return [] if frames and frames[0] == b"drawn" else ["Every frame is a flat colour."]
 
-    monkeypatch.setattr(video_module, "_render", fake_render)
+    monkeypatch.setattr(video_module, "review_frames", fake_review)
+
+    async def fake_render(job):
+        assert "Visible" in job.scene_tsx, "the blank composition was rendered anyway"
+        return b"\x00\x00\x00\x18ftypmp42" + b"0" * 200, {"width": job.width}
+
+    monkeypatch.setattr(video_module, "render", fake_render)
 
     graph = Graph.model_validate(
         {

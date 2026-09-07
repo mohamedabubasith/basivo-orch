@@ -17,6 +17,7 @@ export const NODE_ACCENT: Record<string, string> = {
   "logic.condition": "var(--status-warn)",
   "data.set": "var(--status-good)",
   "agent.llm": "var(--color-brand-300)",
+  "llm.generate": "var(--color-brand-300)",
   "code.python": "var(--color-brand-300)",
   "git.ticket": "var(--status-warn)",
   "git.autofix": "var(--status-good)",
@@ -113,6 +114,13 @@ const PATHS: Record<string, ReactNode> = {
     <>
       <rect x="7" y="7" width="10" height="10" rx="2.5" />
       <path d="M12 2.5v2.3M12 19.2v2.3M2.5 12h2.3M19.2 12h2.3M5 5l1.6 1.6M17.4 17.4 19 19M19 5l-1.6 1.6M6.6 17.4 5 19" />
+    </>
+  ),
+  "llm.generate": (
+    <>
+      <path d="M4.5 19.5 5.6 16l8.6-8.6 2.4 2.4L8 18.4l-3.5 1.1Z" />
+      <path d="M15.4 5.8l1.5-1.5a1.7 1.7 0 0 1 2.4 0l.4.4a1.7 1.7 0 0 1 0 2.4l-1.5 1.5" />
+      <path d="M18.5 15v3.4M16.8 16.7h3.4" />
     </>
   ),
   "code.python": (

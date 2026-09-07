@@ -95,11 +95,11 @@ RUN apt-get update \
         ca-certificates \
         gnupg \
         curl \
-    # Node 22 for the HyperFrames CLI. From nodesource rather than Debian,
-    # which ships 18 — HyperFrames requires 22.
+    # Node 22 for the video renderer and Claude Code. From nodesource rather
+    # than Debian, which ships 18.
     && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
-    && npm install -g hyperframes@0.8.3 @anthropic-ai/claude-code@2.1.259 \
+    && npm install -g @anthropic-ai/claude-code@2.1.259 \
     && npm cache clean --force \
     && apt-get purge -y gnupg \
     && apt-get autoremove -y \
@@ -139,31 +139,39 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/* \
     && fc-cache -f >/dev/null 2>&1 || true
 
-# HyperFrames renders with puppeteer-core, which bundles NO browser: left to
-# itself it downloads Chrome 152 from Google on the first render, into every
-# fresh container, and fails outright if that download is blocked. So it is
-# pointed at the browser we just installed.
+# The video renderer, installed once into the image.
 #
-# Not the download it would prefer, for a reason: its own table of
-# chrome-headless-shell builds has no linux/arm64 entry, because Chrome for
-# Testing does not publish one. Pointing at Playwright's Chromium is the only
-# choice that works the same on x86_64 and ARM.
+# node_modules is baked in on purpose: a render that runs `npm install` first
+# is a render that fails the day the registry is slow, and it would do it
+# inside a subprocess that deliberately has no network reason to exist. Only
+# the manifest is copied here, so a change to our own Python leaves this layer
+# cached.
+COPY basivo_orch/flows/nodes/remotion_project/package.json \
+     /opt/basivo/remotion/package.json
+RUN cd /opt/basivo/remotion \
+    && npm install --omit=dev --no-audit --no-fund \
+    && npm cache clean --force \
+    && chmod -R a+rX /opt/basivo/remotion
+ENV BASIVO_REMOTION_NODE_MODULES=/opt/basivo/remotion/node_modules
+
+# The browser Remotion draws frames with. Downloaded at build time into a path
+# every user can read, because the alternative is every fresh container
+# downloading it on its first render, and failing outright where that download
+# is blocked.
 #
-# The headless shell is preferred when Playwright ships one, because it
-# supports HeadlessExperimental.beginFrame — HyperFrames' fast capture path.
-# Plain Chromium works too and falls back to screenshots, which is slower but
-# correct.
-#
-# The `test -x` is what makes an unresolved symlink fail the BUILD instead of
-# the first render — the difference between a broken image and a container that
-# looks healthy until someone asks for a video.
-RUN shell="$(find /opt/playwright -type f -name headless_shell -perm -u+x | head -1)"; \
-    chrome="$(find /opt/playwright -type f -name chrome -perm -u+x | head -1)"; \
-    mkdir -p /opt/basivo; \
-    ln -sf "${shell:-$chrome}" /opt/basivo/chrome; \
-    test -x /opt/basivo/chrome || { echo "no chromium under /opt/playwright" >&2; exit 1; }; \
-    echo "hyperframes browser: $(readlink -f /opt/basivo/chrome)"
-ENV HYPERFRAMES_BROWSER_PATH=/opt/basivo/chrome
+# Not Playwright's Chromium, which is installed above for the poster path:
+# Remotion pins a Chrome Headless Shell build it has tested against, and mixing
+# the two produces frame differences that are invisible until a customer says
+# their video looks wrong.
+# The download lands under XDG_CACHE_HOME, so it is pinned to a path every
+# user can read. Left at the default it goes to the building user's home,
+# which the `basivo` user cannot see, and the first render downloads it again
+# as that user, into a container layer that does not persist.
+ENV XDG_CACHE_HOME=/opt/basivo/cache
+RUN mkdir -p "$XDG_CACHE_HOME" \
+    && cd /opt/basivo/remotion \
+    && node -e "require('@remotion/renderer').ensureBrowser().then(() => console.log('remotion browser ok'))" \
+    && chmod -R a+rX "$XDG_CACHE_HOME" /opt/basivo/remotion
 
 # The voice model: two files, ~109MB. Fetched with curl from pinned URLs rather
 # than through our own `fetch_model()`, because calling into the package would
@@ -185,7 +193,7 @@ RUN set -e; \
     ffmpeg -version  | head -1; \
     ffprobe -version | head -1; \
     node --version; \
-    hyperframes --help >/dev/null && echo "hyperframes ok"; \
+    test -d /opt/basivo/remotion/node_modules/remotion && echo "remotion ok"; \
     claude --version; \
     test -s /opt/basivo/speech/voices-v1.0.bin && echo "voice model ok"
 

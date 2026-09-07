@@ -304,7 +304,7 @@ class SpeakNode(Node):
     description = "Turn text into narration with a real voice, on this machine."
     when = "A video or message needs a spoken voice track and you do not want to pay a speech API."
     needs = ("Text from an earlier node.",)
-    example = "AI Agent -> Text to Speech -> HTML to Video"
+    example = "AI Agent -> Text to Speech -> Make a Video"
     tier = 2
     category = "design"
     config_model = SpeakConfig

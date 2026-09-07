@@ -148,7 +148,7 @@ def test_a_render_refuses_to_start_without_scratch_space():
     """Filling the disk does not fail a render, it stops Postgres accepting
     writes. Failing one node is the cheaper outcome by a wide margin."""
     from basivo_orch.flows.nodes.base import NodeError
-    from basivo_orch.flows.nodes.video import ensure_disk_space, free_disk_gb
+    from basivo_orch.flows.nodes.remotion import ensure_disk_space, free_disk_gb
 
     assert free_disk_gb() > 0
     ensure_disk_space(0.001)  # plenty free: no complaint

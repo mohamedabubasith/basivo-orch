@@ -418,18 +418,18 @@ export function Inspector({
                   value={String(config[field.key] ?? "")}
                   onChange={(v) => set(field.key, v)}
                 />
-              ) : spec.type === "video.render" && field.key === "html" ? (
+              ) : spec.type === "video.render" && field.key === "scene" ? (
                 <CodeArea
-                  value={String(config.html ?? "")}
-                  onChange={(v) => set("html", v)}
+                  value={String(config.scene ?? "")}
+                  onChange={(v) => set("scene", v)}
                 />
-              ) : spec.type === "video.render" && field.key === "variables" ? (
+              ) : spec.type === "video.render" && field.key === "props" ? (
                 <div>
                   <TemplateInput
                     multiline
                     rows={4}
-                    value={String(config.variables ?? "{}")}
-                    onChange={(v) => set("variables", v)}
+                    value={String(config.props ?? "{}")}
+                    onChange={(v) => set("props", v)}
                     suggestions={suggestions}
                     placeholder={'{"headline": "{{ nodes.copy.output.text }}"}'}
                   />
@@ -746,7 +746,7 @@ function Labelled({
 }
 
 /** Fields whose content is code or markup, and want a monospace editor. */
-const CODE_FIELDS = new Set(["code", "html", "variables", "instructions"]);
+const CODE_FIELDS = new Set(["code", "html", "scene", "props", "variables", "instructions"]);
 
 /**
  * Whether a field deserves the expand button.
