@@ -214,7 +214,7 @@ function HeroStage() {
       muted
       loop
       playsInline
-      aria-label="A pipeline run, from the issue that started it to the pull request it opened"
+      aria-label="What Basivo does: the ways a flow starts, the canvas, the agent, the videos it renders, and where the result is posted"
     />
   );
 }

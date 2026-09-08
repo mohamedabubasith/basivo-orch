@@ -9,12 +9,12 @@
 [![CI](https://github.com/mohamedabubasith/basivo-orch/actions/workflows/ci.yml/badge.svg)](https://github.com/mohamedabubasith/basivo-orch/actions/workflows/ci.yml)
 [![Security](https://github.com/mohamedabubasith/basivo-orch/actions/workflows/security.yml/badge.svg)](https://github.com/mohamedabubasith/basivo-orch/actions/workflows/security.yml)
 [![Release](https://img.shields.io/badge/release-v0.1.0-blue)](https://github.com/mohamedabubasith/basivo-orch/releases)
+[![Licence: MIT](https://img.shields.io/badge/licence-MIT-blue)](LICENSE)
 
-<video src="https://github.com/mohamedabubasith/basivo-orch/raw/main/docs/media/basivo.mp4" poster="https://github.com/mohamedabubasith/basivo-orch/raw/main/docs/media/poster.jpg" width="860" controls muted playsinline></video>
+<img src="docs/media/basivo.gif" width="860" alt="Basivo: the triggers, the canvas, the agent, the renders, and where the result lands">
 
-[Watch it](https://github.com/mohamedabubasith/basivo-orch/raw/main/docs/media/basivo.mp4) if your viewer does not play video inline.
-
-<sub>Forty two seconds, made by this repository's own video node.</sub>
+<sub>Made by this repository's own video node. The full forty two second film, with the run page and the receipt, is
+<a href="https://github.com/mohamedabubasith/basivo-orch/raw/main/docs/media/basivo.mp4">here</a>.</sub>
 
 </div>
 
@@ -213,6 +213,8 @@ make lint      # ruff, tsc, oxlint
 
 ## Licence
 
-There is no licence file in this repository yet, so all rights are reserved for
-now. Remotion, which the video nodes use, has its own terms: see
-[`docs/video.md`](docs/video.md).
+MIT. See [`LICENSE`](LICENSE).
+
+Remotion, which the video nodes use, is separate and not MIT: it is free for up
+to three people and paid above that, and that applies to anyone self-hosting
+this. See [`docs/video.md`](docs/video.md).
