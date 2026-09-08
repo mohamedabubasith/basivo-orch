@@ -57,6 +57,13 @@ jobs:
         if: steps.browser-cache.outputs.cache-hit != 'true'
         run: uv run playwright install --with-deps chromium
 
+      # The cache holds the browser, not the shared libraries it links
+      # against, and those live outside the cached path. On a hit the download
+      # is skipped and only the packages are installed.
+      - name: browser libraries
+        if: steps.browser-cache.outputs.cache-hit == 'true'
+        run: uv run playwright install-deps chromium
+
       - name: lint
         run: uv run ruff check --output-format=github .
 
@@ -199,14 +206,18 @@ jobs:
       # Both targets, because the worker image is a different one: FFmpeg,
       # Node, Chromium and the voice model that the API has no use for. A
       # change that breaks only the worker build would otherwise ship.
+      # A scope per target, not the shared default. Both builds wrote to the
+      # same GitHub cache key, so whichever ran last replaced the other's
+      # layers and the next run rebuilt from scratch: every CI run downloaded
+      # Playwright's Chromium and Remotion's Chrome Headless Shell again.
       - name: API image
         uses: docker/build-push-action@v6
         with:
           context: apps/api
           target: runtime
           push: false
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,scope=api,mode=max
 
       # Only on main. The worker image carries FFmpeg, Node, Chromium and the
       # voice model, which is several minutes of build even warm, and a pull
@@ -218,5 +229,5 @@ jobs:
           context: apps/api
           target: worker
           push: false
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=worker
+          cache-to: type=gha,scope=worker,mode=max
