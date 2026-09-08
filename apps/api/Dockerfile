@@ -139,6 +139,26 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/* \
     && fc-cache -f >/dev/null 2>&1 || true
 
+# The voice model: two files, ~109MB. Fetched with curl from pinned URLs rather
+# than through our own `fetch_model()`, because calling into the package would
+# make this layer depend on our source, which is the whole thing this stage
+# exists to avoid.
+#
+# It sits ABOVE the renderer's npm install on purpose. It depends on nothing
+# but curl, and below that layer every edit to remotion_project/package.json
+# re-downloaded 109MB of voice model for no reason.
+#
+# `test_the_dockerfile_and_the_code_agree_on_the_model` keeps these URLs
+# identical to MODEL_SOURCES.
+ENV BASIVO_SPEECH_MODEL_DIR=/opt/basivo/speech
+RUN mkdir -p /opt/basivo/speech \
+    && curl -fsSL -o /opt/basivo/speech/kokoro-timestamped-q8f16.onnx \
+        "https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX-timestamped/resolve/main/onnx/model_q8f16.onnx" \
+    && curl -fsSL -o /opt/basivo/speech/voices-v1.0.bin \
+        "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin" \
+    && chmod -R a+rX /opt/basivo \
+    && ls -l /opt/basivo/speech
+
 # The video renderer, installed once into the image.
 #
 # node_modules is baked in on purpose: a render that runs `npm install` first
@@ -172,20 +192,6 @@ RUN mkdir -p "$XDG_CACHE_HOME" \
     && cd /opt/basivo/remotion \
     && node -e "require('@remotion/renderer').ensureBrowser().then(() => console.log('remotion browser ok'))" \
     && chmod -R a+rX "$XDG_CACHE_HOME" /opt/basivo/remotion
-
-# The voice model: two files, ~109MB. Fetched with curl from pinned URLs rather
-# than through our own `fetch_model()`, because calling into the package would
-# make this layer depend on our source — which is the whole thing this stage
-# exists to avoid. `test_the_dockerfile_and_the_code_agree_on_the_model` keeps
-# these URLs identical to MODEL_SOURCES.
-ENV BASIVO_SPEECH_MODEL_DIR=/opt/basivo/speech
-RUN mkdir -p /opt/basivo/speech \
-    && curl -fsSL -o /opt/basivo/speech/kokoro-timestamped-q8f16.onnx \
-        "https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX-timestamped/resolve/main/onnx/model_q8f16.onnx" \
-    && curl -fsSL -o /opt/basivo/speech/voices-v1.0.bin \
-        "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin" \
-    && chmod -R a+rX /opt/basivo \
-    && ls -l /opt/basivo/speech
 
 # Everything the render path shells out to, checked once here rather than on
 # the first render — a missing tool should fail the build, not a queued run.

@@ -302,6 +302,12 @@ async def refresh(
         ip_address=client_ip(request),
     )
     await session.commit()
+    # Both cookies, not just the refresh one. The browser transport reads the
+    # session from the access cookie, so rotating the refresh token alone left
+    # the caller presenting the expired access cookie on the very next request:
+    # a 401, and the app signing the person out roughly one access-token
+    # lifetime after they stopped clicking.
+    set_access_cookie(response, access_token)
     set_refresh_cookie(response, replacement)
 
     return TokenResponse(

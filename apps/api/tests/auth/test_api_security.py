@@ -104,3 +104,29 @@ async def test_unhandled_errors_do_not_leak_internals(client, monkeypatch) -> No
 async def test_openapi_is_available_outside_production(client) -> None:
     response = await client.get("/openapi.json")
     assert response.status_code == 200
+
+
+async def test_refresh_renews_the_access_cookie(client, user, password) -> None:
+    """The browser transport reads the session from the access cookie.
+
+    Rotating only the refresh cookie left the caller presenting the expired
+    access cookie on the very next request, so a tab that sat idle past the
+    access-token lifetime was signed out even though its session was valid.
+    """
+    from basivo_orch.auth.settings import get_settings
+
+    settings = get_settings()
+    # Secure cookies are dropped by the client over plain http, and the test
+    # transport speaks http://test by default.
+    client.base_url = "https://test"
+    signed_in = await client.post(
+        "/auth/login", data={"username": user.email, "password": password}
+    )
+    assert signed_in.status_code in (200, 204)
+    first = client.cookies.get(settings.cookie_name)
+    assert first
+
+    refreshed = await client.post("/auth/refresh", json={})
+    assert refreshed.status_code == 200
+    assert settings.cookie_name in refreshed.cookies
+    assert settings.refresh_cookie_name in refreshed.cookies
