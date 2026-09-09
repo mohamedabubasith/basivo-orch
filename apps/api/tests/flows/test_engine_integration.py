@@ -1426,7 +1426,92 @@ async def test_write_with_ai_feeds_its_json_to_the_next_node(session, make_run, 
     assert steps["llm.response"]["output"] == "json"
 
 
+async def test_a_chat_message_reaches_the_agent_and_the_answer_comes_back(
+    session, make_run, monkeypatch
+):
+    """The chat node's whole job, through the engine.
+
+    What the visitor typed has to arrive as the agent's prompt, the session id
+    has to reach the agent's memory key (otherwise every message in one
+    conversation is a stranger), and the run output has to be the shape the
+    chat page reads an answer out of.
+    """
+    from basivo_orch.flows.chat import reply_text
+
+    asked: list[str] = []
+    keys: list[str] = []
+
+    def desk(messages):
+        asked.append(str(messages[-1].content))
+        return says("Your order ships tomorrow.")
+
+    async def fake_build(ctx, **kwargs):
+        return FakeChatModel(respond=desk)
+
+    monkeypatch.setattr("basivo_orch.flows.nodes.agent.build_chat_model", fake_build)
+
+    async def remember(node_id, subject, turns):
+        keys.append(subject)
+
+    graph = Graph.model_validate(
+        {
+            "nodes": [
+                {"id": "chat", "type": "trigger.chat", "name": "Chat", "config": {}},
+                {
+                    "id": "desk",
+                    "type": "agent.llm",
+                    "name": "Desk",
+                    "config": {
+                        "prompt": "{{ input.text }}",
+                        "model": "m",
+                        "memory": "conversation",
+                        "memory_key": "{{ input.session_id }}",
+                    },
+                },
+            ],
+            "edges": [{"source": "chat", "target": "desk"}],
+        }
+    )
+
+    run = await run_graph(
+        session,
+        make_run,
+        graph,
+        payload={"text": "Where is my order?", "session_id": "visitor-42"},
+    )
+
+    assert run.status is RunStatus.SUCCEEDED, run.error
+    assert asked == ["Where is my order?"]
+    assert reply_text(run.output) == "Your order ships tomorrow."
+
+    events = await replay(session, run.id)
+    saved = [e.data for e in events if e.data.get("step") == "memory.saved"]
+    assert saved and saved[0]["subject"] == "visitor-42", (
+        "the conversation must be keyed on the visitor's session, not on the flow"
+    )
+
+
+async def test_an_empty_chat_message_fails_before_a_model_is_paid(session, make_run):
+    graph = Graph.model_validate(
+        {
+            "nodes": [
+                {"id": "chat", "type": "trigger.chat", "config": {}},
+                {"id": "desk", "type": "agent.llm", "config": {"prompt": "x", "model": "m"}},
+            ],
+            "edges": [{"source": "chat", "target": "desk"}],
+        }
+    )
+
+    run = await run_graph(session, make_run, graph, payload={"text": "   ", "session_id": "s"})
+
+    assert run.status is RunStatus.FAILED
+    assert "empty" in (run.error or "")
+    # The agent never ran, so nobody was billed for answering nothing.
+    assert "desk" not in await nodes_for(session, run.id)
+
+
 EXERCISED_NODE_TYPES = {
+    "trigger.chat",
     "trigger.telegram",
     "telegram.reply",
     "session.state",

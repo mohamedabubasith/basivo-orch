@@ -10,6 +10,7 @@ import {
 import { AuthProvider } from "./lib/auth";
 import { consoleOrigin, isAppRoute, isConsoleHost } from "./lib/consoleOrigin";
 import { ThemeProvider } from "./lib/theme";
+import { Chat } from "./routes/Chat";
 import { Landing } from "./routes/Landing";
 import { Admin } from "./routes/app/Admin";
 import { ApiKeys } from "./routes/app/ApiKeys";
@@ -90,6 +91,11 @@ function AppRoutes() {
         <Route path="/forgot-password" element={<ForgotPassword />} />
       </Route>
       <Route path="/two-factor" element={<TwoFactor />} />
+
+      {/* A published chat page. Public on purpose: the people who use it are
+          the flow owner's customers, and asking them to sign in to ours would
+          be absurd. The link's token is what admits them. */}
+      <Route path="/chat/:flowId/:token" element={<Chat />} />
       {/* These two paths are fixed by the API: it emails
           `{FRONTEND_BASE_URL}/auth/verify?token=…` and
           `/auth/reset-password?token=…`. They must match

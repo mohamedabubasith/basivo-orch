@@ -22,6 +22,7 @@ export const NODE_ACCENT: Record<string, string> = {
   "git.ticket": "var(--status-warn)",
   "git.autofix": "var(--status-good)",
   "git.comment": "var(--series)",
+  "trigger.chat": "var(--color-accent-500)",
   "image.ai": "var(--color-brand-300)",
   "social.post": "var(--color-accent-500)",
   "video.ai": "var(--status-warn)",
@@ -49,6 +50,13 @@ const GIT_COMMENT = (
   <>
     <path d="M4.5 6.2c0-.9.8-1.7 1.7-1.7h11.6c.9 0 1.7.8 1.7 1.7v8c0 .9-.8 1.7-1.7 1.7H10l-4 3.3v-3.3H6.2c-.9 0-1.7-.8-1.7-1.7v-8Z" />
     <path d="M8.5 9h7M8.5 12h4.5" />
+  </>
+);
+
+const CHAT = (
+  <>
+    <path d="M4.5 6.5A2 2 0 0 1 6.5 4.5h11a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H10l-4 3.2V15.5H6.5a2 2 0 0 1-2-2Z" />
+    <path d="M8.5 8.5h7M8.5 11.5h4" />
   </>
 );
 
@@ -132,6 +140,7 @@ const PATHS: Record<string, ReactNode> = {
   "git.ticket": GIT_TICKET,
   "git.autofix": GIT_AUTOFIX,
   "git.comment": GIT_COMMENT,
+  "trigger.chat": CHAT,
   "image.ai": AI_IMAGE,
   "social.post": SOCIAL_POST,
   "video.ai": AI_VIDEO,

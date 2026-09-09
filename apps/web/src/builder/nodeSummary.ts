@@ -107,6 +107,8 @@ export function nodeSummary(
         .join(" · ");
     case "trigger.manual":
       return "started by hand";
+    case "trigger.chat":
+      return str(config.title) || "Chat";
     default:
       return "";
   }

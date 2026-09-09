@@ -20,6 +20,7 @@ from basivo_orch.billing.service import QuotaExceeded
 from basivo_orch.config import get_settings
 from basivo_orch.credentials.router import router as credentials_router
 from basivo_orch.db import dispose_engine
+from basivo_orch.flows.chat import router as chat_router
 from basivo_orch.flows.events import RedisClient
 from basivo_orch.flows.router import external_router, hooks_router, management_router
 from basivo_orch.gate import gate_is_active, warn_if_gate_is_inert
@@ -105,7 +106,7 @@ def create_app() -> FastAPI:
         # /billing is the payment provider's webhook, authenticated by the
         # signature over its own body. A provider cannot fetch a CSRF token
         # first, for the same reason GitHub cannot.
-        csrf_exempt_prefixes=("/flows", "/hooks", "/billing"),
+        csrf_exempt_prefixes=("/flows", "/hooks", "/billing", "/chat"),
     )
 
     app.add_middleware(
@@ -139,6 +140,7 @@ def create_app() -> FastAPI:
     app.include_router(admin_router, prefix=settings.API_V1_PREFIX)
     app.include_router(external_router)
     app.include_router(hooks_router)
+    app.include_router(chat_router)
     app.include_router(billing_webhook_router)
 
     @app.exception_handler(QuotaExceeded)

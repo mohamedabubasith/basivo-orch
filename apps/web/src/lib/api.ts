@@ -23,7 +23,7 @@ export const CSRF_HEADER = "X-CSRF-Token";
  * proxy). Requests therefore carry `credentials: "include"`, and the API's
  * CORS_ORIGINS must list this app's origin for any of it to work.
  */
-const API_BASE = (
+export const API_BASE = (
   import.meta.env.VITE_API_URL ?? "http://localhost:8000"
 ).replace(/\/$/, "");
 

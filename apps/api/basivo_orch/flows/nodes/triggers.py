@@ -136,6 +136,81 @@ class WebhookTriggerNode(Node):
         return NodeResult(output=output)
 
 
+class ChatTriggerConfig(BaseModel):
+    """What the hosted chat page looks like. Everything has a working default."""
+
+    model_config = {"extra": "forbid"}
+
+    title: str = Field(
+        default="Chat",
+        max_length=80,
+        title="Title",
+        description="The name at the top of the chat window.",
+    )
+    greeting: str = Field(
+        default="Ask me anything.",
+        max_length=400,
+        title="First message",
+        description="Shown before anyone types. Not sent to the flow.",
+    )
+    placeholder: str = Field(
+        default="Write a message",
+        max_length=80,
+        title="Input placeholder",
+    )
+    #: Buttons under the greeting. A blank chat box is the hardest thing in
+    #: any chat product to answer, and three examples fix it.
+    suggestions: list[str] = Field(
+        default_factory=list,
+        max_length=4,
+        title="Suggested questions",
+        description="Up to four. They appear as buttons until the first message is sent.",
+    )
+
+    @field_validator("suggestions")
+    @classmethod
+    def _no_blanks(cls, value: list[str]) -> list[str]:
+        return [item.strip()[:120] for item in value if item.strip()]
+
+
+class ChatTriggerNode(Node):
+    type = "trigger.chat"
+    label = "Chat"
+    description = "Start when someone types in a chat window this hosts for you."
+    when = (
+        "People should talk to the flow rather than call it: a support desk, an assistant on "
+        "your site, something you want to try by hand. Publishing gives you a link to open or "
+        "embed, and there is nothing to build."
+    )
+    needs = (
+        "Nothing. Publish the flow and the chat page is live at the link the node shows.",
+        "An AI Agent after it, usually with Memory set to conversation.",
+    )
+    example = "Chat -> AI Agent"
+    tier = 1
+    category = "trigger"
+    is_trigger = True
+    config_model = ChatTriggerConfig
+    output_paths = ("text", "session_id", "visitor", "history")
+
+    async def run(self, config: ChatTriggerConfig, ctx: NodeContext) -> NodeResult:
+        payload = ctx.trigger.get("payload", {})
+        text = str(payload.get("text") or "").strip()
+        if not text:
+            raise NodeError("The chat message was empty, so there is nothing to answer.")
+        return NodeResult(
+            output={
+                "text": text,
+                # One id per browser tab, kept by the page. It is what the
+                # agent's memory should be keyed on: without it every message
+                # in a conversation is a stranger.
+                "session_id": str(payload.get("session_id") or ""),
+                "visitor": payload.get("visitor") or {},
+                "history": payload.get("history") or [],
+            }
+        )
+
+
 class ScheduleTriggerConfig(BaseModel):
     model_config = {"extra": "forbid"}
 

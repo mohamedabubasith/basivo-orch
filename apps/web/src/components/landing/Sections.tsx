@@ -512,8 +512,8 @@ const COMPARISON = [
   },
   {
     them: "Flowise and other chat builders",
-    theirs: "Aimed at a chat window with a person typing into it.",
-    ours: "Aimed at work that finishes on a trigger or a schedule while nobody is watching, and leaves an artifact behind.",
+    theirs: "Aimed at a chat window, and that is the whole surface.",
+    ours: "Chat is one trigger of six. Drag the Chat node on, publish, and you have a hosted window to open or embed. The same flow can also run on a schedule and leave a file behind while nobody is watching.",
   },
   {
     them: "Hosted agent products",

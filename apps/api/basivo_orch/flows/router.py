@@ -258,6 +258,28 @@ async def install_flow_template(
     )
 
 
+@management_router.get("/orgs/{organization_id}/flows/{flow_id}/chat")
+async def chat_link(
+    flow_id: uuid.UUID,
+    context: OrgContext = Depends(require(Permission.FLOW_READ)),
+    session: AsyncSession = Depends(get_async_session),
+) -> dict[str, Any]:
+    """Where this flow's chat page is, for the builder to show and copy.
+
+    The token is derived rather than stored, so it cannot be listed from the
+    database or leaked in an exported graph — but the person who owns the flow
+    obviously needs to see it, and this is the one place it is handed out.
+    """
+    from basivo_orch.flows.chat import chat_token, chat_url
+
+    flow = await _load_flow(session, context.organization_id, flow_id)
+    return {
+        "url": chat_url(flow.id),
+        "token": chat_token(flow.id),
+        "published": flow.published_version_id is not None,
+    }
+
+
 @management_router.post("/orgs/{organization_id}/flows/{flow_id}/github/connect")
 async def connect_github_repository(
     flow_id: uuid.UUID,

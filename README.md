@@ -24,7 +24,7 @@ You draw a pipeline on a canvas, and it runs without you. What comes out the
 other end is a thing, not a log line: a pull request, a rendered MP4, a voice
 track, a montage, a post in a channel, a reply to the person who asked.
 
-Inside a flow there are eighteen node types. An agent with real tools, skills,
+Inside a flow there are nineteen node types. An agent with real tools, skills,
 sub-agents, MCP servers and hand over. A plain completion when no tools are
 needed. Python in a sandbox, HTTP, conditionals, variables, chat memory that
 survives between runs. Two media nodes: describe a video and get an MP4, with a
@@ -32,7 +32,8 @@ voice if you tick the box; describe a picture and get a PNG whose type is
 always right. Delivery: a pull request, an issue comment, a post to Telegram,
 Discord, Slack, Mastodon or Bluesky.
 
-Something has to start it, and there are five ways: a webhook you own, which
+Something has to start it, and there are six ways: a chat window this hosts for
+you at a link you can embed; a webhook you own, which
 registers itself against GitHub or Jira; a schedule; a Telegram bot; an API
 call with your own key; or you, pressing run.
 
@@ -59,8 +60,9 @@ pipeline you cannot price is a pipeline you cannot run twice.
   that edits the repository, opens the PR, and comments back on the issue.
 - **A narrated video.** Write the script with an LLM, speak it, render the
   animation with Remotion, then post the file to Telegram or Discord.
-- **A bot that answers.** A Telegram message triggers an agent with chat memory
-  and its own tools, and the reply goes back to the same chat.
+- **A bot that answers.** A Telegram message, or the chat window this hosts for
+  you, triggers an agent with conversation memory and its own tools, and the
+  reply goes back to the person who asked.
 - **A scheduled post.** A cron trigger, an LLM that writes the copy, a video or
   an image render, and a post to Slack, Mastodon or Bluesky. Nobody is watching
   while it happens.
@@ -69,11 +71,11 @@ pipeline you cannot price is a pipeline you cannot run twice.
 
 ### The whole palette
 
-Eighteen node types ship today, and none of them is a placeholder.
+Nineteen node types ship today, and none of them is a placeholder.
 
 | | |
 |---|---|
-| **Triggers** | Run manually, a webhook (GitHub and Jira register themselves), a schedule, a Telegram bot |
+| **Triggers** | Run manually, a chat window this hosts and publishes for you, a webhook (GitHub and Jira register themselves), a schedule, a Telegram bot |
 | **Agents and models** | AI Agent with tools, skills, sub-agents, hand over and MCP servers; Write with AI for a plain completion; Chat Memory that survives between runs |
 | **Code and data** | Python in a sandbox, HTTP Request, If / Else, Set Variables |
 | **Repositories** | Fix Code and Open PR, Open Issue, Comment on Issue |
@@ -90,7 +92,7 @@ People ask which tool this replaces, so here is the honest version.
 | Instead of | What they are | What this does |
 |---|---|---|
 | n8n, Zapier | General automation with an AI node added to the palette. Video, if you need it, is a service you run beside them. | Built around the agent, and the render is a node on the same canvas. React goes in, an MP4 comes out. |
-| Flowise and other chat builders | Aimed at a chat window with a person typing into it. | Aimed at work that finishes on a trigger or a schedule while nobody is watching, and leaves a file behind. |
+| Flowise and other chat builders | Aimed at a chat window, and that is the whole surface. | Chat is one trigger of six: drag the Chat node on, publish, and you get a hosted window to open or embed. The same flow can also run on a schedule and leave a file behind while nobody watches. |
 | Hosted agent products | Model spend folded into a subscription you cannot see inside. | Your own keys, billed by the provider at their price, with tokens and dollars on every node of every run. |
 
 The setup difference is the one you feel first. Connecting a repository
@@ -100,7 +102,7 @@ and tick the events; publishing the flow registers the hook and holds the
 secret. If you delete the flow, the hook goes with it.
 
 Where the others win: n8n and Zapier connect to hundreds of applications. This
-has eighteen node types. If the job is moving rows between SaaS tools, use
+has nineteen node types. If the job is moving rows between SaaS tools, use
 one of those and take the afternoon off.
 
 ## Building one
@@ -206,6 +208,7 @@ make lint      # ruff, tsc, oxlint
 |---|---|
 | [`docs/SOW.md`](docs/SOW.md) | What the product is meant to be |
 | [`docs/video.md`](docs/video.md) | The video nodes, the renderer, and Remotion's licence |
+| [`docs/chat.md`](docs/chat.md) | The hosted chat window, its link, and what the flow sees |
 | [`docs/billing.md`](docs/billing.md) | The one switch and where limits are enforced |
 | [`docs/recipes/`](docs/recipes) | Issue to PR, agent memory, agent skills, narrated video, autofix on failure |
 | [`docs/generated-code-edits.md`](docs/generated-code-edits.md) | What was changed in generated auth code |

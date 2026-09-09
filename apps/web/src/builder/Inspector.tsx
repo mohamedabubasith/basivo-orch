@@ -13,8 +13,9 @@
  * the floor rather than the ceiling.
  */
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
+import { ChatWindow } from "../components/chat/ChatWindow";
 import { cx } from "../lib/cx";
 import { NodeIconChip } from "./nodeIcons";
 import type { Suggestion } from "./suggestions";
@@ -288,6 +289,10 @@ export function Inspector({
               </p>
             )}
           </div>
+        )}
+
+        {spec.type === "trigger.chat" && (
+          <ChatSource orgId={orgId} flowId={flowId} isPublished={isPublished} />
         )}
 
         {spec.type === "trigger.webhook" && (
@@ -1152,6 +1157,133 @@ const GITHUB_EVENTS: { value: string; label: string }[] = [
   { value: "pull_request", label: "A pull request is opened or updated" },
   { value: "push", label: "Code is pushed" },
 ];
+
+/**
+ * A published chat page, from the side of the person who built it: the link,
+ * something to paste into a site, and the window itself so they can talk to
+ * their own flow without leaving the canvas.
+ *
+ * The token is fetched rather than derived here. It comes from the deployment
+ * key, and the browser has no business knowing how to compute one.
+ */
+function ChatSource({
+  orgId,
+  flowId,
+  isPublished,
+}: {
+  orgId?: string | null;
+  flowId?: string;
+  isPublished?: boolean;
+}) {
+  const [link, setLink] = useState<{ url: string; token: string } | null>(null);
+  const [copied, setCopied] = useState("");
+  const [tried, setTried] = useState(false);
+
+  useEffect(() => {
+    if (!orgId || !flowId || !isPublished) return;
+    let live = true;
+    void api
+      .get<{ url: string; token: string }>(`/orgs/${orgId}/flows/${flowId}/chat`)
+      .then((answer) => live && setLink(answer))
+      .catch(() => live && setLink(null));
+    return () => {
+      live = false;
+    };
+  }, [orgId, flowId, isPublished]);
+
+  // The page is served by this app, so the link people should share is this
+  // origin's — not the API's, which is where the server-side default points
+  // when the two are configured as one host.
+  const page = link
+    ? `${window.location.origin}/chat/${flowId}/${link.token}`
+    : "";
+  const embed = page
+    ? `<iframe src="${page}" style="border:0;width:420px;height:600px" title="Chat"></iframe>`
+    : "";
+
+  async function copy(what: string, value: string) {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(what);
+      setTimeout(() => setCopied(""), 1500);
+    } catch {
+      setCopied("");
+    }
+  }
+
+  if (!isPublished) {
+    return (
+      <div className="space-y-2 rounded-xl border border-[var(--edge)] bg-ink-950/40 p-3">
+        <p className="text-xs font-medium text-ink-300">The chat page</p>
+        <p className="text-xs leading-relaxed text-ink-500">
+          Appears when you publish. There is nothing to build and nothing to
+          host: publishing gives you a link to open or embed, and this window
+          so you can try it yourself.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-2.5 rounded-xl border border-[var(--edge)] bg-ink-950/40 p-3">
+      <p className="text-xs font-medium text-ink-300">The chat page</p>
+      {page ? (
+        <>
+          <div className="flex items-center gap-1.5">
+            <code className="min-w-0 flex-1 truncate rounded-md bg-ink-950/60 px-2 py-1.5 font-mono text-xs text-ink-200">
+              {page}
+            </code>
+            <button
+              type="button"
+              onClick={() => void copy("link", page)}
+              className="rounded-lg border border-ink-600 px-2 py-1.5 text-xs text-ink-300 transition-colors hover:border-brand-400"
+            >
+              {copied === "link" ? "Copied" : "Copy"}
+            </button>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => void copy("embed", embed)}
+              className="rounded-lg border border-ink-600 px-2 py-1.5 text-xs text-ink-300 transition-colors hover:border-brand-400"
+            >
+              {copied === "embed" ? "Copied" : "Copy embed code"}
+            </button>
+            <a
+              href={page}
+              target="_blank"
+              rel="noreferrer"
+              className="rounded-lg border border-ink-600 px-2 py-1.5 text-xs text-ink-300 transition-colors hover:border-brand-400"
+            >
+              Open
+            </a>
+            <button
+              type="button"
+              onClick={() => setTried((open) => !open)}
+              className="rounded-lg border border-ink-600 px-2 py-1.5 text-xs text-ink-300 transition-colors hover:border-brand-400"
+            >
+              {tried ? "Hide" : "Try it here"}
+            </button>
+          </div>
+          {tried && flowId && (
+            <ChatWindow flowId={flowId} token={link!.token} className="h-96" />
+          )}
+          <p className="text-xs leading-relaxed text-ink-500">
+            Anyone with the link can talk to this flow, and every message is a
+            run you pay for. The message arrives as{" "}
+            <code className="text-ink-400">{"{{ input.text }}"}</code>; key the
+            agent's memory on{" "}
+            <code className="text-ink-400">{"{{ input.session_id }}"}</code> so
+            a conversation remembers itself. The reply is whatever the last node
+            returns.
+          </p>
+        </>
+      ) : (
+        <p className="text-xs leading-relaxed text-ink-500">Loading the link…</p>
+      )}
+    </div>
+  );
+}
 
 /** Mirrors `JIRA_HOOK_EVENTS` in `nodes/jira.py`. */
 const JIRA_EVENTS: { value: string; label: string }[] = [

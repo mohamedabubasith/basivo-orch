@@ -30,6 +30,7 @@ from basivo_orch.flows.nodes.session import SessionNode
 from basivo_orch.flows.nodes.social import SocialPostNode
 from basivo_orch.flows.nodes.telegram import TelegramReplyNode
 from basivo_orch.flows.nodes.triggers import (
+    ChatTriggerNode,
     ManualTriggerNode,
     ScheduleTriggerNode,
     TelegramTriggerNode,
@@ -39,6 +40,7 @@ from basivo_orch.flows.nodes.video import AiVideoNode
 
 _NODES: tuple[type[Node], ...] = (
     ManualTriggerNode,
+    ChatTriggerNode,
     TelegramTriggerNode,
     WebhookTriggerNode,
     ScheduleTriggerNode,
