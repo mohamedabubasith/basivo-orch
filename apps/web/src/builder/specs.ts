@@ -76,7 +76,7 @@ const HEADINGS: Record<string, string> = {
   utility: "Logic & Data",
   data: "Logic & Data",
   ai: "AI",
-  design: "Images, Video & Voice",
+  design: "Images & Video",
   devops: "Code & Git",
   social: "Messaging",
 };

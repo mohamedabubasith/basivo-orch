@@ -62,17 +62,18 @@ def test_the_response_schema_carries_the_guide() -> None:
         )
 
 
-def test_speak_is_hidden_but_still_runs() -> None:
-    """Voice belongs inside the video node people already found. The type stays
-    registered so saved flows keep executing."""
-    assert registry.REGISTRY["audio.speak"].hidden is True
-    assert registry.REGISTRY["audio.speak"].describe()["hidden"] is True
-    assert registry.REGISTRY["video.generate"].config_model.model_fields["narration"].title
+def test_the_voice_is_a_tick_box_on_the_video_node() -> None:
+    """There is no speech node to find, wire up and match to a length. The one
+    question a person has — does this video talk — is asked where they already
+    are, and it says what happens when they answer yes."""
+    narration = registry.REGISTRY["video.ai"].config_model.model_fields["narration"]
+    assert narration.title and narration.description
+    assert "voice" in narration.title.lower()
 
 
 def test_every_poster_size_has_a_label_a_person_reads() -> None:
-    from basivo_orch.flows.nodes.design import SIZES, RenderConfig
+    from basivo_orch.flows.nodes.design import SIZES, AiImageConfig
 
-    labels = RenderConfig.model_json_schema()["properties"]["size"]["x-enum-labels"]
+    labels = AiImageConfig.model_json_schema()["properties"]["size"]["x-enum-labels"]
     for key in [*SIZES, "custom"]:
         assert key in labels and "_" not in labels[key], key

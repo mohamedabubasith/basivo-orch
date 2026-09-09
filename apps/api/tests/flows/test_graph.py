@@ -236,7 +236,7 @@ def test_problems_speak_in_the_authors_names_not_ids() -> None:
                 "name": "Run Manually",
                 "config": {},
             },
-            {"id": "design_render", "type": "design.render", "name": "Render Poster", "config": {}},
+            {"id": "image_ai", "type": "image.ai", "name": "Make the Poster", "config": {}},
             {
                 "id": "data_set",
                 "type": "data.set",
@@ -244,16 +244,16 @@ def test_problems_speak_in_the_authors_names_not_ids() -> None:
                 "config": {"assignments": [{"name": "x", "value": 1}]},
             },
         ],
-        [{"source": "trigger_manual", "target": "design_render"}],
+        [{"source": "trigger_manual", "target": "image_ai"}],
     )
     with pytest.raises(GraphError) as caught:
         check(graph)
     joined = " | ".join(caught.value.problems)
-    assert "Render Poster: Html is required." in joined
-    assert "design_render" not in joined
+    assert "Make the Poster: What to make is required." in joined
+    assert "image_ai" not in joined
 
     # Shape problems are reported once the configuration is clean.
-    graph.node("design_render").config["html"] = "<div>hi</div>"
+    graph.node("image_ai").config["brief"] = "a poster"
     with pytest.raises(GraphError) as caught:
         check(graph)
     joined = " | ".join(caught.value.problems)

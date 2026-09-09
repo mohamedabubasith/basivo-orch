@@ -35,7 +35,7 @@ def test_the_cpu_bound_nodes_are_the_ones_marked_heavy():
     """Marked by hand, so this pins the list. An unmarked render node would
     run four-up on a two-core box and nothing would say why it got slower."""
     heavy = {node_type for node_type, cls in registry.REGISTRY.items() if cls.heavy}
-    assert heavy == {"video.render", "video.generate", "design.render", "audio.speak"}
+    assert heavy == {"video.ai", "image.ai"}
 
     # And the ones that are merely *slow* stay unmarked: an agent call is
     # minutes of waiting on someone else's GPU, and serialising those would

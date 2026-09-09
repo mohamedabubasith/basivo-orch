@@ -94,7 +94,7 @@ class LlmGenerateNode(Node):
         ),
         "A trigger before it, or any node whose output the prompt should write from",
     )
-    example = "Schedule -> Write with AI -> Describe a Video -> Post to Social"
+    example = "Schedule -> Write with AI -> AI Video -> Post to Social"
     tier = 2
     category = "ai"
     config_model = LlmGenerateConfig

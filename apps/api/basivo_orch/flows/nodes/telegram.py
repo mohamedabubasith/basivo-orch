@@ -118,7 +118,7 @@ class TelegramReplyNode(Node):
         "that person: a text, a status update, a rendered video."
     )
     needs = ("The Telegram Bot trigger at the start of the flow",)
-    example = "Telegram Bot -> Describe a Video -> Telegram Reply"
+    example = "Telegram Bot -> AI Video -> Telegram Reply"
     tier = 1
     category = "social"
     config_model = TelegramReplyConfig

@@ -24,12 +24,13 @@ You draw a pipeline on a canvas, and it runs without you. What comes out the
 other end is a thing, not a log line: a pull request, a rendered MP4, a voice
 track, a montage, a post in a channel, a reply to the person who asked.
 
-Inside a flow there are twenty three node types. An agent with real tools,
-skills, sub-agents, MCP servers and hand over. A plain completion when no tools
-are needed. Python in a sandbox, HTTP, conditionals, variables, chat memory
-that survives between runs. Renders: video from React, images from HTML, a
-photo montage, an invitation, speech from text. Delivery: a pull request, an
-issue comment, a post to Telegram, Discord, Slack, Mastodon or Bluesky.
+Inside a flow there are eighteen node types. An agent with real tools, skills,
+sub-agents, MCP servers and hand over. A plain completion when no tools are
+needed. Python in a sandbox, HTTP, conditionals, variables, chat memory that
+survives between runs. Two media nodes: describe a video and get an MP4, with a
+voice if you tick the box; describe a picture and get a PNG whose type is
+always right. Delivery: a pull request, an issue comment, a post to Telegram,
+Discord, Slack, Mastodon or Bluesky.
 
 Something has to start it, and there are five ways: a webhook you own, which
 registers itself against GitHub or Jira; a schedule; a Telegram bot; an API
@@ -68,7 +69,7 @@ pipeline you cannot price is a pipeline you cannot run twice.
 
 ### The whole palette
 
-Twenty three node types ship today, and none of them is a placeholder.
+Eighteen node types ship today, and none of them is a placeholder.
 
 | | |
 |---|---|
@@ -76,7 +77,7 @@ Twenty three node types ship today, and none of them is a placeholder.
 | **Agents and models** | AI Agent with tools, skills, sub-agents, hand over and MCP servers; Write with AI for a plain completion; Chat Memory that survives between runs |
 | **Code and data** | Python in a sandbox, HTTP Request, If / Else, Set Variables |
 | **Repositories** | Fix Code and Open PR, Open Issue, Comment on Issue |
-| **Media** | Make a Video, Describe a Video (the model writes the composition, we render it and check the frames), Photo Montage, Wedding Invitation, HTML to Image, Prepare Photo, Text to Speech |
+| **Media** | AI Video (describe it, a model writes the animation, we render it and check the frames, and one tick box adds a voice and captions), AI Image (a model writes the page, a browser draws it, so the type is always right) |
 | **Delivery** | Post to Social (Telegram, Discord, Slack, Mastodon, Bluesky), Telegram Reply |
 
 Every model call reports its tokens and its price, whichever provider it went
@@ -99,7 +100,7 @@ and tick the events; publishing the flow registers the hook and holds the
 secret. If you delete the flow, the hook goes with it.
 
 Where the others win: n8n and Zapier connect to hundreds of applications. This
-has twenty three node types. If the job is moving rows between SaaS tools, use
+has eighteen node types. If the job is moving rows between SaaS tools, use
 one of those and take the afternoon off.
 
 ## Building one

@@ -3,6 +3,23 @@
 Monorepo: `apps/api` (FastAPI + SQLAlchemy, managed by `uv`) and `apps/web`
 (React + Vite + Tailwind v4).
 
+## What this product is for
+
+**Simple setup is the product.** n8n and Flowise can do most of what this does,
+and the reason someone picks this instead is that they get to the result
+without assembling it: no webhook pasted into a repository's settings, no
+render service standing beside the automation tool, no choosing between four
+nodes that all make a video. If a feature asks the person to know something
+before they can start, it is not finished.
+
+That principle beats a longer palette every time. Before adding a node, an
+option or a step, ask what it forces someone to decide, and whether the product
+could decide it instead. A tick box on a node they already found is better than
+a node they have to find. One field that takes a sentence is better than six
+fields that take a configuration. A default that is right for most people is
+better than a required choice — and where a choice is genuinely theirs, say
+what happens for each answer in the field's own description.
+
 ## Commands
 
 ```bash
@@ -102,10 +119,15 @@ these are backed by tests that fail the suite if skipped:
   bundle, checked for a flat frame and for a picture that never changes. A
   video that renders eight seconds of empty gradient is the worst outcome
   there is, because nothing failed.
-- Posters are RENDERED, not generated: a model writes HTML, `design.render`
+- Pictures are RENDERED, not generated: a model writes HTML, `image.ai`
   screenshots it in headless Chromium with real fonts. Image models get
   typography wrong about one time in ten and never say so. The worker image
   therefore needs `playwright install chromium`.
+- MEDIA IS TWO NODES, `video.ai` and `image.ai`, and both take an LLM
+  credential. Do not add a third for a shape of video (a montage, an
+  invitation, an intro): that is a sentence in the brief, not a node. Seven
+  media nodes were folded into these two in September 2026 because choosing
+  between them was work the person should never have been given.
 - A node that changes anything outside this system sets `replay_safe = False`.
   Recovery re-runs a graph from the START, so a run whose autofix already
   opened a PR must not be replayed — the reaper fails those for a human

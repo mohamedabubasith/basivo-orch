@@ -25,8 +25,6 @@ from basivo_orch.flows.nodes.base import NodeContext, NodeError
 from basivo_orch.flows.nodes.speech import (
     VOICES,
     WORDS_PER_SECOND,
-    SpeakConfig,
-    SpeakNode,
     language_for,
     model_paths,
     word_budget,
@@ -200,17 +198,6 @@ async def http_client():
         yield client
 
 
-async def test_empty_text_is_refused_before_the_model_is_touched(http_client):
-    """Loading 82MB of ONNX to say nothing is a slow way to fail."""
-    recorder = _Recorder()
-    with pytest.raises(NodeError, match="nothing to say"):
-        await SpeakNode().run(
-            SpeakConfig(text="{{ input.text }}"),
-            make_context(recorder, http=http_client, text="   "),
-        )
-    assert recorder.steps == []
-
-
 async def test_an_unknown_voice_names_some_real_ones(http_client, monkeypatch):
     from basivo_orch.flows.nodes import speech
 
@@ -221,30 +208,6 @@ async def test_an_unknown_voice_names_some_real_ones(http_client, monkeypatch):
     monkeypatch.setattr(speech, "load_engine", lambda: _Engine())
     with pytest.raises(NodeError, match="af_heart"):
         await speech.speak("hello", voice="Morgan Freeman", speed=1.0)
-
-
-async def test_the_node_reports_words_and_timings_for_the_caption_layer(http_client, monkeypatch):
-    """What downstream nodes consume: a duration and per-word spans."""
-    from basivo_orch.flows.nodes import speech
-
-    async def fake_speak(text, *, voice, speed):
-        return b"RIFFfake", 2.0, [{"word": "Ship", "start": 0.0, "end": 0.5}]
-
-    monkeypatch.setattr(speech, "speak", fake_speak)
-    recorder = _Recorder()
-
-    result = await SpeakNode().run(
-        SpeakConfig(text="{{ input.text }}", format="wav"),
-        make_context(recorder, http=http_client),
-    )
-
-    assert result.output["duration_seconds"] == 2.0
-    assert result.output["word_count"] == 3
-    assert result.output["words"][0]["word"] == "Ship"
-    assert recorder.artifacts[0][1] == "audio/wav"
-    started = recorder.data_for("speech.started")[0]
-    assert started["estimated_seconds"] == round(3 / WORDS_PER_SECOND, 1)
-    assert recorder.data_for("speech.finished")[0]["timed_words"] == 1
 
 
 async def test_a_missing_model_says_how_to_install_it(monkeypatch):

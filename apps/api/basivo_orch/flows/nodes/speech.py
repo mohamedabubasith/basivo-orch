@@ -1,7 +1,8 @@
 """Voice-over: text in, narration out, with word-level timings.
 
-The video nodes render silent MP4s, and a silent 30-second product video is
-half a product video. This is the other half.
+Not a node. The voice belongs to AI Video, which ticks a box rather than
+asking anyone to wire a speech step in and match its length to the animation.
+This module is what that box calls.
 
 **Local, not a cloud voice.** Kokoro-82M is Apache-2.0, runs on CPU at better
 than real time, and ships 54 voices across 8 languages, so narration costs
@@ -35,12 +36,9 @@ import re
 import threading
 import time
 from pathlib import Path
-from typing import Any, ClassVar, Literal
+from typing import Any
 
-from pydantic import BaseModel, Field
-
-from basivo_orch.flows.nodes.base import Node, NodeContext, NodeError, NodeResult
-from basivo_orch.flows.templating import render_value
+from basivo_orch.flows.nodes.base import NodeError
 from basivo_orch.logging import get_logger
 
 log = get_logger(__name__)
@@ -276,107 +274,6 @@ def word_budget(seconds: float) -> int:
 # ---------------------------------------------------------------------------
 # The node
 # ---------------------------------------------------------------------------
-
-
-class SpeakConfig(BaseModel):
-    model_config = {"extra": "forbid"}
-
-    text: str = Field(
-        default="{{ input.text }}",
-        max_length=6000,
-        description="What to say. Supports {{ references }}.",
-    )
-    voice: str = Field(default="af_heart", max_length=40)
-    #: Below 0.7 the prosody smears and above 1.4 it starts to sound anxious;
-    #: the useful range for narration is 0.9 to 1.15.
-    speed: float = Field(default=1.0, ge=0.5, le=2.0)
-    format: Literal["wav", "mp3"] = "mp3"
-    filename: str = Field(default="narration", max_length=80)
-
-
-class SpeakNode(Node):
-    type = "audio.speak"
-    # Voice lives inside Describe a Video as its narration option, which is
-    # where people look for it. This node stays for flows that already use
-    # it and for the rare case of wanting audio alone.
-    hidden = True
-    label = "Text to Speech"
-    description = "Turn text into narration with a real voice, on this machine."
-    when = "A video or message needs a spoken voice track and you do not want to pay a speech API."
-    needs = ("Text from an earlier node.",)
-    example = "AI Agent -> Text to Speech -> Make a Video"
-    tier = 2
-    category = "design"
-    config_model = SpeakConfig
-    output_paths = (
-        "artifact_id",
-        "url",
-        "duration_seconds",
-        "word_count",
-        "words",
-        "format",
-    )
-
-    #: Synthesis is a pure function of (text, voice, speed) and touches nothing
-    #: outside this system, so repeating it after a recovery is safe.
-    replay_safe: ClassVar[bool] = True
-    #: Neural inference on the CPU, saturating a core for seconds at a time.
-    heavy: ClassVar[bool] = True
-    max_attempts = 2
-    timeout_seconds = 300.0
-
-    async def run(self, config: SpeakConfig, ctx: NodeContext) -> NodeResult:
-        text = render_value(config.text, ctx.template_context())
-        if not isinstance(text, str):
-            text = str(text)
-        text = text.strip()
-        if not text:
-            raise NodeError("There is nothing to say. The text rendered empty.")
-
-        words = len([w for w in re.split(r"\s+", text) if w])
-        await ctx.step(
-            "speech.started",
-            {
-                "voice": config.voice,
-                "speed": config.speed,
-                "words": words,
-                "estimated_seconds": round(words / WORDS_PER_SECOND, 1),
-            },
-        )
-        await ctx.progress(f"Speaking {words} words as {config.voice}")
-
-        wav, seconds, timings = await speak(text, voice=config.voice, speed=config.speed)
-
-        audio, content_type = wav, "audio/wav"
-        if config.format == "mp3":
-            audio, content_type = await _to_mp3(wav), "audio/mpeg"
-
-        saved = await ctx.save_artifact(
-            audio,
-            filename=f"{config.filename}.{config.format}",
-            content_type=content_type,
-            node_id=ctx.node_id,
-        )
-        await ctx.step(
-            "speech.finished",
-            {
-                **saved,
-                "duration_seconds": seconds,
-                "words_per_second": round(words / seconds, 2) if seconds else None,
-                "timed_words": len(timings),
-            },
-        )
-
-        return NodeResult(
-            output={
-                **saved,
-                "duration_seconds": seconds,
-                "word_count": words,
-                "words": timings,
-                "format": config.format,
-            },
-            metrics={"duration_ms": int(seconds * 1000)},
-        )
 
 
 async def _to_mp3(wav: bytes) -> bytes:

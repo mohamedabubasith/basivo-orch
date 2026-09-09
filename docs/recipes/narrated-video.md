@@ -54,12 +54,13 @@ The narration is saved as its own artifact as well as being mixed into the
 video, so you can play the voice on the run page and judge it by ear without
 downloading the MP4.
 
-## Narration on its own
+## Narration is not a node
 
-Voice-over is an option on the Describe a Video node; turn on **Add a voice-over**. The standalone Speak node (`audio.speak`) is no longer in the palette but keeps working in flows that have it: text
-in, an audio artifact out, plus `words` — the per-word timings. Useful for a
-Telegram voice note, an accessibility read-out, or feeding a composition you
-wrote by hand (`video.render` takes the artifact).
+There is no speech step to find, wire up and match to a length. Tick **This
+video needs a voice** on AI Video and the script, the voice and the captions
+are all handled: the video is made as long as the voice actually took, which is
+the part that used to go wrong by hand. The narration is still saved as its own
+artifact, so it can be played on the run page or posted on its own.
 
 ## Installing the voice
 

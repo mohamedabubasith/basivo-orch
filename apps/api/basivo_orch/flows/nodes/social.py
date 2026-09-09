@@ -178,7 +178,7 @@ class SocialPostNode(Node):
         "A credential for the target network saved under Credentials.",
         "A trigger before it, or any node whose output it should work on",
     )
-    example = "Schedule -> Write with AI -> Make a Video -> Post to Social"
+    example = "Schedule -> Write with AI -> AI Video -> Post to Social"
     tier = 2
     category = "social"
     config_model = SocialPostConfig

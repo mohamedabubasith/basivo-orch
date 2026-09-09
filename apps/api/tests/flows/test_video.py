@@ -22,17 +22,21 @@ from basivo_orch.flows.nodes.base import NodeContext, NodeError
 from basivo_orch.flows.nodes.remotion import RenderJob, is_installed
 from basivo_orch.flows.nodes.video import (
     MAX_DURATION_SECONDS,
-    VideoRenderConfig,
-    VideoRenderNode,
+    AiVideoConfig,
+    _json_object_of,
+    _narrate,
+    _normalise_storyboard,
     caption_lines,
+    composition_code_of,
     frame_difference,
     frame_spread,
     probe_frames,
     review_frames,
     scene_problems,
+    storyboard_probe_frames,
+    storyboard_scene_problems,
     strip_code_fences,
 )
-from basivo_orch.flows.nodes.video_templates import TEMPLATE_CHOICES, TEMPLATES
 
 GOOD_SCENE = """
 import React from "react";
@@ -182,6 +186,46 @@ def test_markdown_fences_are_unwrapped():
     assert strip_code_fences("```tsx\nconst a = 1;\n```") == "const a = 1;"
 
 
+def test_reasoning_before_a_fenced_composition_is_discarded():
+    reply = f"I will reason first.\n```tsx\n{GOOD_SCENE}\n```\nThat is the file."
+    assert composition_code_of(reply).startswith('import React from "react"')
+    assert "I will reason" not in composition_code_of(reply)
+
+
+def test_storyboard_json_can_follow_a_model_preface():
+    parsed = _json_object_of('Here is the plan:\n{"title":"Launch","scenes":[]}\nDone')
+    assert parsed["title"] == "Launch"
+
+
+def test_storyboard_weights_become_an_exact_timeline():
+    plan = _normalise_storyboard(
+        {
+            "title": "Launch",
+            "scenes": [
+                {"headline": "First", "duration_weight": 1},
+                {"headline": "Second", "duration_weight": 3},
+            ],
+        },
+        duration=8,
+        complexity="balanced",
+    )
+    assert plan["scenes"][0]["start_seconds"] == 0
+    assert plan["scenes"][0]["end_seconds"] == 2
+    assert plan["scenes"][1]["end_seconds"] == 8
+
+
+def test_storyboard_checks_copy_and_supplied_images():
+    storyboard = {
+        "scenes": [
+            {"headline": "Build once", "supporting_text": "Ship everywhere"},
+            {"headline": "Stay in control", "supporting_text": ""},
+        ]
+    }
+    problems = storyboard_scene_problems(GOOD_SCENE, storyboard=storyboard, assets={"p0.png"})
+    assert any("p0.png" in problem for problem in problems)
+    assert any("planned text" in problem for problem in problems)
+
+
 # ---------------------------------------------------------------------------
 # What the frames say
 # ---------------------------------------------------------------------------
@@ -246,6 +290,20 @@ def test_the_frames_looked_at_are_spread_across_the_video():
     assert 0 <= frames[0] < frames[-1] <= 10 * 30 - 1
 
 
+def test_complex_storyboards_are_sampled_inside_each_scene():
+    storyboard = {
+        "scenes": [
+            {"start_seconds": 0, "end_seconds": 2},
+            {"start_seconds": 2, "end_seconds": 5},
+            {"start_seconds": 5, "end_seconds": 8},
+        ]
+    }
+    frames = storyboard_probe_frames(storyboard, duration=8, fps=10)
+    assert 10 in frames
+    assert 35 in frames
+    assert 65 in frames
+
+
 def test_a_very_short_video_still_has_a_frame_to_look_at():
     """A video of a frame and a half is a mistake somebody will make, and it
     must not produce a negative frame number or an empty list."""
@@ -260,66 +318,57 @@ def test_a_very_short_video_still_has_a_frame_to_look_at():
 # ---------------------------------------------------------------------------
 
 
-def test_a_custom_video_needs_a_composition():
-    with pytest.raises(ValueError, match="needs its composition"):
-        VideoRenderConfig(template="custom", scene="   ")
-
-
-def test_values_must_be_a_json_object():
-    with pytest.raises(ValueError, match="JSON object"):
-        VideoRenderConfig(props='["a", "b"]')
-    with pytest.raises(ValueError, match="JSON object"):
-        VideoRenderConfig(props="not json at all")
-
-
-def test_values_holding_a_reference_are_checked_at_run_time_instead():
-    """`{{ ... }}` is not JSON until it is filled in, so refusing it here would
-    refuse the normal case: an agent writing the copy."""
-    config = VideoRenderConfig(props='{"headline": "{{ nodes.writer.output.text }}"}')
-    assert "headline" in config.props
-
-
 def test_a_video_longer_than_the_limit_is_refused():
+    """The cap is here rather than discovered when a worker runs out of memory
+    part way through an encode."""
     with pytest.raises(ValueError):
-        VideoRenderConfig(duration_seconds=MAX_DURATION_SECONDS + 1)
+        AiVideoConfig(brief="Launch the product", duration_seconds=MAX_DURATION_SECONDS + 1)
 
 
-@pytest.mark.parametrize("name", TEMPLATE_CHOICES)
-def test_every_template_would_render(name: str):
-    """The static checks the renderer applies to an agent's work apply to ours
-    too. A template that breaks one of them ships a broken first experience."""
-    template = TEMPLATES[name]
-    assets = {
-        value
-        for value in template.props.values()
-        if isinstance(value, str) and value.endswith((".png", ".jpg"))
-    }
-    for item in template.props.values():
-        if isinstance(item, list):
-            for entry in item:
-                if isinstance(entry, dict):
-                    assets |= {
-                        str(value)
-                        for value in entry.values()
-                        if isinstance(value, str) and value.endswith((".png", ".jpg"))
-                    }
-    assert scene_problems(template.scene, assets=assets) == []
+def test_generated_videos_default_to_complex_with_room_for_code():
+    config = AiVideoConfig(brief="Launch the product", model="a-model")
+    assert config.complexity == "complex"
+    assert config.max_output_tokens == 12_000
 
 
-@pytest.mark.parametrize("name", TEMPLATE_CHOICES)
-def test_every_template_says_what_it_is_for(name: str):
-    template = TEMPLATES[name]
-    assert template.label and template.description
-    assert template.duration_seconds > 0
-    assert template.props
+async def test_short_narration_is_expanded_before_speech(monkeypatch):
+    from basivo_orch.flows.nodes import speech as speech_module
+    from tests.flows.fakes import FakeChatModel, says
 
+    replies = iter(
+        [
+            says("Too short"),
+            says("Build faster with clear workflows that keep every team aligned today."),
+        ]
+    )
+    prompts: list[str] = []
 
-def test_the_render_node_offers_every_template():
-    """The picker and the catalogue are two lists that must not drift apart:
-    a template missing from the picker cannot be chosen, and a choice with no
-    template fails at run time with a KeyError."""
-    choices = set(VideoRenderConfig.model_fields["template"].annotation.__args__)
-    assert choices == set(TEMPLATE_CHOICES) | {"custom"}
+    def respond(messages):
+        prompts.append(str(messages[-1].content))
+        return next(replies)
+
+    async def fake_speak(text, *, voice, speed):
+        words = [
+            {"word": word, "start": index * 0.2, "end": index * 0.2 + 0.2}
+            for index, word in enumerate(text.split())
+        ]
+        return b"RIFFvoice", len(words) * 0.2, words
+
+    monkeypatch.setattr(speech_module, "speak", fake_speak)
+    usage = {"input_tokens": 0, "output_tokens": 0}
+    script, _, _, _ = await _narrate(
+        AiVideoConfig(brief="Build faster", model="model", duration_seconds=4),
+        make_context(_Recorder()),
+        model=FakeChatModel(respond=respond),
+        brief="Build faster",
+        style="",
+        usage=usage,
+    )
+
+    assert len(prompts) == 2
+    assert "minimum" in prompts[1]
+    assert script.startswith("Build faster")
+    assert usage == {"input_tokens": 20, "output_tokens": 10}
 
 
 # ---------------------------------------------------------------------------
@@ -474,26 +523,6 @@ def test_caption_lines_never_overlap():
 # ---------------------------------------------------------------------------
 
 
-async def test_values_that_do_not_survive_templating_say_so():
-    recorder = _Recorder()
-    node = VideoRenderNode()
-    config = VideoRenderConfig(props='{"headline": "{{ input.headline }}"}')
-    context = make_context(recorder, input={"headline": 'a "quoted" word'})
-
-    with pytest.raises(NodeError, match="escaping"):
-        await node.run(config, context)
-
-
-async def test_a_custom_composition_is_checked_before_anything_is_rendered():
-    """Several minutes of work should not start on a file that cannot work."""
-    recorder = _Recorder()
-    node = VideoRenderNode()
-    config = VideoRenderConfig(template="custom", scene="const nothing = 1;")
-
-    with pytest.raises(NodeError, match="will not render"):
-        await node.run(config, make_context(recorder))
-
-
 # ---------------------------------------------------------------------------
 # Rendering for real
 # ---------------------------------------------------------------------------
@@ -502,28 +531,6 @@ needs_renderer = pytest.mark.skipif(
     not is_installed(),
     reason="the Remotion project is not installed here (npm install in remotion_project)",
 )
-
-
-@pytest.mark.slow
-@needs_renderer
-async def test_it_renders_a_real_video_from_a_template():
-    recorder = _Recorder()
-    node = VideoRenderNode()
-    config = VideoRenderConfig(
-        template="announcement",
-        size="square",
-        duration_seconds=2,
-        fps=12,
-        quality="draft",
-        props='{"headline": "It works"}',
-    )
-    result = await node.run(config, make_context(recorder))
-
-    assert result.output["format"] == "mp4"
-    assert recorder.saved and len(recorder.saved[0]) > 10_000
-    # An MP4 announces itself in its first bytes. A renderer that wrote a
-    # zero-length file or an error page would pass a size check and fail here.
-    assert recorder.saved[0][4:8] == b"ftyp"
 
 
 @pytest.mark.slow

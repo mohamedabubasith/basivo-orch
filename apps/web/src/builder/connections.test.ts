@@ -103,19 +103,19 @@ import type { NodeSpec } from "./specs.ts";
 const spec = (type: string, required: string[] = []): NodeSpec => ({
   type, label: type, description: "", tier: 1, category: "x", is_trigger: type.startsWith("trigger."),
   hidden: false, when: "", needs: [], example: "", ports: ["out"], output_paths: [],
-  config_schema: { required, properties: Object.fromEntries(required.map((k) => [k, { title: k === "html" ? "Html" : undefined }])) },
+  config_schema: { required, properties: Object.fromEntries(required.map((k) => [k, { title: k === "brief" ? "What to make" : undefined }])) },
 });
 const specs = new Map<string, NodeSpec>([
   ["trigger.manual", spec("trigger.manual")],
-  ["design.render", spec("design.render", ["html"])],
+  ["image.ai", spec("image.ai", ["brief"])],
   ["data.set", spec("data.set")],
 ]);
 
 test("no trigger is the first thing said", () => {
-  const poster = node("p", { nodeType: "design.render", label: "Render Poster" });
+  const poster = node("p", { nodeType: "image.ai", label: "AI Image" });
   const { summary, byNode } = liveProblems([poster], [], specs);
   assert.equal(summary[0], "Add a trigger. Nothing starts this flow yet.");
-  assert.match(byNode.get("p")!, /Html is required/);
+  assert.match(byNode.get("p")!, /What to make is required/);
 });
 
 test("a node the trigger cannot reach is flagged on the node and in the summary", () => {
@@ -129,7 +129,7 @@ test("a node the trigger cannot reach is flagged on the node and in the summary"
 
 test("a wired, filled-in flow has nothing to say", () => {
   const t = node("t", { isTrigger: true, nodeType: "trigger.manual" });
-  const p = node("p", { nodeType: "design.render", label: "Render Poster", config: { html: "<div/>" } });
+  const p = node("p", { nodeType: "image.ai", label: "AI Image", config: { brief: "a poster" } });
   const { summary, byNode } = liveProblems([t, p], [edge("t", "p")], specs);
   assert.equal(summary.length, 0);
   assert.equal(byNode.size, 0);

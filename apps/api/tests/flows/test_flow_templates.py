@@ -184,7 +184,7 @@ def test_no_node_reads_input_from_something_that_cannot_supply_it():
         },
         "telegram.reply": {"message_id", "chat_id", "sent"},
         "agent.llm": {"text", "json", "stop_reason", "handover_to", "usage"},
-        "video.invitation": {"artifact_id", "url", "seconds", "width", "height"},
+        "video.ai": {"artifact_id", "url", "duration_seconds", "script"},
     }
 
     problems: list[str] = []

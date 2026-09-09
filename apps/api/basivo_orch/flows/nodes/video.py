@@ -36,9 +36,10 @@ from __future__ import annotations
 import io
 import json
 import re
+import uuid
 from typing import Any, ClassVar, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field
 
 from basivo_orch.flows.nodes.base import Node, NodeContext, NodeError, NodeResult
 from basivo_orch.flows.nodes.remotion import (
@@ -48,7 +49,6 @@ from basivo_orch.flows.nodes.remotion import (
     probe,
     render,
 )
-from basivo_orch.flows.nodes.video_templates import TEMPLATES
 from basivo_orch.flows.templating import render_value
 
 #: The sizes people actually publish at, named by where they go rather than by
@@ -59,7 +59,7 @@ SIZES: dict[str, tuple[int, int]] = {
     "story": (1080, 1920),
 }
 
-SIZE_LABELS = {
+SIZE_LABELS: dict[str, Any] = {
     "landscape": "Landscape, YouTube or a website (1920 x 1080)",
     "square": "Square, Instagram post (1080 x 1080)",
     "story": "Vertical, Story, Reel or Short (1080 x 1920)",
@@ -80,6 +80,27 @@ def strip_code_fences(text: str) -> str:
     if lines and lines[-1].strip().startswith("```"):
         lines = lines[:-1]
     return "\n".join(lines).strip()
+
+
+def composition_code_of(text: str) -> str:
+    """Extract TSX even when a reasoning model talks before the answer.
+
+    OpenAI-compatible endpoints do not all separate reasoning from content.
+    Some therefore return a short explanation followed by a fenced file even
+    when asked for code only. Prefer a complete fenced composition, then fall
+    back to the first import so that the renderer never receives the preface.
+    """
+    for match in re.finditer(
+        r"```(?:tsx|jsx|typescript|javascript|ts|js)?\s*\n?(.*?)```", text, re.S
+    ):
+        candidate = match.group(1).strip()
+        if "export default" in candidate:
+            return candidate
+    stripped = strip_code_fences(text)
+    starts = [
+        index for marker in ("import React", "import {") if (index := stripped.find(marker)) >= 0
+    ]
+    return stripped[min(starts) :].strip() if starts else stripped
 
 
 def message_text_of(message: Any) -> str:
@@ -218,7 +239,7 @@ def probe_frames(duration_seconds: float, fps: int) -> list[int]:
     return sorted({min(last, max(0, round(last * point))) for point in PROBE_POINTS})
 
 
-def _grey(png: bytes):
+def _grey(png: bytes) -> Any:
     from PIL import Image
 
     return Image.open(io.BytesIO(png)).convert("L")
@@ -286,213 +307,40 @@ def review_frames(frames: list[bytes], *, seconds: list[float]) -> list[str]:
     return problems
 
 
-# ---------------------------------------------------------------------------
-# video.render — a composition in, an MP4 out
-# ---------------------------------------------------------------------------
-
-
-class VideoRenderConfig(BaseModel):
-    model_config = {"extra": "forbid"}
-
-    template: Literal[
-        "brand_intro",
-        "product_demo",
-        "workflow_explainer",
-        "feature_launch",
-        "announcement",
-        "stat_reveal",
-        "quote",
-        "title_card",
-        "custom",
-    ] = Field(default="feature_launch", title="Template")
-    #: Only read when the template is "custom": a React component, exported as
-    #: the default, using nothing but react and remotion.
-    scene: str = Field(
-        default="",
-        max_length=400_000,
-        title="Your own composition",
-        description="A React component, exported as the default. Only used for a custom video.",
-    )
-    #: Values the composition reads as props. Templated, so an upstream node
-    #: can write the copy: {"headline": "{{ nodes.writer.output.text }}"}.
-    props: str = Field(
-        default="",
-        max_length=40_000,
-        title="Values",
-        description='JSON of values, e.g. {"headline": "{{ nodes.writer.output.text }}"}.',
-    )
-    #: Artifact ids of images the composition may show, in order. They arrive
-    #: beside the composition as p0.png, p1.png and so on.
-    images: str = Field(
-        default="",
-        title="Images",
-        max_length=4_000,
-        description="Artifact ids of images to use, newest first. They become p0.png, p1.png.",
-    )
-    size: Literal["landscape", "square", "story"] = Field(
-        default="landscape", title="Size", json_schema_extra={"x-enum-labels": SIZE_LABELS}
-    )
-    duration_seconds: float = Field(default=0, ge=0, le=MAX_DURATION_SECONDS, title="Length")
-    format: Literal["mp4", "webm", "gif"] = "mp4"
-    quality: Literal["draft", "standard", "high"] = "standard"
-    fps: int = Field(default=30, ge=1, le=60)
-    background: str = Field(default="#0b1020", max_length=32, title="Background")
-    filename: str = Field(default="video", max_length=100)
-
-    @model_validator(mode="after")
-    def _custom_needs_a_composition(self) -> VideoRenderConfig:
-        if self.template == "custom" and not self.scene.strip():
-            raise ValueError("A custom video needs its composition.")
-        return self
-
-    @model_validator(mode="after")
-    def _props_must_be_json(self) -> VideoRenderConfig:
-        raw = self.props.strip()
-        if not raw or "{{" in raw:
-            # A value holding a `{{ reference }}` is not JSON until it has been
-            # filled in, so it is checked at run time instead.
-            return self
-        try:
-            parsed = json.loads(raw)
-        except ValueError as exc:
-            raise ValueError(f"Values must be a JSON object: {exc}") from exc
-        if not isinstance(parsed, dict):
-            raise ValueError("Values must be a JSON object, not a list or a bare value.")
-        return self
-
-    def dimensions(self) -> tuple[int, int]:
-        return SIZES[self.size]
-
-
-class VideoRenderNode(Node):
-    """A composition in, a video file out."""
-
-    type = "video.render"
-    label = "Make a Video"
-    description = "Render a template, or your own React composition, into a video file."
-    when = (
-        "You know what the video should look like and only the words change. Pick a template, "
-        "wire the copy in from an earlier node, and this renders it every time it runs."
-    )
-    needs = ("A trigger before it, or any node whose output it should work on",)
-    example = "Schedule -> Write with AI -> Make a Video -> Post to Social"
-    tier = 2
-    category = "design"
-    config_model = VideoRenderConfig
-    output_paths = ("artifact_id", "url", "duration_seconds", "size_bytes", "format")
-
-    #: A browser drawing every frame, then an encode. The heaviest thing this
-    #: product does.
-    heavy: ClassVar[bool] = True
-    #: One attempt: a retry is another several minutes of identical work, and a
-    #: composition that failed will fail the same way again.
-    max_attempts = 1
-    timeout_seconds = float(RENDER_TIMEOUT_SECONDS + 60)
-
-    async def run(self, config: VideoRenderConfig, ctx: NodeContext) -> NodeResult:
-        template_context = ctx.template_context()
-        chosen = TEMPLATES.get(config.template)
-
-        scene = (
-            strip_code_fences(str(render_value(config.scene, template_context)))
-            if config.template == "custom"
-            else chosen.scene
-        )
-        props = _resolve_props(config.props, template_context)
-        if chosen is not None:
-            # The template's own example values fill any gap, so a template
-            # rendered with nothing configured is still a finished video rather
-            # than a frame of undefined.
-            props = {**chosen.props, **props}
-
-        duration = config.duration_seconds or (chosen.duration_seconds if chosen else 8.0)
-        background = config.background or (chosen.background if chosen else "#0b1020")
-        width, height = config.dimensions()
-
-        assets = await _load_images(config.images, ctx)
-        if problems := scene_problems(scene, assets=set(assets)):
-            raise NodeError(
-                "This composition will not render: "
-                + " ".join(problems)
-                + (
-                    " If an agent wrote it, put the composition rules in that agent's prompt."
-                    if config.template == "custom"
-                    else ""
-                )
-            )
-
-        await ctx.step(
-            "video.started",
-            {
-                "template": config.template,
-                "format": config.format,
-                "quality": config.quality,
-                "fps": config.fps,
-                "size": config.size,
-                "duration_seconds": duration,
-                "images": len(assets),
-                "props": sorted(props),
-            },
-        )
-        await ctx.progress(f"Rendering {duration:g}s of {config.format}. This takes a while")
-
-        job = RenderJob(
-            scene_tsx=scene,
-            width=width,
-            height=height,
-            fps=config.fps,
-            duration_seconds=duration,
-            props=props,
-            background=background,
-            fmt=config.format,
-            quality=config.quality,
-            assets=assets,
-        )
-        data, info = await render(job)
-        if not data:
-            raise NodeError("The renderer finished but produced no file.")
-
-        saved = await ctx.save_artifact(
-            data,
-            filename=f"{config.filename}.{config.format}",
-            content_type={"mp4": "video/mp4", "webm": "video/webm", "gif": "image/gif"}[
-                config.format
-            ],
-            node_id=ctx.node_id,
-        )
-        await ctx.step("video.finished", {**saved, "duration_seconds": duration})
-        return NodeResult(
-            output={
-                **saved,
-                "duration_seconds": duration,
-                "format": config.format,
-                "width": info.get("width", width),
-                "height": info.get("height", height),
-            }
-        )
-
-
-def _resolve_props(raw: str, template_context: dict[str, Any]) -> dict[str, Any]:
-    """Fill in `{{ references }}`, then read the result as JSON."""
-    if not raw.strip():
-        return {}
-    rendered = str(render_value(raw, template_context))
-    try:
-        parsed = json.loads(rendered)
-    except ValueError as exc:
-        raise NodeError(
-            f"The values did not come out as JSON after filling in the references: {exc}. "
-            "A value containing quotes or newlines needs escaping. Ask the agent that wrote "
-            "it for plain text."
-        ) from exc
-    if not isinstance(parsed, dict):
-        raise NodeError("The values must be a JSON object, not a list or a bare value.")
-    return parsed
-
-
-#: How many images one video may use. Past this the render is long enough that
-#: the wait stops being reasonable, and the composition stops being readable.
+#: How many images one composition may show. Twelve is a long montage; past
+#: that the render is slower than the video is interesting.
 MAX_IMAGES = 12
+
+
+def photo_ids(value: Any) -> list[str]:
+    """Artifact ids out of the several shapes a flow might hand over.
+
+    A reference resolves to a real list; a person typing into the field writes
+    commas; a model writes JSON. All three are the same intent. Anything that
+    is not a UUID is dropped rather than passed on, because the failure of a
+    bad id is a 404 several nodes later.
+    """
+    if isinstance(value, list):
+        candidates = [str(item) for item in value]
+    elif isinstance(value, str):
+        text = value.strip()
+        if text.startswith("["):
+            try:
+                candidates = [str(item) for item in json.loads(text)]
+            except ValueError:
+                candidates = []
+        else:
+            candidates = [part.strip() for part in text.replace("\n", ",").split(",")]
+    else:
+        candidates = []
+
+    kept: list[str] = []
+    for candidate in candidates:
+        try:
+            kept.append(str(uuid.UUID(candidate.strip())))
+        except (ValueError, AttributeError):
+            continue
+    return kept
 
 
 async def _load_images(reference: str, ctx: NodeContext) -> dict[str, bytes]:
@@ -505,9 +353,7 @@ async def _load_images(reference: str, ctx: NodeContext) -> dict[str, bytes]:
     if not reference.strip():
         return {}
 
-    from basivo_orch.flows.nodes.montage import _photo_ids
-
-    wanted = _photo_ids(render_value(reference, ctx.template_context()))
+    wanted = photo_ids(render_value(reference, ctx.template_context()))
     images: dict[str, bytes] = {}
     for index, artifact_id in enumerate(wanted[:MAX_IMAGES]):
         if ctx.load_artifact and (blob := await ctx.load_artifact(artifact_id)):
@@ -517,7 +363,7 @@ async def _load_images(reference: str, ctx: NodeContext) -> dict[str, bytes]:
 
 
 # ---------------------------------------------------------------------------
-# video.generate — the agent writes, we look, it fixes, then we render
+# video.ai — the model writes, we look, it fixes, then we render
 # ---------------------------------------------------------------------------
 #
 # One node rather than two wired together, because the interesting part is the
@@ -570,6 +416,16 @@ RULES, each of which is a way a video comes out broken:
    height/26. This is watched on a phone.
 10. Contrast is not optional: light type on a dark ground or the reverse,
     never mid-grey on mid-grey.
+11. Follow the supplied storyboard scene by scene. Keep its visible copy
+    verbatim. Build reusable components for repeated visual elements instead
+    of one enormous JSX expression.
+12. A complex video needs depth: combine a background treatment, foreground
+    subject, typography, and small supporting details. Use at least two motion
+    properties per scene, but keep the headline stable long enough to read.
+13. Scene changes overlap by 6 to 12 frames. Give each scene a clear entrance,
+    a readable hold, and an exit. Do not fade the whole screen to empty.
+14. Use SVG elements and CSS shapes for diagrams, charts, glows, grids, paths,
+    and interface mockups. Do not use emoji as primary artwork.
 
 USEFUL PATTERNS:
 
@@ -577,6 +433,41 @@ USEFUL PATTERNS:
     const pop = spring({frame: frame - 10, fps, config: {damping: 14}});
     <Sequence from={fps * 2} durationInFrames={fps * 3}>...</Sequence>
     const drift = interpolate(frame, [0, durationInFrames], [1.05, 1.15]);"""
+
+STORYBOARD_INSTRUCTIONS = """You are the creative director for a Remotion video.
+Plan the whole timeline before another model pass writes code.
+
+Reply with one JSON object only. Do not use markdown. Use this exact shape:
+{
+  "title": "short internal title",
+  "creative_direction": "one coherent visual system",
+  "palette": ["#hex", "#hex", "#hex"],
+  "scenes": [
+    {
+      "purpose": "what changes for the viewer",
+      "headline": "exact short copy visible on screen",
+      "supporting_text": "optional exact visible copy",
+      "visual": "specific composition, shapes, image crop, or interface",
+      "motion": "specific entrance, hold, ambient motion, and exit",
+      "duration_weight": 1,
+      "asset": "p0.png or an empty string"
+    }
+  ]
+}
+
+Rules:
+1. Preserve names, facts, calls to action, and required copy from the brief.
+2. Give every scene a different visual job while keeping one design system.
+3. Headline copy is concise and supporting copy is readable at phone size.
+4. Plan continuous motion and overlapping transitions, not static slides.
+5. Use only asset names explicitly provided. Never invent a URL or file.
+6. The final scene resolves the story and keeps meaningful content visible."""
+
+SCENE_LIMITS: dict[str, tuple[int, int]] = {
+    "simple": (1, 4),
+    "balanced": (2, 6),
+    "complex": (3, 8),
+}
 
 NARRATION_INSTRUCTIONS = """You write narration for short product videos: the words a voice
 will read aloud, nothing else.
@@ -652,7 +543,272 @@ def _spoken_outline(words: list[dict[str, Any]], *, every: int = 3) -> str:
     return "  ".join(picked)
 
 
-class VideoGeneratorConfig(BaseModel):
+def _json_object_of(text: str) -> dict[str, Any]:
+    """Read the first JSON object from a model reply.
+
+    This deliberately avoids provider-specific structured-output features.
+    Plain JSON works with NVIDIA NIM and with small OpenAI-compatible models,
+    including models that put a sentence before the requested object.
+    """
+    candidate = strip_code_fences(text).strip()
+    try:
+        value = json.loads(candidate)
+    except ValueError:
+        decoder = json.JSONDecoder()
+        value = None
+        for index, character in enumerate(candidate):
+            if character != "{":
+                continue
+            try:
+                decoded, _ = decoder.raw_decode(candidate[index:])
+            except ValueError:
+                continue
+            if isinstance(decoded, dict):
+                value = decoded
+                break
+    if not isinstance(value, dict):
+        raise ValueError("The reply did not contain a JSON object.")
+    return value
+
+
+def _scene_limits(complexity: str, duration: float) -> tuple[int, int]:
+    wanted_min, wanted_max = SCENE_LIMITS[complexity]
+    practical_min = max(1, int(duration / 1.5))
+    minimum = min(wanted_min, practical_min)
+    maximum = min(wanted_max, max(minimum, int(duration / 0.75)))
+    return minimum, maximum
+
+
+def _storyboard_problems(
+    storyboard: dict[str, Any], *, complexity: str, duration: float, assets: set[str]
+) -> list[str]:
+    scenes = storyboard.get("scenes")
+    minimum, maximum = _scene_limits(complexity, duration)
+    if not isinstance(scenes, list):
+        return ["The JSON needs a scenes array."]
+    problems: list[str] = []
+    if not minimum <= len(scenes) <= maximum:
+        problems.append(f"Plan between {minimum} and {maximum} scenes, not {len(scenes)}.")
+    for index, scene in enumerate(scenes[:maximum], start=1):
+        if not isinstance(scene, dict):
+            problems.append(f"Scene {index} must be a JSON object.")
+            continue
+        if not str(scene.get("headline") or "").strip():
+            problems.append(f"Scene {index} needs concise visible headline copy.")
+        if not str(scene.get("visual") or "").strip():
+            problems.append(f"Scene {index} needs a specific visual composition.")
+        asset = str(scene.get("asset") or "").strip()
+        if asset and asset not in assets:
+            problems.append(f"Scene {index} names unavailable asset {asset!r}.")
+    return problems
+
+
+def _fallback_storyboard(
+    brief: str, *, complexity: str, duration: float, assets: set[str]
+) -> dict[str, Any]:
+    """Keep generation moving when a weak model cannot produce valid JSON."""
+    minimum, _ = _scene_limits(complexity, duration)
+    fragments = [part.strip() for part in re.split(r"[.!?\n]+", brief) if part.strip()]
+    fragments = fragments or ["Your story"]
+    scenes = []
+    ordered_assets = sorted(assets)
+    purposes = ("Open with the main idea", "Develop the story", "Resolve with the next step")
+    for index in range(minimum):
+        headline = fragments[min(index, len(fragments) - 1)][:90]
+        scenes.append(
+            {
+                "purpose": purposes[min(index, len(purposes) - 1)],
+                "headline": headline,
+                "supporting_text": "",
+                "visual": "Layered typography, geometric depth, and a clear focal point",
+                "motion": "Fast entrance, readable hold, continuous drift, and overlapping exit",
+                "duration_weight": 1.0,
+                "asset": ordered_assets[index % len(ordered_assets)] if ordered_assets else "",
+            }
+        )
+    return {
+        "title": fragments[0][:60],
+        "creative_direction": "A clear visual narrative with continuous frame-driven motion",
+        "palette": [],
+        "scenes": scenes,
+    }
+
+
+def _normalise_storyboard(
+    storyboard: dict[str, Any], *, duration: float, complexity: str
+) -> dict[str, Any]:
+    """Add an exact timeline to a validated creative plan."""
+    _, maximum = _scene_limits(complexity, duration)
+    raw_scenes = [scene for scene in storyboard.get("scenes", []) if isinstance(scene, dict)][
+        :maximum
+    ]
+    weights = []
+    for scene in raw_scenes:
+        try:
+            weight = float(scene.get("duration_weight") or 1)
+        except (TypeError, ValueError):
+            weight = 1.0
+        weights.append(max(0.25, min(weight, 8.0)))
+    total = sum(weights) or 1.0
+    cursor = 0.0
+    scenes: list[dict[str, Any]] = []
+    for index, (raw, weight) in enumerate(zip(raw_scenes, weights, strict=True), start=1):
+        end = duration if index == len(raw_scenes) else cursor + duration * weight / total
+        scenes.append(
+            {
+                "index": index,
+                "start_seconds": round(cursor, 2),
+                "end_seconds": round(end, 2),
+                "purpose": str(raw.get("purpose") or "").strip(),
+                "headline": str(raw.get("headline") or "").strip()[:160],
+                "supporting_text": str(raw.get("supporting_text") or "").strip()[:300],
+                "visual": str(raw.get("visual") or "").strip()[:600],
+                "motion": str(raw.get("motion") or "").strip()[:600],
+                "asset": str(raw.get("asset") or "").strip(),
+            }
+        )
+        cursor = end
+    return {
+        "title": str(storyboard.get("title") or "Untitled video").strip()[:120],
+        "creative_direction": str(storyboard.get("creative_direction") or "").strip()[:800],
+        "palette": [
+            str(colour)[:32]
+            for colour in (
+                storyboard.get("palette", []) if isinstance(storyboard.get("palette"), list) else []
+            )[:8]
+        ],
+        "scenes": scenes,
+    }
+
+
+def storyboard_probe_frames(storyboard: dict[str, Any], *, duration: float, fps: int) -> list[int]:
+    """Look inside every planned scene, not only at three global moments."""
+    last = max(0, round(duration * fps) - 1)
+    moments = {duration * 0.08, duration * 0.5, duration * 0.92}
+    for scene in storyboard.get("scenes", []):
+        start = float(scene.get("start_seconds") or 0)
+        end = float(scene.get("end_seconds") or duration)
+        moments.add((start + end) / 2)
+    frames = sorted({min(last, max(0, round(moment * fps))) for moment in moments})
+    if len(frames) <= 8:
+        return frames
+    indexes = {round(index * (len(frames) - 1) / 7) for index in range(8)}
+    return [frame for index, frame in enumerate(frames) if index in indexes]
+
+
+def storyboard_scene_problems(
+    scene: str, *, storyboard: dict[str, Any], assets: set[str]
+) -> list[str]:
+    """Check that working code still implements the approved storyboard."""
+    problems: list[str] = []
+    used_assets = set(_STATIC_FILE.findall(scene))
+    if missing_assets := sorted(assets - used_assets):
+        problems.append(
+            "The storyboard includes supplied images that are never shown: "
+            + ", ".join(missing_assets)
+            + ". Use each image with staticFile()."
+        )
+
+    copy: list[str] = []
+    for item in storyboard.get("scenes", []):
+        copy.extend((str(item.get("headline") or ""), str(item.get("supporting_text") or "")))
+    copy = [value for value in copy if len(value.strip()) >= 3]
+    searchable = re.sub(r"[\W_]+", " ", scene.casefold())
+    present = sum(
+        1
+        for value in copy
+        if (needle := re.sub(r"[\W_]+", " ", value.casefold()).strip()) and needle in searchable
+    )
+    required = max(1, (len(copy) + 1) // 2) if copy else 0
+    if present < required:
+        problems.append(
+            f"Only {present} of {len(copy)} planned text lines appear in the composition. "
+            "Keep the storyboard copy verbatim so required content is not lost."
+        )
+    return problems
+
+
+def _add_usage(reply: Any, usage: dict[str, int]) -> None:
+    metadata = getattr(reply, "usage_metadata", None) or {}
+    usage["input_tokens"] += int(metadata.get("input_tokens") or 0)
+    usage["output_tokens"] += int(metadata.get("output_tokens") or 0)
+
+
+async def _plan_storyboard(
+    *,
+    model: Any,
+    ctx: NodeContext,
+    brief: str,
+    style: str,
+    duration: float,
+    width: int,
+    height: int,
+    complexity: str,
+    assets: set[str],
+    spoken_outline: str,
+    usage: dict[str, int],
+) -> dict[str, Any]:
+    """Ask for a creative plan, repair it once, then use a safe fallback."""
+    from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+
+    minimum, maximum = _scene_limits(complexity, duration)
+    request = (
+        f"Original brief:\n{brief}\n\n"
+        + (f"Art direction:\n{style}\n\n" if style else "")
+        + f"Plan a {duration:g} second, {width} by {height} video at {complexity} complexity. "
+        f"Use between {minimum} and {maximum} scenes.\n"
+        + (
+            "Available image assets: " + ", ".join(sorted(assets)) + ". Assign every asset.\n"
+            if assets
+            else "There are no image assets. Plan shapes, type, diagrams, or interface visuals.\n"
+        )
+        + (f"Narration timing landmarks:\n{spoken_outline}\n" if spoken_outline else "")
+    )
+    conversation: list[Any] = [
+        SystemMessage(content=STORYBOARD_INSTRUCTIONS),
+        HumanMessage(content=request),
+    ]
+    raw: dict[str, Any] | None = None
+    problems: list[str] = []
+    for attempt in (1, 2):
+        await ctx.progress(f"Planning the video, pass {attempt}")
+        reply = await model.ainvoke(conversation)
+        _add_usage(reply, usage)
+        text = message_text_of(reply)
+        try:
+            raw = _json_object_of(text)
+        except ValueError as error:
+            problems = [str(error)]
+        else:
+            problems = _storyboard_problems(
+                raw, complexity=complexity, duration=duration, assets=assets
+            )
+        await ctx.step(
+            "video.storyboard_attempt",
+            {"attempt": attempt, "problems": problems, "characters": len(text)},
+        )
+        if not problems and raw is not None:
+            break
+        conversation.extend(
+            [
+                AIMessage(content=text),
+                HumanMessage(
+                    content=(
+                        "Repair the storyboard JSON. Fix every problem below and return the whole "
+                        "JSON object only:\n" + "\n".join(f"- {problem}" for problem in problems)
+                    )
+                ),
+            ]
+        )
+    if problems or raw is None:
+        raw = _fallback_storyboard(brief, complexity=complexity, duration=duration, assets=assets)
+        await ctx.step("video.storyboard_fallback", {"problems": problems})
+    storyboard = _normalise_storyboard(raw, duration=duration, complexity=complexity)
+    await ctx.step("video.storyboard", storyboard)
+    return storyboard
+
+
+class AiVideoConfig(BaseModel):
     """Describe the video; the agent writes it and this node checks its work."""
 
     model_config = {"extra": "forbid"}
@@ -671,6 +827,18 @@ class VideoGeneratorConfig(BaseModel):
     size: Literal["landscape", "square", "story"] = Field(
         default="landscape", title="Size", json_schema_extra={"x-enum-labels": SIZE_LABELS}
     )
+    complexity: Literal["simple", "balanced", "complex"] = Field(
+        default="complex",
+        title="Creative complexity",
+        description="Controls scene count and visual detail. Complex makes a richer storyboard.",
+        json_schema_extra={
+            "x-enum-labels": {
+                "simple": "Simple",
+                "balanced": "Balanced",
+                "complex": "Complex",
+            }
+        },
+    )
 
     #: Images the composition may use, as artifact ids or a reference, usually
     #: {{ trigger.photo_ids }} or the output of an earlier node. Without these
@@ -682,6 +850,15 @@ class VideoGeneratorConfig(BaseModel):
     model: str = Field(default="", max_length=160)
     credential_id: str = Field(
         default="", title="Model credential", description="The saved key the model is called with."
+    )
+    max_output_tokens: int = Field(
+        default=12_000,
+        ge=4_000,
+        le=32_000,
+        title="Maximum model output",
+        description=(
+            "Output budget for detailed Remotion code. Raise it if a model truncates files."
+        ),
     )
 
     #: How many times the agent may revise before this gives up. Each round is
@@ -700,10 +877,12 @@ class VideoGeneratorConfig(BaseModel):
     # -- voice ---------------------------------------------------------------
     narration: bool = Field(
         default=False,
-        title="Add a voice-over",
+        title="This video needs a voice",
         description=(
-            "The agent writes a short script from the brief, a voice reads it, and the "
-            "video is made as long as the voice actually took. No speech key needed."
+            "Tick this and the video is narrated: the model writes a short script from your "
+            "brief, a built-in voice reads it, and the video runs as long as the voice took. "
+            "Nothing to configure, no speech provider, no extra key. Leave it off for a "
+            "silent video you will add music to elsewhere."
         ),
     )
     voice: str = Field(default="af_heart", max_length=40, title="Voice")
@@ -720,15 +899,15 @@ class VideoGeneratorConfig(BaseModel):
         return SIZES[self.size]
 
 
-class VideoGeneratorNode(Node):
+class AiVideoNode(Node):
     """Brief in, finished video out, with the agent's revisions on the log."""
 
-    type = "video.generate"
-    label = "Describe a Video"
-    description = "Describe the video you want; an agent writes the animation and this renders it."
+    type = "video.ai"
+    label = "AI Video"
+    description = "Describe the video. A model writes the animation, this renders it to MP4."
     when = (
-        "The video is different every time: an intro for a site, a demo of a feature, a clip "
-        "from whatever the flow just produced. Describe it in words and get a file back."
+        "Any video: an intro for a site, a demo of a feature, a montage of photos, a clip from "
+        "whatever the flow just produced. Describe it in words and get a file back."
     )
     needs = (
         (
@@ -737,10 +916,10 @@ class VideoGeneratorNode(Node):
         ),
         "Images from the trigger or an earlier node, when the video should show them.",
     )
-    example = "Schedule -> Write with AI -> Describe a Video -> Post to Social"
+    example = "Schedule -> Write with AI -> AI Video -> Post to Social"
     tier = 2
     category = "design"
-    config_model = VideoGeneratorConfig
+    config_model = AiVideoConfig
     output_paths = (
         "artifact_id",
         "url",
@@ -750,20 +929,31 @@ class VideoGeneratorNode(Node):
         "narration_artifact_id",
         "script",
         "words",
+        "storyboard",
+        "usage.input_tokens",
+        "usage.output_tokens",
+        "usage.cost_usd",
     )
     #: Speech, a few frames per attempt, a still, then the render.
     heavy: ClassVar[bool] = True
     max_attempts = 1
     timeout_seconds = float(RENDER_TIMEOUT_SECONDS + 300)
 
-    async def run(self, config: VideoGeneratorConfig, ctx: NodeContext) -> NodeResult:
+    async def run(self, config: AiVideoConfig, ctx: NodeContext) -> NodeResult:
         from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-        from basivo_orch.flows.nodes.models import build_chat_model
+        from basivo_orch.flows.nodes.models import build_chat_model, price_of
 
         template_context = ctx.template_context()
         brief = str(render_value(config.brief, template_context))
         style = str(render_value(config.style, template_context)) if config.style else ""
+        if not brief.strip():
+            raise NodeError(
+                "The video brief rendered empty. Check its reference against the output of the "
+                "node before this one."
+            )
+        if ctx.save_artifact is None:  # pragma: no cover - engine contract
+            raise NodeError("This run cannot save generated video artifacts.")
         width, height = config.dimensions()
 
         model = await build_chat_model(
@@ -771,17 +961,21 @@ class VideoGeneratorNode(Node):
             provider=config.provider,
             model=config.model,
             credential_id=config.credential_id,
-            max_tokens=8000,
-            temperature=0.4,
+            max_tokens=config.max_output_tokens,
+            temperature=0.35,
         )
+        usage: dict[str, int] = {"input_tokens": 0, "output_tokens": 0}
 
         # The voice comes first. The length of the video, and the moments the
         # composition is asked to cut on, are both derived from how long the
         # narration actually turned out to be.
-        script, narration_audio, spoken_seconds, words = "", b"", 0.0, []
+        script = ""
+        narration_audio = b""
+        spoken_seconds = 0.0
+        words: list[dict[str, Any]] = []
         if config.narration:
             script, narration_audio, spoken_seconds, words = await _narrate(
-                config, ctx, model=model, brief=brief, style=style
+                config, ctx, model=model, brief=brief, style=style, usage=usage
             )
 
         duration = (
@@ -791,10 +985,25 @@ class VideoGeneratorNode(Node):
         )
 
         assets = await _load_images(config.photos, ctx)
+        image_assets = set(assets)
+        storyboard = await _plan_storyboard(
+            model=model,
+            ctx=ctx,
+            brief=brief,
+            style=style,
+            duration=duration,
+            width=width,
+            height=height,
+            complexity=config.complexity,
+            assets=image_assets,
+            spoken_outline=_spoken_outline(words),
+            usage=usage,
+        )
         instructions = (
             f"{COMPOSITION_INSTRUCTIONS}\n\n"
             f"This video is {width} by {height}, {duration:g} seconds, {config.fps} frames "
-            f"per second, on a {config.background} background."
+            f"per second, on a {config.background} background. Implement the approved "
+            "storyboard from the user message exactly."
         )
         if assets:
             instructions += (
@@ -819,9 +1028,16 @@ class VideoGeneratorNode(Node):
                 "with sound. Leave the bottom fifth of the frame clear: captions go there."
             )
 
+        author_request = (
+            f"ORIGINAL BRIEF:\n{brief}\n\n"
+            + (f"ART DIRECTION:\n{style}\n\n" if style else "")
+            + "APPROVED STORYBOARD WITH EXACT TIMINGS AND COPY:\n"
+            + json.dumps(storyboard, ensure_ascii=False, indent=2)
+            + "\n\nWrite the complete composition now."
+        )
         conversation: list[Any] = [
             SystemMessage(content=instructions),
-            HumanMessage(content=brief + (f"\n\nArt direction: {style}" if style else "")),
+            HumanMessage(content=author_request),
         ]
 
         await ctx.step(
@@ -832,6 +1048,8 @@ class VideoGeneratorNode(Node):
                 "duration_seconds": duration,
                 "max_attempts": config.max_attempts,
                 "images": len(assets),
+                "complexity": config.complexity,
+                "scenes": len(storyboard["scenes"]),
             },
         )
 
@@ -857,15 +1075,20 @@ class VideoGeneratorNode(Node):
 
         scene = ""
         accepted = False
-        wanted_frames = probe_frames(duration, config.fps)
+        wanted_frames = storyboard_probe_frames(storyboard, duration=duration, fps=config.fps)
         moments = [frame / config.fps for frame in wanted_frames]
 
         for attempt in range(1, config.max_attempts + 1):
             await ctx.progress(f"Attempt {attempt}: writing the animation")
             reply = await model.ainvoke(conversation)
-            scene = strip_code_fences(message_text_of(reply))
+            _add_usage(reply, usage)
+            scene = composition_code_of(message_text_of(reply))
 
-            problems = scene_problems(scene, assets=set(assets) - {"narration.wav"})
+            problems = scene_problems(scene, assets=image_assets)
+            if not problems:
+                problems.extend(
+                    storyboard_scene_problems(scene, storyboard=storyboard, assets=image_assets)
+                )
             if not problems:
                 # Only worth rendering frames from something that at least
                 # compiles on paper. A file with no default export produces a
@@ -949,6 +1172,17 @@ class VideoGeneratorNode(Node):
         )
         await ctx.step("video.finished", {**saved, "duration_seconds": duration})
 
+        cost = price_of(
+            model=config.model,
+            provider=config.provider,
+            input_tokens=usage["input_tokens"],
+            output_tokens=usage["output_tokens"],
+        )
+        usage_output = {
+            **usage,
+            "cost_usd": round(cost or 0.0, 6),
+        }
+
         return NodeResult(
             output={
                 **saved,
@@ -959,14 +1193,27 @@ class VideoGeneratorNode(Node):
                 "narration_artifact_id": narration_id,
                 "script": script,
                 "words": words,
+                "storyboard": storyboard,
+                "usage": usage_output,
                 "width": info.get("width", width),
                 "height": info.get("height", height),
-            }
+            },
+            metrics={
+                "tokens_in": usage["input_tokens"],
+                "tokens_out": usage["output_tokens"],
+                "cost_usd": usage_output["cost_usd"],
+            },
         )
 
 
 async def _narrate(
-    config: Any, ctx: NodeContext, *, model: Any, brief: str, style: str
+    config: Any,
+    ctx: NodeContext,
+    *,
+    model: Any,
+    brief: str,
+    style: str,
+    usage: dict[str, int],
 ) -> tuple[str, bytes, float, list[dict[str, Any]]]:
     """Write the script, speak it, and report how long it really took.
 
@@ -996,24 +1243,29 @@ async def _narrate(
     script = ""
     for attempt in (1, 2):
         reply = await model.ainvoke(conversation)
+        _add_usage(reply, usage)
         script = strip_code_fences(message_text_of(reply)).strip()
         count = len(script.split())
         await ctx.step(
             "video.script",
             {"attempt": attempt, "words": count, "budget": budget, "script": script[:600]},
         )
-        if count <= budget * 1.15 or attempt == 2:
+        if floor <= count <= budget * 1.15 or attempt == 2:
             break
         conversation.append(AIMessageLike(script))
-        conversation.append(
-            HumanMessage(
-                content=(
-                    f"That is {count} words and the budget is {budget}. It would run past the "
-                    f"end of the video. Cut it to {budget} words or fewer, keeping the opening. "
-                    "Reply with ONLY the narration."
-                )
+        if count < floor:
+            feedback = (
+                f"That is only {count} words and the minimum is {floor}. It would leave a long "
+                f"silent ending. Expand it to between {floor} and {budget} words while keeping "
+                "the opening direct. Reply with ONLY the narration."
             )
-        )
+        else:
+            feedback = (
+                f"That is {count} words and the budget is {budget}. It would run past the "
+                f"end of the video. Cut it to {budget} words or fewer, keeping the opening. "
+                "Reply with ONLY the narration."
+            )
+        conversation.append(HumanMessage(content=feedback))
 
     if not script:
         raise NodeError("The agent returned an empty narration script.")

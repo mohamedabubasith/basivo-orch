@@ -890,8 +890,36 @@ async def test_a_narrated_video_is_authored_to_the_voice_and_captioned(
             # The whole turn, so the assertions can look at the instructions
             # and at what was asked for in the same string.
             prompts.append(" ".join(str(message.content) for message in messages))
-            if len(prompts) == 1:  # the script pass
+            # Which pass this is, read off the instructions rather than
+            # counted: a short script is expanded, which spends an extra call.
+            latest = prompts[-1]
+            if "narration for short product videos" in latest:
                 return says("Ship your workflows today. Nothing else needed.")
+            if "storyboard" in latest.lower() and "JSON" in latest:
+                return says(
+                    json.dumps(
+                        {
+                            "title": "Ship it",
+                            "creative_direction": "Three held words on a dark field.",
+                            "palette": ["#0b1020"],
+                            "scenes": [
+                                {
+                                    "purpose": purpose,
+                                    "headline": headline,
+                                    "supporting_text": "",
+                                    "visual": "A word on a dark field",
+                                    "motion": "fade in",
+                                    "duration_weight": 1,
+                                }
+                                for purpose, headline in (
+                                    ("open", "Visible"),
+                                    ("middle", "Faster"),
+                                    ("close", "Ship it"),
+                                )
+                            ],
+                        }
+                    )
+                )
             return says(
                 'import React from "react";\n'
                 'import {AbsoluteFill, useCurrentFrame, interpolate} from "remotion";\n'
@@ -899,6 +927,7 @@ async def test_a_narrated_video_is_authored_to_the_voice_and_captioned(
                 "  const frame = useCurrentFrame();\n"
                 "  const enter = interpolate(frame, [0, 12], [0, 1]);\n"
                 "  return <AbsoluteFill style={{opacity: enter}}><h1>Visible</h1>"
+                "<h2>Faster</h2><h3>Ship it</h3>"
                 "</AbsoluteFill>;\n"
                 "}\n"
             )
@@ -934,7 +963,7 @@ async def test_a_narrated_video_is_authored_to_the_voice_and_captioned(
                 {"id": "t", "type": "trigger.manual", "config": {}},
                 {
                     "id": "promo",
-                    "type": "video.generate",
+                    "type": "video.ai",
                     "name": "Narrated promo",
                     "config": {
                         "brief": "A 4 second promo for a workflow tool.",
@@ -960,8 +989,13 @@ async def test_a_narrated_video_is_authored_to_the_voice_and_captioned(
     # under it and the video ends in silence.
     assert "between 8 and 10 words" in prompts[0]
     # The composition pass knew the real length and when each word lands.
-    assert "6 seconds long" in prompts[1]
-    assert "0.0s Ship" in prompts[1]
+    # Found by content rather than by index: a script that comes back short is
+    # expanded, and that spends a call the index would then be off by.
+    composition_prompt = prompts[-1]
+    assert "6 seconds long" in composition_prompt
+    assert "0.0s Ship" in composition_prompt
+    # And it was implementing an agreed plan rather than inventing one twice.
+    assert "APPROVED STORYBOARD" in composition_prompt
 
     job = rendered["job"]
     # The voice is a file beside the composition, and the renderer plays it.
@@ -983,51 +1017,6 @@ async def test_a_narrated_video_is_authored_to_the_voice_and_captioned(
 
     assert run.output["result"]["duration_seconds"] == 6.4
     assert run.output["result"]["narration_artifact_id"]
-
-
-async def test_the_speak_node_produces_playable_narration_in_a_run(session, make_run, monkeypatch):
-    """audio.speak on its own, so it can feed a poster, a bot, or a video."""
-    from basivo_orch.flows.nodes import speech as speech_module
-
-    async def fake_speak(text, *, voice, speed):
-        assert text == "Your build is green."
-        return b"RIFF" + b"0" * 200, 1.8, [{"word": "Your", "start": 0.0, "end": 0.3}]
-
-    monkeypatch.setattr(speech_module, "speak", fake_speak)
-
-    graph = Graph.model_validate(
-        {
-            "nodes": [
-                {"id": "t", "type": "trigger.manual", "config": {}},
-                {
-                    "id": "voice",
-                    "type": "audio.speak",
-                    "name": "Say it",
-                    "config": {
-                        "text": "{{ input.line }}",
-                        "voice": "am_michael",
-                        "format": "wav",
-                    },
-                },
-            ],
-            "edges": [{"source": "t", "target": "voice"}],
-        }
-    )
-
-    run = await run_graph(session, make_run, graph, payload={"line": "Your build is green."})
-    assert run.status is RunStatus.SUCCEEDED, run.error
-    result = run.output["result"]
-    assert result["duration_seconds"] == 1.8
-    assert result["word_count"] == 4
-    assert result["artifact_id"]
-
-    # Stored as audio, so the run page offers a player rather than a download.
-    from basivo_orch.flows.models import Artifact
-
-    artifacts = (
-        (await session.execute(select(Artifact).where(Artifact.run_id == run.id))).scalars().all()
-    )
-    assert [a.content_type for a in artifacts] == ["audio/wav"]
 
 
 async def test_two_agent_nodes_hand_over_on_the_canvas(session, make_run, monkeypatch):
@@ -1438,19 +1427,11 @@ async def test_write_with_ai_feeds_its_json_to_the_next_node(session, make_run, 
 
 
 EXERCISED_NODE_TYPES = {
-    # Covered in their own suites rather than here: preparing a photograph and
-    # composing a montage are pixel work, and proving them through the engine
-    # would assert less while costing a real render.
-    "image.edit",
-    "video.montage",
-    "video.invitation",
     "trigger.telegram",
     "telegram.reply",
     "session.state",
-    "audio.speak",
-    "design.render",
-    "video.render",
-    "video.generate",
+    "image.ai",
+    "video.ai",
     "social.post",
     "git.comment",
     "trigger.manual",
@@ -1671,6 +1652,23 @@ async def test_the_morning_poster_flow_renders_and_posts(session, make_run, monk
 
     monkeypatch.setattr("basivo_orch.flows.nodes.agent.build_chat_model", fake_build)
 
+    # The designer is a second model, called by the image node with the
+    # copywriter's line already templated into its brief.
+    briefs: list[str] = []
+
+    def designer(messages):
+        briefs.append(str(messages[-1].content))
+        return says(
+            "<html><body style='margin:0;width:400px;height:400px;"
+            "background:#7857ff;color:#fff;font-family:sans-serif'>"
+            f"<h1>{briefs[-1].splitlines()[-1]}</h1></body></html>"
+        )
+
+    async def fake_designer(ctx, **kwargs):
+        return FakeChatModel(respond=designer)
+
+    monkeypatch.setattr("basivo_orch.flows.nodes.models.build_chat_model", fake_designer)
+
     sent: list[httpx.Request] = []
 
     def telegram(request: httpx.Request) -> httpx.Response:
@@ -1695,19 +1693,15 @@ async def test_the_morning_poster_flow_renders_and_posts(session, make_run, monk
                 },
                 {
                     "id": "poster",
-                    "type": "design.render",
+                    "type": "image.ai",
                     "name": "Poster",
                     "config": {
-                        "html": (
-                            "<html><body style='margin:0;width:400px;height:400px;"
-                            "background:#7857ff;color:#fff;font-family:sans-serif'>"
-                            "<h1>{{ nodes.copy.output.text }}</h1></body></html>"
-                        ),
+                        "brief": "A poster that says:\n{{ nodes.copy.output.text }}",
                         "size": "custom",
                         "width": 400,
                         "height": 400,
                         "scale": 1,
-                        "wait_for_fonts": False,
+                        "model": "m",
                     },
                 },
                 {
@@ -1756,85 +1750,7 @@ async def test_the_morning_poster_flow_renders_and_posts(session, make_run, monk
     assert b"Ship the fix before standup" in body, "the agent's copy was not used as the caption"
 
 
-async def test_a_video_node_takes_its_copy_from_an_agent_and_stores_the_file(
-    session, make_run, monkeypatch
-):
-    """The video half of the same story: an agent writes the line, a template
-    renders it, and the file lands as an artifact the posting node can attach.
-
-    The renderer itself is substituted — a real render is minutes of CPU and
-    belongs in `test_video.py` behind its own flag — but everything around it
-    is real: the templating of variables from an upstream node, the duration
-    guard, the artifact write, and the reference downstream nodes use.
-    """
-    from basivo_orch.flows.nodes import video as video_module
-
-    captured: dict[str, object] = {}
-
-    async def fake_render(job):
-        captured["props"] = job.props
-        captured["scene"] = job.scene_tsx
-        return b"\x00\x00\x00\x18ftypmp42" + b"0" * 400, {"width": job.width}
-
-    monkeypatch.setattr(video_module, "render", fake_render)
-
-    def copywriter(messages):
-        return says("Auto-fix shipped")
-
-    async def fake_build(ctx, **kwargs):
-        return FakeChatModel(respond=copywriter)
-
-    monkeypatch.setattr("basivo_orch.flows.nodes.agent.build_chat_model", fake_build)
-
-    graph = Graph.model_validate(
-        {
-            "nodes": [
-                {"id": "t", "type": "trigger.manual", "config": {}},
-                {
-                    "id": "copy",
-                    "type": "agent.llm",
-                    "config": {"prompt": "Write a launch line.", "model": "m"},
-                },
-                {
-                    "id": "clip",
-                    "type": "video.render",
-                    "name": "Promo",
-                    "config": {
-                        "template": "announcement",
-                        "props": '{"headline": "{{ nodes.copy.output.text }}"}',
-                        "quality": "draft",
-                    },
-                },
-            ],
-            "edges": [
-                {"source": "t", "target": "copy"},
-                {"source": "copy", "target": "clip"},
-            ],
-        }
-    )
-
-    run = await run_graph(session, make_run, graph)
-    assert run.status is RunStatus.SUCCEEDED, run.error
-
-    # The agent's line reached the composition as a prop, and the template
-    # filled in everything the user did not set.
-    assert captured["props"]["headline"] == "Auto-fix shipped"
-    assert len(captured["props"]) > 1, "the template's own example values fill the gaps"
-
-    from basivo_orch.flows.models import Artifact
-
-    stored = (
-        (await session.execute(select(Artifact).where(Artifact.run_id == run.id))).scalars().all()
-    )
-    assert len(stored) == 1
-    assert stored[0].content_type == "video/mp4"
-    assert stored[0].filename.endswith(".mp4")
-
-    executions = await nodes_for(session, run.id)
-    assert executions["clip"].status is NodeStatus.SUCCEEDED
-
-
-async def test_the_video_generator_revises_until_the_composition_actually_shows_something(
+async def test_the_video_node_revises_until_the_composition_actually_shows_something(
     session, make_run, monkeypatch
 ):
     """The loop, as a flow: the agent's first attempt renders blank, the node
@@ -1865,8 +1781,20 @@ async def test_the_video_generator_revises_until_the_composition_actually_shows_
     good = composition("<h1>Visible</h1>")
 
     attempts: list[str] = []
+    model_calls = 0
 
     def author(messages):
+        nonlocal model_calls
+        model_calls += 1
+        if model_calls == 1:
+            return says(
+                '{"title":"Promo","creative_direction":"Bold",'
+                '"palette":["#111111","#ffffff"],"scenes":['
+                '{"purpose":"Open","headline":"Visible","supporting_text":"",'
+                '"visual":"Type","motion":"Fade","duration_weight":1,"asset":""},'
+                '{"purpose":"Close","headline":"Visible","supporting_text":"",'
+                '"visual":"Type","motion":"Scale","duration_weight":1,"asset":""}]}'
+            )
         attempts.append("turn")
         return says(blank if len(attempts) == 1 else good)
 
@@ -1900,7 +1828,7 @@ async def test_the_video_generator_revises_until_the_composition_actually_shows_
                 {"id": "t", "type": "trigger.manual", "config": {}},
                 {
                     "id": "gen",
-                    "type": "video.generate",
+                    "type": "video.ai",
                     "name": "Make the promo",
                     "config": {
                         "brief": "A six second promo.",
@@ -1920,6 +1848,8 @@ async def test_the_video_generator_revises_until_the_composition_actually_shows_
 
     executions = await nodes_for(session, run.id)
     assert executions["gen"].status is NodeStatus.SUCCEEDED
+    assert executions["gen"].tokens_in == 30
+    assert executions["gen"].tokens_out == 15
     assert len(attempts) == 2, "the agent was not asked to revise"
 
     from basivo_orch.flows.models import Artifact

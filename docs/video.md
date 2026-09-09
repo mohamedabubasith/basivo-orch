@@ -1,14 +1,23 @@
-# Video
+# Images and video
 
-Four nodes make video, and all four render the same way: a React component,
-drawn frame by frame in a headless browser, encoded by FFmpeg.
+Two nodes, one question each.
 
 | Node | What it is for |
 |---|---|
-| Make a Video (`video.render`) | A template, or your own composition, with the words wired in from an earlier node |
-| Describe a Video (`video.generate`) | Describe it in words; an agent writes the animation and this checks its work |
-| Photo Montage (`video.montage`) | A set of photographs, with motion, music and titles |
-| Wedding Invitation (`invitation.render`) | The invitation, from the details |
+| AI Video (`video.ai`) | Describe the video. A model writes the animation, this checks it and renders an MP4. Tick **This video needs a voice** and it is narrated and captioned. |
+| AI Image (`image.ai`) | Describe the picture. A model writes an HTML page, a browser screenshots it. |
+
+There used to be seven: a template renderer, a composition renderer, a montage,
+an invitation, an HTML-to-image node, a photo preparer and a speech node.
+Between them they asked a person to know which one their job was before they
+could start, and to wire a voice step to a video step and match the lengths by
+hand. A montage is a video of photographs. An invitation is a video with names
+in it. Both are now a sentence in the brief, and the photos go in the same
+field. Both nodes need an LLM credential, and nothing else.
+
+Video renders through Remotion; images render through headless Chromium,
+because typography is the one thing image models still get wrong and a browser
+never does.
 
 ## The renderer
 
@@ -73,6 +82,33 @@ The rules, each of which is checked before anything renders:
   rendered landscape, square and vertical.
 - No `Audio`, `Video` or captions. Those are added around the composition.
 - No URLs. There is no network during a render.
+
+## How AI Video works
+
+AI Video uses two model stages. First it turns the brief into a timed
+storyboard with exact on-screen copy, visual direction, motion, and image
+assignments. It then asks the model for one complete Remotion composition from
+that contract. If the model returns malformed planning JSON, the node asks it
+to repair the plan once and can still continue with a deterministic fallback.
+
+Creative complexity controls the number and density of scenes. Complex is the
+default and plans up to eight scenes. The model output budget defaults to
+12,000 tokens so detailed TSX is less likely to be cut off. Lower it for a
+small-context model, or raise it when a provider truncates the composition.
+
+Every planned scene contributes a frame-check timestamp. The node also checks
+that planned copy and supplied images reached the generated source before it
+starts the expensive final encode.
+
+## NVIDIA NIM
+
+Create a credential with provider **NVIDIA NIM**, paste the NVIDIA API key, and
+select a model from its live catalogue. Hosted NVIDIA endpoints use
+`https://integrate.api.nvidia.com/v1`. For a self-hosted NIM, set the
+credential base URL to that deployment's OpenAI-compatible `/v1` endpoint.
+The video node uses plain chat completions and JSON text rather than
+provider-specific tool calls, so the same planning and authoring flow works
+with NVIDIA and the other supported chat providers.
 
 ## What the product owns
 

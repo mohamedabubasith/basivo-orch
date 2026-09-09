@@ -22,9 +22,9 @@ export const NODE_ACCENT: Record<string, string> = {
   "git.ticket": "var(--status-warn)",
   "git.autofix": "var(--status-good)",
   "git.comment": "var(--series)",
-  "design.render": "var(--color-brand-300)",
+  "image.ai": "var(--color-brand-300)",
   "social.post": "var(--color-accent-500)",
-  "video.render": "var(--status-warn)",
+  "video.ai": "var(--status-warn)",
 };
 export const DEFAULT_ACCENT = "var(--series)";
 
@@ -52,7 +52,7 @@ const GIT_COMMENT = (
   </>
 );
 
-const DESIGN_RENDER = (
+const AI_IMAGE = (
   <>
     <rect x="3.5" y="4.5" width="17" height="15" rx="2.5" />
     <path d="M3.5 15l4.2-4.2a1.6 1.6 0 0 1 2.3 0L14 14.7" />
@@ -68,7 +68,7 @@ const SOCIAL_POST = (
   </>
 );
 
-const VIDEO_RENDER = (
+const AI_VIDEO = (
   <>
     <rect x="2.8" y="5.5" width="12.4" height="13" rx="2.4" />
     <path d="M15.2 10.4l4.1-2.6a.8.8 0 0 1 1.2.7v6.9a.8.8 0 0 1-1.2.7l-4.1-2.6" />
@@ -132,9 +132,9 @@ const PATHS: Record<string, ReactNode> = {
   "git.ticket": GIT_TICKET,
   "git.autofix": GIT_AUTOFIX,
   "git.comment": GIT_COMMENT,
-  "design.render": DESIGN_RENDER,
+  "image.ai": AI_IMAGE,
   "social.post": SOCIAL_POST,
-  "video.render": VIDEO_RENDER,
+  "video.ai": AI_VIDEO,
 };
 
 const FALLBACK = (

@@ -207,7 +207,7 @@ def studio_video_bot(
             },
             {
                 "id": "film",
-                "type": "video.generate",
+                "type": "video.ai",
                 "name": "Make the video",
                 "position": {"x": 2120, "y": 220},
                 "config": {

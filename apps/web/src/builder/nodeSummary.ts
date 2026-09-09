@@ -86,11 +86,12 @@ export function nodeSummary(
       const code = str(config.code);
       return code ? `${code.split("\n").length} lines` : "no code";
     }
-    case "design.render":
-      return str(config.size) || "instagram_square";
-    case "video.render":
-      return `${str(config.template) || "custom"} · ${str(config.quality) || "standard"}`;
-    case "video.generate":
+    case "image.ai":
+      return [
+        str(config.size) || "instagram_square",
+        shortModel(str(config.model)) || "no model",
+      ].join(" · ");
+    case "video.ai":
       return [
         `${config.duration_seconds ?? 6}s`,
         str(config.size) || "landscape",
@@ -100,8 +101,6 @@ export function nodeSummary(
           : "silent",
         shortModel(str(config.model)) || "no model",
       ].join(" · ");
-    case "audio.speak":
-      return `${str(config.voice) || "af_heart"} · ${str(config.format) || "mp3"}`;
     case "social.post":
       return [str(config.platform) || "telegram", str(config.target)]
         .filter(Boolean)

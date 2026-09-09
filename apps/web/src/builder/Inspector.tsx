@@ -173,12 +173,12 @@ export function Inspector({
   const isAgent = spec.type === "agent.llm";
   // The autofix node embeds an LLM config under the same field names the
   // Agent uses, so the provider/model/credential pickers apply to both.
-  // Derived from the schema, not a list of node types. It was a list, and the
-  // Video Generator — which calls a model exactly like the others — was left
-  // off it, so its provider rendered as a free-text box and its credential
-  // asked for a UUID nobody can supply. Any node carrying both a `provider`
-  // and a `credential_id` gets the pickers, so the next one is right by
-  // default rather than by remembering.
+  // Derived from the schema, not a list of node types. It was a list, and
+  // every node that calls a model but is not the Agent was left off it, so
+  // the provider rendered as a free-text box where you could type "opnai" and
+  // the credential asked for a UUID nobody can supply. Any node carrying both
+  // a `provider` and a `credential_id` gets the pickers, so the next one is
+  // right by default rather than by remembering.
   const [expanded, setExpanded] = useState<SchemaField | null>(null);
   // Settings most people never touch stay out of the way until asked for.
   // Anything the schema marks advanced is hidden, not removed: one click
@@ -351,7 +351,7 @@ export function Inspector({
               // Voice, speed and captions describe narration that is switched
               // off — three controls for something that will not happen.
               !(
-                spec.type === "video.generate" &&
+                spec.type === "video.ai" &&
                 (field.key === "voice" ||
                   field.key === "voice_speed" ||
                   field.key === "captions") &&
@@ -377,7 +377,7 @@ export function Inspector({
                   }
                   onChange={(methods) => set("methods", methods)}
                 />
-              ) : isAgent && field.key === "provider" ? (
+              ) : usesLlm && field.key === "provider" ? (
                 <select
                   value={String(config.provider ?? MODEL_PROVIDERS[0].value)}
                   onChange={(event) => set("provider", event.target.value)}
@@ -417,35 +417,6 @@ export function Inspector({
                   )}
                   value={String(config[field.key] ?? "")}
                   onChange={(v) => set(field.key, v)}
-                />
-              ) : spec.type === "video.render" && field.key === "scene" ? (
-                <CodeArea
-                  value={String(config.scene ?? "")}
-                  onChange={(v) => set("scene", v)}
-                />
-              ) : spec.type === "video.render" && field.key === "props" ? (
-                <div>
-                  <TemplateInput
-                    multiline
-                    rows={4}
-                    value={String(config.props ?? "{}")}
-                    onChange={(v) => set("props", v)}
-                    suggestions={suggestions}
-                    placeholder={'{"headline": "{{ nodes.copy.output.text }}"}'}
-                  />
-                  <p className="mt-1.5 text-xs leading-relaxed text-ink-500">
-                    JSON, filled into the template. An upstream agent usually
-                    writes these. That is the division of labour: it writes
-                    words, the template does layout.
-                  </p>
-                </div>
-              ) : spec.type === "design.render" && field.key === "html" ? (
-                <CodeArea
-                  value={String(config.html ?? "")}
-                  onChange={(v) => set("html", v)}
-                  placeholder={
-                    '<div style="width:1080px;height:1080px;display:grid;place-items:center;background:#111;color:#fff;font:700 72px Inter">\n  {{ nodes.copy.output.headline }}\n</div>'
-                  }
                 />
               ) : spec.type === "social.post" &&
                 field.key === "credential_id" ? (
@@ -655,17 +626,16 @@ export function Inspector({
                       : ""
                   }
                 />
-              ) : isAgent &&
-                (field.key === "prompt" || field.key === "system") ? (
+              ) : (isAgent && (field.key === "prompt" || field.key === "system")) ||
+                ((spec.type === "video.ai" || spec.type === "image.ai") &&
+                  (field.key === "brief" || field.key === "style")) ? (
                 <TemplateInput
                   multiline
-                  rows={field.key === "prompt" ? 5 : 3}
+                  rows={field.key === "prompt" || field.key === "brief" ? 5 : 3}
                   value={String(config[field.key] ?? "")}
                   onChange={(v) => set(field.key, v)}
                   suggestions={suggestions}
-                  placeholder={
-                    field.key === "prompt" ? "{{ input.text }}" : "You are…"
-                  }
+                  placeholder={PLACEHOLDERS[field.key] ?? ""}
                 />
               ) : usesLlm &&
                 (field.key === "model" || field.key === "vision_model") ? (
@@ -975,6 +945,15 @@ function JsonInput({
     </>
   );
 }
+
+/** What to write in the fields people stare at longest. */
+const PLACEHOLDERS: Record<string, string> = {
+  prompt: "{{ input.text }}",
+  system: "You are…",
+  brief:
+    "A 15 second launch clip for {{ nodes.writer.output.text }}, ending on the product name",
+  style: "Dark background, one accent colour, big type",
+};
 
 function CodeArea({
   value,
