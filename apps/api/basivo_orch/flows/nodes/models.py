@@ -1,9 +1,9 @@
 """Turning a saved credential into a LangChain chat model.
 
 One fact shapes this whole module: **most providers speak OpenAI's API.** Of
-the twenty-two the product offers, seventeen are OpenAI-compatible endpoints
-that differ only in their base URL, so they all become `ChatOpenAI` pointed
-somewhere else. Only Anthropic and Google need their own classes.
+the twenty-one chat providers supported here, nineteen are OpenAI-compatible
+endpoints that differ only in their base URL, so they all become `ChatOpenAI`
+pointed somewhere else. Only Anthropic and Google need their own classes.
 
 That is why a new model never needs a code change here — it is a string the
 user picks from the catalogue their credential fetches live. It is also why
@@ -30,6 +30,7 @@ if TYPE_CHECKING:
 #: carry the URL.
 OPENAI_COMPATIBLE: dict[str, str] = {
     "openai": "",
+    "nvidia": "https://integrate.api.nvidia.com/v1",
     "azure": "",
     "ollama": "",
     "deepseek": "https://api.deepseek.com",
@@ -123,11 +124,15 @@ async def build_chat_model(
 
     if provider == "google":
         try:
-            from langchain_google_genai import ChatGoogleGenerativeAI
+            from langchain_google_genai import (  # type: ignore[import-not-found]
+                ChatGoogleGenerativeAI,
+            )
         except ImportError as exc:
             raise _missing(provider, "langchain-google-genai") from exc
         common.pop("stop", None)
-        return ChatGoogleGenerativeAI(google_api_key=api_key or None, **common)
+        return ChatGoogleGenerativeAI(  # type: ignore[no-any-return]
+            google_api_key=api_key or None, **common
+        )
 
     try:
         from langchain_openai import ChatOpenAI
@@ -158,8 +163,8 @@ def price_of(*, model: str, provider: str, input_tokens: int, output_tokens: int
     these figures before.
     """
     try:
-        from genai_prices import calc_price
-        from genai_prices.types import Usage
+        from genai_prices import calc_price  # type: ignore[import-not-found]
+        from genai_prices.types import Usage  # type: ignore[import-not-found]
     except ImportError:  # pragma: no cover - optional dependency
         return None
 

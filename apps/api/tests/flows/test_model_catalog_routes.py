@@ -26,7 +26,14 @@ from basivo_orch.credentials.models import Credential
 # test, because its real name starts with `test_`.
 from basivo_orch.credentials.router import credential_models
 from basivo_orch.credentials.router import test_credential as connection_test_route
-from basivo_orch.credentials.schemas import CredentialTestRequest
+from basivo_orch.credentials.schemas import PROVIDERS, CredentialTestRequest
+from basivo_orch.flows.nodes.models import OPENAI_COMPATIBLE, SUPPORTED_PROVIDERS
+
+
+def test_nvidia_is_a_first_class_openai_compatible_provider():
+    assert "nvidia" in PROVIDERS
+    assert "nvidia" in SUPPORTED_PROVIDERS
+    assert OPENAI_COMPATIBLE["nvidia"] == "https://integrate.api.nvidia.com/v1"
 
 
 def make_context(organization: Organization) -> OrgContext:

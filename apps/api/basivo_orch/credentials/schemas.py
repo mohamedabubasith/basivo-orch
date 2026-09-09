@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field
 PROVIDERS: list[str] = [
     "anthropic",
     "openai",
+    "nvidia",
     "google",
     "groq",
     "mistral",

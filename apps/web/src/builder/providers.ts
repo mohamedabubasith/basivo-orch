@@ -10,6 +10,7 @@
 export const PROVIDER_LABEL: Record<string, string> = {
   anthropic: "Anthropic",
   openai: "OpenAI",
+  nvidia: "NVIDIA NIM",
   google: "Google (Gemini)",
   groq: "Groq",
   mistral: "Mistral",
