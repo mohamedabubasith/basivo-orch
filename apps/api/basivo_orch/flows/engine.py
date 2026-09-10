@@ -316,6 +316,84 @@ class Engine:
             if key in found
         ]
 
+    async def _load_toolbox(self, tool_ids: list[str], server_ids: list[str]) -> dict[str, Any]:
+        """Saved tools and MCP servers a node refers to by id.
+
+        Missing ids are skipped for the same reason skills are: deleting one
+        entry from a library must not take down every flow that mentioned it.
+        A disabled server is treated as missing, which is the point of the
+        switch — turn it off once, every agent stops calling it.
+        """
+        from sqlalchemy import select as _select
+
+        from basivo_orch.toolbox.models import McpConnection, Tool
+
+        def ids(values: list[str]) -> list[uuid.UUID]:
+            out: list[uuid.UUID] = []
+            for value in values:
+                try:
+                    out.append(uuid.UUID(str(value)))
+                except (ValueError, AttributeError, TypeError):
+                    continue
+            return out
+
+        wanted_tools, wanted_servers = ids(tool_ids), ids(server_ids)
+        if not wanted_tools and not wanted_servers:
+            return {"tools": [], "mcp_servers": []}
+
+        async with self._db:
+            tools = (
+                (
+                    await self.session.execute(
+                        _select(Tool).where(
+                            Tool.id.in_(wanted_tools),
+                            Tool.organization_id == self.run.organization_id,
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+                if wanted_tools
+                else []
+            )
+            servers = (
+                (
+                    await self.session.execute(
+                        _select(McpConnection).where(
+                            McpConnection.id.in_(wanted_servers),
+                            McpConnection.organization_id == self.run.organization_id,
+                            McpConnection.enabled.is_(True),
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+                if wanted_servers
+                else []
+            )
+
+        return {
+            "tools": [
+                {
+                    "name": row.name,
+                    "description": row.description,
+                    "kind": row.kind,
+                    **(row.definition or {}),
+                }
+                for row in tools
+            ],
+            "mcp_servers": [
+                {
+                    "name": row.name,
+                    "url": row.url,
+                    "credential_id": row.credential_id,
+                    "headers": dict(row.headers or {}),
+                    "tools": list(row.tools or []),
+                }
+                for row in servers
+            ],
+        }
+
     async def _record_skill_load(self, skill_id: str) -> None:
         """Bump the usage counter. Best effort — a run must not fail over it."""
         from sqlalchemy import update as _update
@@ -657,6 +735,7 @@ class Engine:
                 load_memory=self._load_memory,
                 save_memory=self._save_memory,
                 load_skills=self._load_skills,
+                load_toolbox=self._load_toolbox,
                 record_skill_load=self._record_skill_load,
                 session_state=self._session_state,
                 downstream=lambda port, _id=node.id: self._downstream(_id, port),

@@ -16,6 +16,7 @@ import { Admin } from "./routes/app/Admin";
 import { ApiKeys } from "./routes/app/ApiKeys";
 import { Credentials } from "./routes/app/Credentials";
 import { Skills } from "./routes/app/Skills";
+import { Toolbox } from "./routes/app/Toolbox";
 import {
   AppShell,
   RedirectIfSignedIn,
@@ -125,6 +126,7 @@ function AppRoutes() {
             <Route path="api-keys" element={<ApiKeys />} />
             <Route path="credentials" element={<Credentials />} />
             <Route path="skills" element={<Skills />} />
+            <Route path="tools" element={<Toolbox />} />
             <Route path="billing" element={<Billing />} />
             <Route path="security" element={<Security />} />
             <Route path="admin" element={<Admin />} />

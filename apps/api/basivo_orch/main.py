@@ -26,6 +26,7 @@ from basivo_orch.flows.router import external_router, hooks_router, management_r
 from basivo_orch.gate import gate_is_active, warn_if_gate_is_inert
 from basivo_orch.logging import configure_logging, get_logger
 from basivo_orch.skills.router import router as skills_router
+from basivo_orch.toolbox.router import router as toolbox_router
 
 log = get_logger(__name__)
 
@@ -136,6 +137,7 @@ def create_app() -> FastAPI:
     app.include_router(management_router, prefix=settings.API_V1_PREFIX)
     app.include_router(credentials_router, prefix=settings.API_V1_PREFIX)
     app.include_router(skills_router, prefix=settings.API_V1_PREFIX)
+    app.include_router(toolbox_router, prefix=settings.API_V1_PREFIX)
     app.include_router(billing_router, prefix=settings.API_V1_PREFIX)
     app.include_router(admin_router, prefix=settings.API_V1_PREFIX)
     app.include_router(external_router)

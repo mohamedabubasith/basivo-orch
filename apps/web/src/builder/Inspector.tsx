@@ -525,6 +525,20 @@ export function Inspector({
                   parentCredentialId={String(config.credential_id ?? "")}
                   teamMode={String(config.team_mode ?? "delegate")}
                 />
+              ) : isAgent && field.key === "tool_ids" ? (
+                <LibraryPicker
+                  orgId={orgId}
+                  what="tools"
+                  value={Array.isArray(config.tool_ids) ? (config.tool_ids as string[]) : []}
+                  onChange={(ids) => set("tool_ids", ids)}
+                />
+              ) : isAgent && field.key === "mcp_ids" ? (
+                <LibraryPicker
+                  orgId={orgId}
+                  what="mcp-servers"
+                  value={Array.isArray(config.mcp_ids) ? (config.mcp_ids as string[]) : []}
+                  onChange={(ids) => set("mcp_ids", ids)}
+                />
               ) : isAgent && field.key === "tools" ? (
                 <ToolEditor
                   value={config.tools}
@@ -1288,6 +1302,84 @@ function ChatSource({
       ) : (
         <p className="text-xs leading-relaxed text-ink-500">Loading the link…</p>
       )}
+    </div>
+  );
+}
+
+
+/**
+ * Saved tools and MCP servers, chosen rather than redefined.
+ *
+ * The node's own tool editor is still here for the one-off. This is for the
+ * ones worth naming: the list comes from Tools and MCP, and what an agent gets
+ * is a reference, so fixing the definition there fixes every agent at once.
+ */
+function LibraryPicker({
+  orgId,
+  what,
+  value,
+  onChange,
+}: {
+  orgId?: string | null;
+  what: "tools" | "mcp-servers";
+  value: string[];
+  onChange: (ids: string[]) => void;
+}) {
+  const [rows, setRows] = useState<
+    { id: string; name: string; description?: string; url?: string; enabled?: boolean }[] | null
+  >(null);
+
+  useEffect(() => {
+    if (!orgId) return;
+    let alive = true;
+    void api
+      .get<typeof rows>(`/api/v1/orgs/${orgId}/${what}`)
+      .then((found) => alive && setRows(found ?? []))
+      .catch(() => alive && setRows([]));
+    return () => {
+      alive = false;
+    };
+  }, [orgId, what]);
+
+  if (rows === null) {
+    return <p className="text-xs text-ink-500">Loading…</p>;
+  }
+  if (rows.length === 0) {
+    return (
+      <p className="text-xs leading-relaxed text-ink-500">
+        Nothing saved yet. Add one under{" "}
+        <a
+          href="/app/tools"
+          target="_blank"
+          rel="noreferrer"
+          className="text-brand-400 underline decoration-dotted underline-offset-2"
+        >
+          Tools and MCP
+        </a>{" "}
+        and it appears here for every agent.
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-1">
+      {rows.map((row) => (
+        <CheckBox
+          key={row.id}
+          checked={value.includes(row.id)}
+          onChange={(on) =>
+            onChange(
+              on ? [...value, row.id] : value.filter((id) => id !== row.id),
+            )
+          }
+          label={<span className="font-mono text-xs">{row.name}</span>}
+          hint={
+            row.enabled === false
+              ? "Switched off in the library"
+              : (row.description ?? row.url)
+          }
+        />
+      ))}
     </div>
   );
 }

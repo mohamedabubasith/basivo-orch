@@ -238,7 +238,25 @@ class AgentConfig(BaseModel):
     stop_sequences: list[str] = Field(default_factory=list, max_length=8)
 
     # -- tools ---------------------------------------------------------------
+    #: Tools defined on this node, for the one-off that is nobody else's
+    #: business.
     tools: list[ToolDefinition] = Field(default_factory=list, max_length=32)
+    #: Tools from the workspace library, by id. The library is where a tool
+    #: worth naming lives: define "look up the order" once and every agent that
+    #: uses it changes when you fix it.
+    tool_ids: list[str] = Field(
+        default_factory=list,
+        max_length=32,
+        title="Saved tools",
+        description="Tools from Tools and MCP. Managed there, used here.",
+    )
+    #: MCP servers from the library, by id.
+    mcp_ids: list[str] = Field(
+        default_factory=list,
+        max_length=16,
+        title="Saved MCP servers",
+        description="Servers from Tools and MCP. Their key and URL live there, not in this flow.",
+    )
     #: The one tool nearly every agent wants and nobody should have to define.
     #: Off by default: an agent that searches when it did not need to is slower,
     #: and the answer is worse for the noise.
@@ -589,6 +607,38 @@ class AgentNode(Node):
     async def run(self, config: AgentConfig, ctx: NodeContext) -> NodeResult:
         # The MCP sessions live exactly as long as the run: opened before the
         # model sees its tool list, closed after the last tool result.
+        # Saved definitions are merged in before anything runs, so from here
+        # down a shared tool and an inline one are indistinguishable.
+        shared = (
+            await ctx.load_toolbox(list(config.tool_ids), list(config.mcp_ids))
+            if ctx.load_toolbox and (config.tool_ids or config.mcp_ids)
+            else {"tools": [], "mcp_servers": []}
+        )
+        if shared["tools"] or shared["mcp_servers"]:
+            config = config.model_copy(
+                update={
+                    "tools": [
+                        *[ToolDefinition.model_validate(item) for item in shared["tools"]],
+                        *config.tools,
+                    ],
+                    "mcp_servers": [
+                        *[McpServer.model_validate(item) for item in shared["mcp_servers"]],
+                        *config.mcp_servers,
+                    ],
+                }
+            )
+            await ctx.step(
+                "agent.toolbox",
+                {
+                    "tools": [item["name"] for item in shared["tools"]],
+                    "mcp_servers": [item["name"] for item in shared["mcp_servers"]],
+                    "missing": len(config.tool_ids)
+                    + len(config.mcp_ids)
+                    - len(shared["tools"])
+                    - len(shared["mcp_servers"]),
+                },
+            )
+
         async with mcp_toolset(ctx, config.mcp_servers) as mcp_tools:
             return await self._run(config, ctx, mcp_tools)
 

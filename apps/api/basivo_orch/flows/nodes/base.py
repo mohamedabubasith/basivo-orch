@@ -126,6 +126,10 @@ class NodeContext:
     #: for, skipping any that have been deleted. Engine-provided: the node
     #: never touches SQL.
     load_skills: Callable[..., Awaitable[list[Any]]] | None = None
+    #: Saved tools and MCP servers, by id: {"tools": [...], "mcp_servers": [...]}
+    #: in the shape the node's own config uses, so a shared definition and an
+    #: inline one are the same thing by the time they reach the model.
+    load_toolbox: Callable[..., Awaitable[dict[str, Any]]] | None = None
     #: Count a skill as used, so the library can show what earns its place.
     record_skill_load: Callable[..., Awaitable[None]] | None = None
 

@@ -13,6 +13,7 @@ from basivo_orch.credentials import models as credential_models  # noqa: F401
 from basivo_orch.db import Base
 from basivo_orch.flows import models as flow_models  # noqa: F401  (registers flow tables)
 from basivo_orch.skills import models as skill_models  # noqa: F401
+from basivo_orch.toolbox import models as toolbox_models  # noqa: F401
 
 __all__ = [
     "Base",
@@ -21,4 +22,5 @@ __all__ = [
     "credential_models",
     "flow_models",
     "skill_models",
+    "toolbox_models",
 ]

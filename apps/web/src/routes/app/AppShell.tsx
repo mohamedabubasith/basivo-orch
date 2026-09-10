@@ -152,6 +152,17 @@ const NAV: { heading: string; items: NavItem[] }[] = [
         ),
       },
       {
+        to: "/app/tools",
+        label: "Tools and MCP",
+        icon: (
+          // A spanner: the things an agent can pick up.
+          <svg viewBox="0 0 24 24" {...stroke}>
+            <path d="M14.7 6.3a4 4 0 0 0 5.1 5.1l-8.4 8.4a2.4 2.4 0 0 1-3.4-3.4Z" />
+            <path d="M14.7 6.3 17 4a4 4 0 0 1 3 3l-2.3 2.3" />
+          </svg>
+        ),
+      },
+      {
         to: "/app/skills",
         label: "Skills",
         icon: (
