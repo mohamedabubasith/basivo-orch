@@ -724,7 +724,9 @@ class AgentNode(Node):
                     description=(
                         "Search the web and get back titles, links and snippets. Use it for "
                         "anything you are not sure of, anything recent, and anything about a "
-                        "specific company, product or person."
+                        "specific company, product or person. Answer ONLY from what it "
+                        "returns, quoting the titles and linking the urls it gives you; if it "
+                        "returns nothing useful, say so rather than answering from memory."
                     ),
                     input_schema={
                         "type": "object",
@@ -732,6 +734,13 @@ class AgentNode(Node):
                             "query": {
                                 "type": "string",
                                 "description": "What to search for, in plain words.",
+                            },
+                            "recent": {
+                                "type": "boolean",
+                                "description": (
+                                    "True for news and anything that happened in the last few "
+                                    "days: results come back dated, newest first."
+                                ),
                             },
                             "count": {
                                 "type": "integer",
@@ -998,17 +1007,18 @@ async def _execute_tool(
         return True, definition.value
 
     if definition.kind == "search":
-        from basivo_orch.flows.nodes.search import search
+        from basivo_orch.flows.nodes.search_providers import search
 
         try:
             found = await search(
                 str(arguments.get("query", "")).strip(),
                 count=min(int(arguments.get("count", 5) or 5), 8),
-                region="wt-wt",
-                safe="moderate",
+                kind="news" if arguments.get("recent") else "web",
             )
         except NodeError as exc:
             return False, str(exc)
+        # Returned as a list of records rather than prose so a model cannot
+        # mistake our formatting for its own recollection.
         return True, found
 
     if definition.kind == "code":

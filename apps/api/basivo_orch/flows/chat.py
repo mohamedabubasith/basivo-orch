@@ -185,6 +185,20 @@ def reply_text(output: dict[str, Any] | None) -> str:
     return ""
 
 
+def _tool_said(data: dict[str, Any]) -> str:
+    """One tool call, described rather than named.
+
+    A visitor watching a support chat should see that it looked something up,
+    not the internal name of the tool that did it, and never the engine behind
+    it: that is a supplier we may change on a Tuesday.
+    """
+    if data.get("kind") == "search":
+        query = str((data.get("arguments") or {}).get("query") or "").strip()
+        return f'searched the web for "{query[:60]}"' if query else "searched the web"
+    name = str(data.get("tool") or "a tool").replace("_", " ")
+    return f"used {name}"
+
+
 async def activity(session: AsyncSession, run_id: uuid.UUID) -> list[ChatStep]:
     """What the flow did, in the words a visitor can be shown.
 
@@ -205,28 +219,31 @@ async def activity(session: AsyncSession, run_id: uuid.UUID) -> list[ChatStep]:
         .all()
     )
 
-    tools: dict[str, list[str]] = {}
-    models: dict[str, str] = {}
+    # What the flow DID, in the words a visitor can be shown. Not which model
+    # answered and not which search engine was asked: those are ours, they
+    # change, and a chat window is not where a customer learns our suppliers.
+    doing: dict[str, list[str]] = {}
     for event in await replay(session, run_id):
         data = event.data or {}
         node_id = str(data.get("node_id") or "")
-        if data.get("step") == "llm.response":
-            if model := str(data.get("model") or ""):
-                models[node_id] = model
-            called = [str(name) for name in (data.get("tool_calls") or []) if name]
-            if called:
-                tools.setdefault(node_id, []).extend(called)
-        elif data.get("step") == "agent.handover" and (to := data.get("to")):
-            tools.setdefault(node_id, []).append(f"handed over to {to}")
+        step = data.get("step")
+        if step == "tool.called":
+            doing.setdefault(node_id, []).append(_tool_said(data))
+        elif step == "agent.handover" and (to := data.get("to")):
+            doing.setdefault(node_id, []).append(f"handed over to {to}")
+        elif step == "agent.delegating" and (to := data.get("to")):
+            doing.setdefault(node_id, []).append(f"asked {to}")
+        elif step == "search.results":
+            doing.setdefault(node_id, []).append(
+                f"searched the web, {data.get('count', 0)} results"
+            )
 
     steps: list[ChatStep] = []
     for execution in executions:
         cls = REGISTRY.get(execution.node_type)
-        detail = models.get(execution.node_id, "")
-        if called := tools.get(execution.node_id):
-            # Named, not counted: "searched the docs" is worth waiting for and
-            # "3 tool calls" is not.
-            detail = ", ".join(list(dict.fromkeys(called))[:4])
+        # Named, not counted: "searched the web" is worth waiting for and
+        # "3 tool calls" is not.
+        detail = ", ".join(list(dict.fromkeys(doing.get(execution.node_id, [])))[:4])
         steps.append(
             ChatStep(
                 label=execution.node_name or (cls.label if cls else execution.node_type),

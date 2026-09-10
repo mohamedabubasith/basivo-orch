@@ -94,7 +94,7 @@ async def test_a_private_address_is_refused_even_when_a_search_returned_it() -> 
 async def test_results_arrive_as_a_list_and_as_one_block_of_text(monkeypatch) -> None:
     """Both shapes, because the next node is either a loop or a prompt."""
 
-    async def fake_search(query, *, count, region, safe):
+    async def fake_search(query, *, count, kind, region):
         assert query == "otters"
         return [
             {"title": "Otters", "url": "https://a.example", "snippet": "They hold hands."},
@@ -116,12 +116,12 @@ async def test_results_arrive_as_a_list_and_as_one_block_of_text(monkeypatch) ->
 
 
 async def test_nothing_found_says_what_to_do_about_it(monkeypatch) -> None:
-    async def empty(query, *, count, region, safe):
+    async def empty(query, *, count, kind, region):
         return []
 
     monkeypatch.setattr("basivo_orch.flows.nodes.search.search", empty)
     async with httpx.AsyncClient() as client:
-        with pytest.raises(NodeError, match="rate limits"):
+        with pytest.raises(NodeError, match="rate limit"):
             await WebSearchNode().run(
                 WebSearchConfig(query="{{ input.text }}"), make_context(_Recorder(), client)
             )
@@ -130,7 +130,7 @@ async def test_nothing_found_says_what_to_do_about_it(monkeypatch) -> None:
 async def test_an_empty_query_is_refused_before_the_search(monkeypatch) -> None:
     called: list[str] = []
 
-    async def spy(query, *, count, region, safe):
+    async def spy(query, *, count, kind, region):
         called.append(query)
         return []
 
@@ -142,3 +142,56 @@ async def test_an_empty_query_is_refused_before_the_search(monkeypatch) -> None:
                 make_context(_Recorder(), client, text="   "),
             )
     assert called == []
+
+
+def test_the_provider_is_a_choice_and_falls_back(monkeypatch):
+    """Which engine answers is configuration, not something a flow knows.
+
+    Deployments outgrow the free one, and when they do nothing in a graph, a
+    node's settings or a chat window should have to change.
+    """
+    from basivo_orch.flows.nodes import search_providers
+
+    monkeypatch.delenv("BASIVO_SEARXNG_URL", raising=False)
+    monkeypatch.delenv("BASIVO_SEARCH_PROVIDER", raising=False)
+    assert [p.name for p in search_providers.configured()] == ["duckduckgo"]
+
+    monkeypatch.setenv("BASIVO_SEARXNG_URL", "https://searx.example")
+    monkeypatch.setenv("BASIVO_SEARCH_PROVIDER", "searxng")
+    assert [p.name for p in search_providers.configured()] == ["searxng", "duckduckgo"]
+
+
+async def test_an_empty_first_provider_is_asked_again_of_the_second(monkeypatch):
+    """A search that returns nothing is worse than one that took a second
+    longer, so a provider having a bad day is not the visitor's problem."""
+    from basivo_orch.flows.nodes import search_providers
+
+    class Silent:
+        name = "silent"
+
+        async def search(self, query, *, count, kind, region):
+            return []
+
+    class Answers:
+        name = "answers"
+
+        async def search(self, query, *, count, kind, region):
+            return [{"title": "Found", "url": "https://ok.example", "snippet": ""}]
+
+    monkeypatch.setattr(search_providers, "configured", lambda: [Silent(), Answers()])
+    found = await search_providers.search("otters")
+    assert [item["title"] for item in found] == ["Found"]
+
+
+async def test_every_provider_failing_says_so_once(monkeypatch):
+    from basivo_orch.flows.nodes import search_providers
+
+    class Broken:
+        name = "broken"
+
+        async def search(self, query, *, count, kind, region):
+            raise RuntimeError("429 Too Many Requests")
+
+    monkeypatch.setattr(search_providers, "configured", lambda: [Broken(), Broken()])
+    with pytest.raises(NodeError, match="rate limit"):
+        await search_providers.search("otters")

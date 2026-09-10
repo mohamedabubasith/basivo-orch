@@ -1,15 +1,15 @@
 """Searching the web, without a key and without a bill.
 
-Every hosted search API worth using wants a key and a credit card: Brave,
-Serper, Tavily, Exa. That is a fine trade for a company already paying for a
-model, and a terrible first experience for somebody who has just drawn their
-first flow — they wanted "look this up", not another signup.
+Every hosted search API worth using wants a key and a credit card. That is a
+fair trade for a company already paying for a model, and a terrible first
+experience for somebody who has just drawn their first flow: they wanted "look
+this up", not another signup. So this works with nothing configured.
 
-So the default is DuckDuckGo, which needs neither. `ddgs` is a thin, maintained
-client over the endpoint DuckDuckGo serves to browsers; it is unofficial, it is
-rate limited, and it is free, which for "check what this company does before
-writing the post" is exactly the right trade. A paid provider can be added
-behind the same node later without the flow changing.
+WHICH engine answers is deliberately not this module's business, and not the
+flow's either. See `search_providers.py`: one interface, a default that needs
+no key, a fallback, and a setting. Changing the engine is a line of
+configuration, not an edit to every flow that searches, and nobody looking at a
+chat window is told whose index it was.
 
 **Reading a page is not searching it.** A search returns titles, links and
 snippets — that is often all a model needs, and it costs nothing. Fetching the
@@ -22,13 +22,14 @@ from __future__ import annotations
 
 import asyncio
 import re
-from typing import Any, Literal
+from typing import Literal
 
 import httpx
 from pydantic import BaseModel, Field
 
 from basivo_orch.flows.nodes.base import Node, NodeContext, NodeError, NodeResult
 from basivo_orch.flows.nodes.http import assert_public_url
+from basivo_orch.flows.nodes.search_providers import search
 from basivo_orch.flows.templating import render_value
 
 #: Per page fetched. Enough for an article, small enough that ten of them do
@@ -50,46 +51,6 @@ class SearchResult(BaseModel):
     url: str = ""
     snippet: str = ""
     text: str = ""
-
-
-async def search(query: str, *, count: int, region: str, safe: str) -> list[dict[str, str]]:
-    """Titles, links and snippets for one query.
-
-    Runs in a thread: `ddgs` is synchronous, and on the event loop it would
-    stall the worker's heartbeat — which is how a run gets taken away from us
-    mid-search by the reaper.
-    """
-    try:
-        from ddgs import DDGS
-    except ImportError as exc:  # pragma: no cover - packaging guard
-        raise NodeError(
-            "Web search needs the `ddgs` package. It ships with the API image; "
-            "install it locally with `uv sync`."
-        ) from exc
-
-    def run() -> list[dict[str, Any]]:
-        with DDGS() as engine:
-            return list(engine.text(query, region=region, safesearch=safe, max_results=count))
-
-    try:
-        found = await asyncio.wait_for(asyncio.to_thread(run), timeout=SEARCH_TIMEOUT_SECONDS)
-    except TimeoutError as exc:
-        raise NodeError(
-            f"The search did not answer within {int(SEARCH_TIMEOUT_SECONDS)} seconds. "
-            "DuckDuckGo rate limits bursts; try again, or search less often."
-        ) from exc
-    except Exception as exc:  # noqa: BLE001 - the message matters more than the type
-        raise NodeError(f"The search failed: {type(exc).__name__}: {exc}") from exc
-
-    return [
-        {
-            "title": str(item.get("title") or "").strip(),
-            "url": str(item.get("href") or item.get("url") or "").strip(),
-            "snippet": str(item.get("body") or "").strip(),
-        }
-        for item in found
-        if item.get("href") or item.get("url")
-    ]
 
 
 def readable(html: str) -> str:
@@ -160,13 +121,23 @@ class WebSearchConfig(BaseModel):
             "each. Leave at zero when the snippets are enough."
         ),
     )
+    kind: Literal["web", "news"] = Field(
+        default="web",
+        title="What to search",
+        description=(
+            "News for anything that happened recently: it returns dated headlines with their "
+            "source, where the web index returns a newspaper's front page."
+        ),
+        json_schema_extra={
+            "x-enum-labels": {"web": "The web", "news": "News, newest first"},
+        },
+    )
     region: str = Field(
         default="wt-wt",
         max_length=12,
         title="Region",
         description="wt-wt is worldwide. in-en is India, uk-en the UK, us-en the US.",
     )
-    safe: Literal["on", "moderate", "off"] = Field(default="moderate", title="Safe search")
 
 
 class WebSearchNode(Node):
@@ -204,18 +175,15 @@ class WebSearchNode(Node):
             )
 
         await ctx.progress(f"Searching for {query[:60]}")
-        results = await search(
-            query, count=config.count, region=config.region, safe=config.safe
+        results = await search(query, count=config.count, kind=config.kind, region=config.region)
+        await ctx.step(
+            "search.results", {"query": query, "kind": config.kind, "count": len(results)}
         )
-        await ctx.step("search.results", {"query": query, "count": len(results)})
 
         if config.read_pages and results:
             await ctx.progress(f"Reading {min(config.read_pages, len(results))} pages")
             pages = await asyncio.gather(
-                *(
-                    fetch_text(ctx.http, item["url"])
-                    for item in results[: config.read_pages]
-                )
+                *(fetch_text(ctx.http, item["url"]) for item in results[: config.read_pages])
             )
             for item, page in zip(results, pages, strict=False):
                 item["text"] = page
@@ -226,14 +194,23 @@ class WebSearchNode(Node):
 
         if not results:
             raise NodeError(
-                f"Nothing came back for {query!r}. DuckDuckGo rate limits bursts, so a flow "
-                "searching in a loop will see this; otherwise try a plainer query."
+                f"Nothing came back for {query!r}. Search engines rate limit bursts, so a "
+                "flow searching in a loop will see this; otherwise try a plainer query."
             )
 
         # One block of text as well as the list, because the common next step is
         # "put this in a prompt" and nobody should have to write a loop for it.
         joined = "\n\n".join(
-            f"{item['title']}\n{item['url']}\n{item.get('text') or item['snippet']}"
+            "\n".join(
+                part
+                for part in (
+                    item["title"],
+                    item.get("published") or "",
+                    item["url"],
+                    item.get("text") or item["snippet"],
+                )
+                if part
+            )
             for item in results
         )
         return NodeResult(

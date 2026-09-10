@@ -339,28 +339,30 @@ export function Logo({ className }: { className?: string }) {
   const gradient = useId();
   return (
     <span className={cx("inline-flex items-center gap-2.5", className)}>
-      {/* One path, one fill, the chevron knocked out by evenodd rather than
-          painted over: the mark has to hold as a 16px favicon and as flat
-          black on a print, so nothing about it may depend on the gradient. */}
+      {/* A lowercase b whose bowl is a node with a port through it: the letter
+          the product is called by, and the thing it draws all day, in one
+          shape. One path, evenodd for the hole, so it holds as a 16px favicon
+          and as flat black on a print — nothing about the mark depends on the
+          gradient. */}
       <svg viewBox="0 0 32 32" className="h-7 w-7" aria-hidden="true">
         <defs>
           <linearGradient
             id={gradient}
-            x1="3"
-            y1="3"
-            x2="29"
-            y2="29"
+            x1="2"
+            y1="2"
+            x2="30"
+            y2="30"
             gradientUnits="userSpaceOnUse"
           >
             <stop offset="0" stopColor="var(--series)" />
-            <stop offset="0.55" stopColor="var(--series)" />
             <stop offset="1" stopColor="var(--color-accent-500)" />
           </linearGradient>
         </defs>
+        <rect width="32" height="32" rx="9.5" fill={`url(#${gradient})`} />
         <path
-          fill={`url(#${gradient})`}
+          fill="#fff"
           fillRule="evenodd"
-          d="M8.5 2.5h11.6L30 16l-9.9 13.5H8.5A6 6 0 0 1 2.5 23.5v-15A6 6 0 0 1 8.5 2.5ZM8.56 11.44 13.11 16 8.56 20.56a2.75 2.75 0 0 0 3.89 3.89L18.94 17.94a2.75 2.75 0 0 0 0-3.89L12.44 7.56a2.75 2.75 0 0 0-3.89 3.89Z"
+          d="M10.7 5.6a1.75 1.75 0 0 1 1.75 1.75v16.3a1.75 1.75 0 0 1-3.5 0V7.35A1.75 1.75 0 0 1 10.7 5.6ZM18.9 12.7a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13Zm0 4.1a2.4 2.4 0 1 1 0 4.8 2.4 2.4 0 0 1 0-4.8Z"
         />
       </svg>
       <span className="text-[1.05rem] font-semibold tracking-tight text-ink-100">

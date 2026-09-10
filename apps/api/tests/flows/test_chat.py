@@ -379,3 +379,67 @@ async def test_a_file_from_another_flows_run_is_not_served_by_this_link(session,
             mine.id, chat_token(mine.id), secret.id, _Request(), Response(), session
         )  # type: ignore[arg-type]
     assert caught.value.status_code == 404
+
+
+async def test_the_steps_say_what_was_done_not_who_supplied_it(session, organization):
+    """A visitor sees that the flow searched the web. Which search engine and
+    which model are ours, they change, and a customer's chat window is not
+    where a supplier gets announced."""
+    from basivo_orch.flows.chat import activity
+    from basivo_orch.flows.models import NodeExecution, NodeStatus, RunEvent
+
+    flow = await published(session, organization)
+    accepted = await send(
+        flow.id,
+        chat_token(flow.id),
+        ChatMessage(text="what happened today?", session_id="s-1"),
+        _Request(),  # type: ignore[arg-type]
+        Response(),
+        session,
+    )
+
+    session.add(
+        NodeExecution(
+            run_id=accepted.run_id,
+            node_id="agent",
+            node_type="agent.llm",
+            node_name="Desk",
+            status=NodeStatus.SUCCEEDED,
+            attempt=1,
+            duration_ms=2100,
+        )
+    )
+    session.add_all(
+        [
+            RunEvent(
+                run_id=accepted.run_id,
+                seq=1,
+                type="node.step",
+                data={
+                    "step": "llm.response",
+                    "node_id": "agent",
+                    "model": "openai/gpt-oss-20b",
+                    "provider": "nvidia",
+                },
+            ),
+            RunEvent(
+                run_id=accepted.run_id,
+                seq=2,
+                type="node.step",
+                data={
+                    "step": "tool.called",
+                    "node_id": "agent",
+                    "kind": "search",
+                    "tool": "search_the_web",
+                    "arguments": {"query": "sports news"},
+                },
+            ),
+        ]
+    )
+    await session.commit()
+
+    steps = await activity(session, accepted.run_id)
+    detail = steps[0].detail
+    assert "searched the web" in detail and "sports news" in detail
+    for supplier in ("gpt-oss", "nvidia", "openai", "duckduckgo", "search_the_web"):
+        assert supplier not in detail.lower()

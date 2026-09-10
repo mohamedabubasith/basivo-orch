@@ -1516,7 +1516,7 @@ async def test_a_search_feeds_the_node_after_it(session, make_run, monkeypatch):
     DuckDuckGo, everything after it is real."""
     from basivo_orch.flows.nodes import search as search_module
 
-    async def fake_search(query, *, count, region, safe):
+    async def fake_search(query, *, count, kind, region):
         assert query == "otters"
         return [
             {"title": "Otters", "url": "https://a.example", "snippet": "They hold hands."},
