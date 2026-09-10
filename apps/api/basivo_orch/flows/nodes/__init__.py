@@ -26,6 +26,7 @@ from basivo_orch.flows.nodes.gitops import AutofixNode, CommentNode, TicketNode
 from basivo_orch.flows.nodes.http import HttpRequestNode, assert_public_url
 from basivo_orch.flows.nodes.llm import LlmGenerateNode
 from basivo_orch.flows.nodes.logic import FALSE_PORT, TRUE_PORT, ConditionNode, SetVariablesNode
+from basivo_orch.flows.nodes.search import WebSearchNode
 from basivo_orch.flows.nodes.session import SessionNode
 from basivo_orch.flows.nodes.social import SocialPostNode
 from basivo_orch.flows.nodes.telegram import TelegramReplyNode
@@ -45,6 +46,7 @@ _NODES: tuple[type[Node], ...] = (
     WebhookTriggerNode,
     ScheduleTriggerNode,
     HttpRequestNode,
+    WebSearchNode,
     ConditionNode,
     SetVariablesNode,
     AgentNode,

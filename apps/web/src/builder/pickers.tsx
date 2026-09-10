@@ -10,6 +10,7 @@ import { useEffect, useState } from "react";
 
 import { api } from "../lib/api";
 import { cx } from "../lib/cx";
+import { CheckBox, Select } from "../components/fields";
 
 /** Sentinel value for the "add one" row in a credential dropdown. */
 const ADD_CREDENTIAL = "__add_credential__";
@@ -89,29 +90,34 @@ export function CredentialPicker({
 
   return (
     <div>
-      <select
+      <Select
+        ariaLabel="Credential"
         value={value}
-        onChange={(event) => choose(event.target.value)}
-        className={INPUT}
-      >
-        <option value="">
-          {provider === "github" || provider === "gitlab" || provider === "jira"
-            ? "Pick a credential…"
-            : provider === "mcp"
-              ? "No credential (the server is open)"
-              : "Use the server's own key (no credential)"}
-        </option>
-        {matching.map((credential) => (
-          <option key={credential.id} value={credential.id}>
-            {credential.name} (…{credential.hint || "????"})
-          </option>
-        ))}
-        {/* In the list itself, not only in a hint below it. Someone who opens
-            this dropdown and finds nothing for their provider is looking for
-            exactly this, and a sentinel option is reachable by keyboard and on
-            a phone in a way a floating button beside the field is not. */}
-        <option value={ADD_CREDENTIAL}>+ Add a credential…</option>
-      </select>
+        onChange={choose}
+        options={[
+          {
+            value: "",
+            label:
+              provider === "github" ||
+              provider === "gitlab" ||
+              provider === "jira"
+                ? "Pick a credential…"
+                : provider === "mcp"
+                  ? "No credential (the server is open)"
+                  : "Use the server's own key (no credential)",
+          },
+          ...matching.map((credential) => ({
+            value: credential.id,
+            label: credential.name,
+            hint: `…${credential.hint || "????"}`,
+          })),
+          /* In the list itself, not only in a hint below it. Someone who opens
+             this dropdown and finds nothing for their provider is looking for
+             exactly this, and an entry in the list is reachable by keyboard and
+             on a phone in a way a floating button beside the field is not. */
+          { value: ADD_CREDENTIAL, label: "+ Add a credential…" },
+        ]}
+      />
       {credentials !== null && matching.length === 0 && (
         <p className="mt-1.5 text-xs leading-relaxed text-ink-500">
           No saved credential for this provider yet. Add one from the list
@@ -175,24 +181,21 @@ export function ModelPicker({
   if (models && models.length > 0) {
     return (
       <div>
-        <select
+        <Select
+          ariaLabel="Model"
           value={value}
-          onChange={(event) => onChange(event.target.value)}
-          className={INPUT}
-        >
-          {/* A saved model that the key can no longer see (renamed, retired,
-              or configured before the credential) must not be silently
-              swapped for the first list entry — keep it selectable and let
-              the run surface the provider's own error if it is truly gone. */}
-          {value && !models.includes(value) && (
-            <option value={value}>{value} (saved)</option>
-          )}
-          {models.map((model) => (
-            <option key={model} value={model}>
-              {model}
-            </option>
-          ))}
-        </select>
+          onChange={onChange}
+          options={[
+            /* A saved model that the key can no longer see (renamed, retired,
+               or configured before the credential) must not be silently
+               swapped for the first list entry — keep it selectable and let
+               the run surface the provider's own error if it is truly gone. */
+            ...(value && !models.includes(value)
+              ? [{ value, label: `${value} (saved)` }]
+              : []),
+            ...models.map((model) => ({ value: model, label: model })),
+          ]}
+        />
         <p className="mt-1 text-xs leading-relaxed text-ink-500">
           {models.length} models available to this credential.
         </p>
@@ -321,27 +324,17 @@ export function SkillPicker({
           const on = selected.has(skill.id);
           return (
             <li key={skill.id}>
-              <label
-                className={cx(
-                  "flex cursor-pointer gap-2.5 rounded-lg p-2 transition-colors",
-                  on ? "bg-ink-800/70" : "hover:bg-ink-800/40",
-                )}
-              >
-                <input
-                  type="checkbox"
-                  checked={on}
-                  onChange={() => toggle(skill.id)}
-                  className="mt-0.5 h-3.5 w-3.5 flex-none accent-[var(--color-brand-400)]"
-                />
-                <span className="min-w-0">
-                  <span className="block font-mono text-xs text-ink-100">
+              <CheckBox
+                className={on ? "bg-ink-800/70" : ""}
+                checked={on}
+                onChange={() => toggle(skill.id)}
+                label={
+                  <span className="font-mono text-xs text-ink-100">
                     {skill.name}
                   </span>
-                  <span className="mt-0.5 block text-xs leading-relaxed text-ink-500">
-                    {skill.description}
-                  </span>
-                </span>
-              </label>
+                }
+                hint={skill.description}
+              />
             </li>
           );
         })}
@@ -441,21 +434,20 @@ export function RepoPicker({
 
   return (
     <div>
-      <select
+      <Select
+        ariaLabel="Repository"
         value={value}
-        onChange={(event) => onChange(event.target.value)}
-        className={INPUT}
+        onChange={onChange}
         disabled={repos === null}
-      >
-        <option value="">
-          {repos === null ? "Loading repositories…" : "Pick a repository…"}
-        </option>
-        {listed.map((repo) => (
-          <option key={repo} value={repo}>
-            {repo}
-          </option>
-        ))}
-      </select>
+        placeholder={repos === null ? "Loading repositories…" : "Pick a repository…"}
+        options={[
+          {
+            value: "",
+            label: repos === null ? "Loading repositories…" : "Pick a repository…",
+          },
+          ...listed.map((repo) => ({ value: repo, label: repo })),
+        ]}
+      />
       <button
         type="button"
         onClick={() => setTyping(true)}

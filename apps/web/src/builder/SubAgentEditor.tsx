@@ -18,6 +18,7 @@ import { useState } from "react";
 import { cx } from "../lib/cx";
 import { CredentialPicker, ModelPicker } from "./pickers";
 import { MODEL_PROVIDERS } from "./providers";
+import { Select } from "../components/fields";
 
 export interface SubAgentValue {
   name: string;
@@ -213,19 +214,12 @@ export function SubAgentEditor({
                   <div className="mt-3 space-y-3">
                     <div>
                       <label className={LABEL}>Provider</label>
-                      <select
+                      <Select
+                        ariaLabel="Provider"
                         value={agent.provider ?? parentProvider}
-                        onChange={(event) =>
-                          update(index, { provider: event.target.value })
-                        }
-                        className={INPUT}
-                      >
-                        {MODEL_PROVIDERS.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
+                        onChange={(provider) => update(index, { provider })}
+                        options={MODEL_PROVIDERS}
+                      />
                     </div>
                     <div>
                       <label className={LABEL}>Credential</label>

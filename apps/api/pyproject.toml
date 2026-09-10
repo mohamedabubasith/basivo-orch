@@ -45,6 +45,7 @@ dependencies = [
     "soundfile>=0.13.0",
     "pillow>=11.0",
     "mcp>=1.12",
+    "ddgs>=9.16.0",
 ]
 
 [dependency-groups]

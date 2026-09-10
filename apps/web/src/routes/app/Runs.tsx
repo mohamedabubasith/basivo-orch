@@ -24,6 +24,7 @@ import { api } from "../../lib/api";
 import { cx } from "../../lib/cx";
 import { useWorkspace } from "../../lib/workspace";
 import { PageHeader, RelativeTime, duration } from "./bits";
+import { Select } from "../../components/fields";
 
 interface Run {
   id: string;
@@ -223,22 +224,15 @@ export function Runs() {
 
             <label className="block w-full sm:w-64">
               <span className="sr-only">Filter by flow</span>
-              <select
+              <Select
+                ariaLabel="Filter by flow"
                 value={flowId}
-                onChange={(event) => setFlowId(event.target.value)}
-                className={cx(
-                  "w-full rounded-xl border border-ink-600/70 bg-ink-900/70 px-3 py-2 text-sm text-ink-100",
-                  "transition-all duration-150 hover:border-ink-500",
-                  "focus:border-brand-400 focus:bg-ink-900 focus:ring-[3px] focus:ring-brand-500/15 focus:outline-none",
-                )}
-              >
-                <option value="all">All flows</option>
-                {flows.map((flow) => (
-                  <option key={flow.id} value={flow.id}>
-                    {flow.name}
-                  </option>
-                ))}
-              </select>
+                onChange={setFlowId}
+                options={[
+                  { value: "all", label: "All flows" },
+                  ...flows.map((flow) => ({ value: flow.id, label: flow.name })),
+                ]}
+              />
             </label>
           </div>
 

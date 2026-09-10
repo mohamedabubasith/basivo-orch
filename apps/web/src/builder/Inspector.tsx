@@ -16,6 +16,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { ChatWindow } from "../components/chat/ChatWindow";
+import { CheckBox, Select } from "../components/fields";
 import { cx } from "../lib/cx";
 import { NodeIconChip } from "./nodeIcons";
 import type { Suggestion } from "./suggestions";
@@ -393,28 +394,12 @@ export function Inspector({
                   onChange={(methods) => set("methods", methods)}
                 />
               ) : usesLlm && field.key === "provider" ? (
-                <select
+                <Select
+                  ariaLabel="Provider"
                   value={String(config.provider ?? MODEL_PROVIDERS[0].value)}
-                  onChange={(event) => set("provider", event.target.value)}
-                  className={INPUT}
-                >
-                  {MODEL_PROVIDERS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-        {advancedCount > 0 && (
-          <button
-            type="button"
-            onClick={() => setShowAdvanced((open) => !open)}
-            className="w-full rounded-xl border border-dashed border-ink-700/70 px-3 py-2 text-xs text-ink-400 transition-colors hover:border-ink-500 hover:text-ink-200"
-          >
-            {showAdvanced
-              ? "Hide advanced settings"
-              : `Show advanced settings (${advancedCount})`}
-          </button>
-        )}
-                </select>
+                  onChange={(value) => set("provider", value)}
+                  options={MODEL_PROVIDERS}
+                />
               ) : usesLlm &&
                 (field.key === "credential_id" ||
                   field.key === "vision_credential_id") ? (
@@ -463,17 +448,12 @@ export function Inspector({
                   onChange={(v) => set("code", v)}
                 />
               ) : field.key === "voice" ? (
-                <select
+                <Select
+                  ariaLabel="Voice"
                   value={String(config.voice ?? "af_heart")}
-                  onChange={(event) => set("voice", event.target.value)}
-                  className={INPUT}
-                >
-                  {VOICES.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(value) => set("voice", value)}
+                  options={VOICES}
+                />
               ) : field.key === "skills" ? (
                 <SkillPicker
                   orgId={orgId}
@@ -486,16 +466,15 @@ export function Inspector({
                 />
               ) : isAgent && field.key === "memory" ? (
                 <div>
-                  <select
+                  <Select
+                    ariaLabel="Memory"
                     value={String(config.memory ?? "off")}
-                    onChange={(event) => set("memory", event.target.value)}
-                    className={INPUT}
-                  >
-                    <option value="off">Off (every run starts fresh)</option>
-                    <option value="conversation">
-                      Remember the conversation
-                    </option>
-                  </select>
+                    onChange={(value) => set("memory", value)}
+                    options={[
+                      { value: "off", label: "Off (every run starts fresh)" },
+                      { value: "conversation", label: "Remember the conversation" },
+                    ]}
+                  />
                   <p className="mt-1.5 text-xs leading-relaxed text-ink-500">
                     {config.memory === "conversation"
                       ? "Past requests and replies are sent again before the new one, so you can say “that didn’t work” and be understood. Tool calls are never stored."
@@ -520,18 +499,15 @@ export function Inspector({
                 </div>
               ) : isAgent && field.key === "team_mode" ? (
                 <div>
-                  <select
+                  <Select
+                    ariaLabel="How it works with them"
                     value={String(config.team_mode ?? "delegate")}
-                    onChange={(event) => set("team_mode", event.target.value)}
-                    className={INPUT}
-                  >
-                    <option value="delegate">
-                      Delegate: it asks, then answers itself
-                    </option>
-                    <option value="handover">
-                      Handover: it transfers, they answer you
-                    </option>
-                  </select>
+                    onChange={(value) => set("team_mode", value)}
+                    options={[
+                      { value: "delegate", label: "Delegate: it asks, then answers itself" },
+                      { value: "handover", label: "Handover: it transfers, they answer you" },
+                    ]}
+                  />
                   <p className="mt-1.5 text-xs leading-relaxed text-ink-500">
                     {config.team_mode === "handover"
                       ? "Control moves. The agent it transfers to replies directly and can transfer on again. Right for triage."
@@ -562,20 +538,15 @@ export function Inspector({
                   orgId={orgId}
                 />
               ) : usesLlm && field.key === "vision_provider" ? (
-                <select
+                <Select
+                  ariaLabel="Vision provider"
                   value={String(config.vision_provider ?? "")}
-                  onChange={(event) =>
-                    set("vision_provider", event.target.value)
-                  }
-                  className={INPUT}
-                >
-                  <option value="">Same as the repair model</option>
-                  {MODEL_PROVIDERS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(value) => set("vision_provider", value)}
+                  options={[
+                    { value: "", label: "Same as the repair model" },
+                    ...MODEL_PROVIDERS,
+                  ]}
+                />
               ) : usesGit && field.key === "repo" ? (
                 <RepoPicker
                   orgId={orgId}
@@ -607,17 +578,12 @@ export function Inspector({
                   )}
                 </div>
               ) : usesGit && field.key === "git_provider" ? (
-                <select
+                <Select
+                  ariaLabel="Git provider"
                   value={String(config.git_provider ?? "github")}
-                  onChange={(event) => set("git_provider", event.target.value)}
-                  className={INPUT}
-                >
-                  {VCS_PROVIDERS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(value) => set("git_provider", value)}
+                  options={VCS_PROVIDERS}
+                />
               ) : usesGit && field.key === "git_credential_id" ? (
                 <CredentialPicker
                   orgId={orgId}
@@ -676,6 +642,18 @@ export function Inspector({
               )}
             </Labelled>
           ))}
+
+        {advancedCount > 0 && (
+        <button
+        type="button"
+        onClick={() => setShowAdvanced((open) => !open)}
+        className="w-full rounded-xl border border-dashed border-ink-700/70 px-3 py-2 text-xs text-ink-400 transition-colors hover:border-ink-500 hover:text-ink-200"
+        >
+        {showAdvanced
+        ? "Hide advanced settings"
+        : `Show advanced settings (${advancedCount})`}
+        </button>
+        )}
       </div>
 
       <div className="flex items-center justify-between gap-3 border-t border-ink-800/70 px-5 py-3">
@@ -797,17 +775,15 @@ function FieldInput({
 }) {
   if (field.enum) {
     return (
-      <select
+      <Select
+        ariaLabel={field.title}
         value={String(value ?? field.default ?? field.enum[0])}
-        onChange={(event) => onChange(event.target.value)}
-        className={INPUT}
-      >
-        {field.enum.map((option) => (
-          <option key={option} value={option}>
-            {field.enumLabels?.[option] ?? readable(option)}
-          </option>
-        ))}
-      </select>
+        onChange={(next) => onChange(next)}
+        options={field.enum.map((option) => ({
+          value: option,
+          label: field.enumLabels?.[option] ?? readable(option),
+        }))}
+      />
     );
   }
 
@@ -1115,10 +1091,11 @@ function ProblemSource({
 
   return (
     <div className="space-y-2">
-      <select
+      <Select
+        ariaLabel="Where the problem is described"
+        placeholder="Where is the problem described?"
         value={mode}
-        onChange={(event) => {
-          const next = event.target.value;
+        onChange={(next) => {
           if (next === "custom") {
             setCustom(true);
             return;
@@ -1131,16 +1108,17 @@ function ProblemSource({
           onIssueNumber(chosen?.issueNumber ?? "");
           onTicketProvider(chosen?.ticketProvider ?? "");
         }}
-        className={INPUT}
-      >
-        <option value="">Where is the problem described?</option>
-        {PROBLEM_SOURCES.map((source) => (
-          <option key={source.value} value={source.value}>
-            {source.label}
-          </option>
-        ))}
-        <option value="custom">I will write it, or mix in my own words</option>
-      </select>
+        options={[
+          ...PROBLEM_SOURCES.map((source) => ({
+            value: source.value,
+            label: source.label,
+          })),
+          {
+            value: "custom",
+            label: "I will write it, or mix in my own words",
+          },
+        ]}
+      />
       {custom && (
         <TemplateInput
           multiline
@@ -1403,15 +1381,28 @@ function WebhookSource({
   return (
     <div className="space-y-3 rounded-lg border border-ink-700/70 bg-ink-950/40 p-3">
       <Labelled label="Where do calls come from?">
-        <select
+        <Select
+          ariaLabel="Where the calls come from"
           value={provider}
-          onChange={(event) => choose(event.target.value)}
-          className={INPUT}
-        >
-          <option value="">Anything that can POST. I will paste the URL myself.</option>
-          <option value="github">A GitHub repository. Set it up for me.</option>
-          <option value="jira">A Jira site. Set it up for me.</option>
-        </select>
+          onChange={choose}
+          options={[
+            {
+              value: "",
+              label: "Anything that can POST",
+              hint: "You paste the URL wherever you like.",
+            },
+            {
+              value: "github",
+              label: "A GitHub repository",
+              hint: "Publishing registers the webhook for you.",
+            },
+            {
+              value: "jira",
+              label: "A Jira site",
+              hint: "Publishing registers the webhook for you.",
+            },
+          ]}
+        />
       </Labelled>
 
       {provider === "jira" ? (
@@ -1438,21 +1429,19 @@ function WebhookSource({
           <Labelled label="Start this flow when">
             <div className="space-y-1.5">
               {JIRA_EVENTS.map((event) => (
-                <label key={event.value} className="flex items-center gap-2 text-xs text-ink-200">
-                  <input
-                    type="checkbox"
-                    checked={events.includes(event.value)}
-                    onChange={(e) =>
-                      set(
-                        "listen_events",
-                        e.target.checked
-                          ? [...events, event.value]
-                          : events.filter((v) => v !== event.value),
-                      )
-                    }
-                  />
-                  {event.label}
-                </label>
+                <CheckBox
+                  key={event.value}
+                  checked={events.includes(event.value)}
+                  onChange={(on) =>
+                    set(
+                      "listen_events",
+                      on
+                        ? [...events, event.value]
+                        : events.filter((v) => v !== event.value),
+                    )
+                  }
+                  label={event.label}
+                />
               ))}
             </div>
           </Labelled>
@@ -1508,21 +1497,19 @@ function WebhookSource({
           <Labelled label="Start this flow when">
             <div className="space-y-1.5">
               {GITHUB_EVENTS.map((event) => (
-                <label key={event.value} className="flex items-center gap-2 text-xs text-ink-200">
-                  <input
-                    type="checkbox"
-                    checked={events.includes(event.value)}
-                    onChange={(e) =>
-                      set(
-                        "listen_events",
-                        e.target.checked
-                          ? [...events, event.value]
-                          : events.filter((v) => v !== event.value),
-                      )
-                    }
-                  />
-                  {event.label}
-                </label>
+                <CheckBox
+                  key={event.value}
+                  checked={events.includes(event.value)}
+                  onChange={(on) =>
+                    set(
+                      "listen_events",
+                      on
+                        ? [...events, event.value]
+                        : events.filter((v) => v !== event.value),
+                    )
+                  }
+                  label={event.label}
+                />
               ))}
             </div>
           </Labelled>

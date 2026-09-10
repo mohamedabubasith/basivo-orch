@@ -16,6 +16,7 @@
 import { AnimatePresence, motion } from "motion/react";
 import { useState } from "react";
 
+import { CheckBox, Select } from "../components/fields";
 import { cx } from "../lib/cx";
 import type { Suggestion } from "./suggestions";
 import { TemplateInput } from "./TemplateInput";
@@ -237,23 +238,18 @@ export function ToolEditor({
                 />
 
                 <LabelledSmall label="Kind">
-                  <select
+                  <Select
+                    ariaLabel="What this tool does"
                     value={tool.kind}
-                    onChange={(event) =>
-                      update(index, {
-                        kind: event.target.value as ToolValue["kind"],
-                      })
+                    onChange={(kind) =>
+                      update(index, { kind: kind as ToolValue["kind"] })
                     }
-                    className={SMALL_INPUT}
-                  >
-                    <option value="code">
-                      Your own code (Python function)
-                    </option>
-                    <option value="http">HTTP call</option>
-                    <option value="constant">
-                      Constant value (stub for testing)
-                    </option>
-                  </select>
+                    options={[
+                      { value: "code", label: "Your own code (Python function)" },
+                      { value: "http", label: "HTTP call" },
+                      { value: "constant", label: "Constant value (stub for testing)" },
+                    ]}
+                  />
                 </LabelledSmall>
 
                 {tool.kind === "code" ? (
@@ -296,23 +292,19 @@ export function ToolEditor({
                 ) : tool.kind === "http" ? (
                   <>
                     <div className="flex gap-2">
-                      <select
+                      <Select
+                        ariaLabel="Method"
+                        className="w-28 flex-none"
                         value={tool.method}
-                        onChange={(event) =>
+                        onChange={(method) =>
                           update(index, {
-                            method: event.target.value as ToolValue["method"],
+                            method: method as ToolValue["method"],
                           })
                         }
-                        className={cx(SMALL_INPUT, "w-24 flex-none")}
-                      >
-                        {["GET", "POST", "PUT", "PATCH", "DELETE"].map(
-                          (method) => (
-                            <option key={method} value={method}>
-                              {method}
-                            </option>
-                          ),
+                        options={["GET", "POST", "PUT", "PATCH", "DELETE"].map(
+                          (method) => ({ value: method, label: method }),
                         )}
-                      </select>
+                      />
                       <div className="min-w-0 flex-1">
                         <TemplateInput
                           value={tool.url}
@@ -440,24 +432,24 @@ function ParameterTable({
               }
               className={cx(SMALL_INPUT, "w-24 flex-none font-mono")}
             />
-            <select
+            <Select
+              ariaLabel="Type"
+              className="w-28 flex-none"
               value={parameter.type}
-              onChange={(event) =>
+              onChange={(type) =>
                 commit(
                   parameters.map((p, i) =>
-                    i === index
-                      ? { ...p, type: event.target.value as Parameter["type"] }
-                      : p,
+                    i === index ? { ...p, type: type as Parameter["type"] } : p,
                   ),
                 )
               }
-              className={cx(SMALL_INPUT, "w-20 flex-none")}
-            >
-              <option value="string">text</option>
-              <option value="number">number</option>
-              <option value="integer">integer</option>
-              <option value="boolean">yes/no</option>
-            </select>
+              options={[
+                { value: "string", label: "text" },
+                { value: "number", label: "number" },
+                { value: "integer", label: "integer" },
+                { value: "boolean", label: "yes/no" },
+              ]}
+            />
             <input
               value={parameter.description}
               placeholder="what it means"
@@ -470,25 +462,18 @@ function ParameterTable({
               }
               className={SMALL_INPUT}
             />
-            <label
-              className="flex flex-none cursor-pointer items-center gap-1 text-[0.7rem] text-ink-400"
-              title="Required"
-            >
-              <input
-                type="checkbox"
-                checked={parameter.required}
-                onChange={(event) =>
-                  commit(
-                    parameters.map((p, i) =>
-                      i === index
-                        ? { ...p, required: event.target.checked }
-                        : p,
-                    ),
-                  )
-                }
-              />
-              req
-            </label>
+            <CheckBox
+              className="w-auto flex-none"
+              checked={parameter.required}
+              onChange={(required) =>
+                commit(
+                  parameters.map((p, i) =>
+                    i === index ? { ...p, required } : p,
+                  ),
+                )
+              }
+              label="req"
+            />
             <button
               type="button"
               aria-label="Remove parameter"

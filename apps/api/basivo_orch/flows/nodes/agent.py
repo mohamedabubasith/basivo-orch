@@ -134,7 +134,7 @@ class ToolDefinition(BaseModel):
         description="JSON Schema for the arguments. Sent to the model as-is.",
     )
 
-    kind: Literal["code", "http", "constant"] = "http"
+    kind: Literal["code", "http", "constant", "search"] = "http"
 
     # -- code tools --------------------------------------------------------
     #: The user's own function — `def main(data)` with the model's arguments
@@ -239,6 +239,18 @@ class AgentConfig(BaseModel):
 
     # -- tools ---------------------------------------------------------------
     tools: list[ToolDefinition] = Field(default_factory=list, max_length=32)
+    #: The one tool nearly every agent wants and nobody should have to define.
+    #: Off by default: an agent that searches when it did not need to is slower,
+    #: and the answer is worse for the noise.
+    web_search: bool = Field(
+        default=False,
+        title="Let it search the web",
+        description=(
+            "Gives this agent a search tool it can call when it needs something it does not "
+            "know. No key and no account: it uses DuckDuckGo. It decides when to search and "
+            "each search is on the run log."
+        ),
+    )
     #: Other agents this one may work with at run time.
     sub_agents: list[SubAgentDefinition] = Field(
         default_factory=list,
@@ -655,6 +667,36 @@ class AgentNode(Node):
                 execute=call,
             )
 
+        built_in = (
+            [
+                ToolDefinition(
+                    name="search_the_web",
+                    description=(
+                        "Search the web and get back titles, links and snippets. Use it for "
+                        "anything you are not sure of, anything recent, and anything about a "
+                        "specific company, product or person."
+                    ),
+                    input_schema={
+                        "type": "object",
+                        "properties": {
+                            "query": {
+                                "type": "string",
+                                "description": "What to search for, in plain words.",
+                            },
+                            "count": {
+                                "type": "integer",
+                                "description": "How many results, 1 to 8. Default 5.",
+                            },
+                        },
+                        "required": ["query"],
+                    },
+                    kind="search",
+                )
+            ]
+            if config.web_search
+            else []
+        )
+
         # Whoever the author wired to the handover port. An empty list when
         # nothing is connected, so an agent working alone is never told about a
         # mechanism it has no use for.
@@ -675,6 +717,7 @@ class AgentNode(Node):
         tools = [
             *skill_extras,
             *_handover_tools(ctx, colleagues, handover),
+            *(guard(definition) for definition in built_in),
             *[guard(definition) for definition in config.tools],
             *mcp_tools,
         ]
@@ -903,6 +946,20 @@ async def _execute_tool(
     sees and can adapt to, not a crashed run."""
     if definition.kind == "constant":
         return True, definition.value
+
+    if definition.kind == "search":
+        from basivo_orch.flows.nodes.search import search
+
+        try:
+            found = await search(
+                str(arguments.get("query", "")).strip(),
+                count=min(int(arguments.get("count", 5) or 5), 8),
+                region="wt-wt",
+                safe="moderate",
+            )
+        except NodeError as exc:
+            return False, str(exc)
+        return True, found
 
     if definition.kind == "code":
         try:

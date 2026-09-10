@@ -1510,7 +1510,68 @@ async def test_an_empty_chat_message_fails_before_a_model_is_paid(session, make_
     assert "desk" not in await nodes_for(session, run.id)
 
 
+async def test_a_search_feeds_the_node_after_it(session, make_run, monkeypatch):
+    """Search is only useful if what it found reaches the next prompt, so this
+    asserts the handover rather than the search: the fake stands in for
+    DuckDuckGo, everything after it is real."""
+    from basivo_orch.flows.nodes import search as search_module
+
+    async def fake_search(query, *, count, region, safe):
+        assert query == "otters"
+        return [
+            {"title": "Otters", "url": "https://a.example", "snippet": "They hold hands."},
+        ]
+
+    monkeypatch.setattr(search_module, "search", fake_search)
+
+    prompts: list[str] = []
+
+    def writer(messages):
+        prompts.append(str(messages[-1].content))
+        return says("Otters hold hands while they sleep.")
+
+    async def fake_build(ctx, **kwargs):
+        return FakeChatModel(respond=writer)
+
+    monkeypatch.setattr("basivo_orch.flows.nodes.llm.build_chat_model", fake_build)
+
+    graph = Graph.model_validate(
+        {
+            "nodes": [
+                {"id": "t", "type": "trigger.manual", "config": {}},
+                {
+                    "id": "look",
+                    "type": "web.search",
+                    "name": "Look it up",
+                    "config": {"query": "{{ input.topic }}", "count": 3},
+                },
+                {
+                    "id": "write",
+                    "type": "llm.generate",
+                    "name": "Write it up",
+                    "config": {
+                        "prompt": "Using this:\n{{ input.text }}\n\nWrite one fact.",
+                        "model": "m",
+                    },
+                },
+            ],
+            "edges": [
+                {"source": "t", "target": "look"},
+                {"source": "look", "target": "write"},
+            ],
+        }
+    )
+
+    run = await run_graph(session, make_run, graph, payload={"topic": "otters"})
+
+    assert run.status is RunStatus.SUCCEEDED, run.error
+    assert "They hold hands." in prompts[0], "what the search found never reached the prompt"
+    assert run.output["result"]["text"].startswith("Otters hold hands")
+
+
+
 EXERCISED_NODE_TYPES = {
+    "web.search",
     "trigger.chat",
     "trigger.telegram",
     "telegram.reply",

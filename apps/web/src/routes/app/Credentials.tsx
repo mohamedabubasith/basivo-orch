@@ -31,6 +31,7 @@ import {
 } from "../../components/ui";
 import { PageHeader, RelativeTime } from "./bits";
 import { PROVIDER_LABEL, PROVIDERS } from "../../builder/providers";
+import { Select } from "../../components/fields";
 
 export interface Credential {
   id: string;
@@ -441,21 +442,18 @@ function CredentialDialog({
               Provider
             </label>
             <div className="relative">
-              <select
-                id={providerId}
+              <Select
+                ariaLabel="Provider"
                 value={provider}
-                onChange={(event) => {
-                  setProvider(event.target.value);
+                onChange={(next) => {
+                  setProvider(next);
                   invalidateTest();
                 }}
-                className="w-full appearance-none rounded-xl border border-ink-600/70 bg-ink-900/70 py-2.5 pr-10 pl-3.5 text-[0.95rem] text-ink-100 transition-all duration-150 hover:border-ink-500 focus:border-brand-400 focus:bg-ink-900 focus:ring-[3px] focus:ring-brand-500/15 focus:outline-none"
-              >
-                {PROVIDERS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
+                options={PROVIDERS.map((option) => ({
+                  value: option.value,
+                  label: option.label,
+                }))}
+              />
               <svg
                 viewBox="0 0 24 24"
                 className="pointer-events-none absolute top-1/2 right-3.5 h-4 w-4 -translate-y-1/2 text-ink-400"
