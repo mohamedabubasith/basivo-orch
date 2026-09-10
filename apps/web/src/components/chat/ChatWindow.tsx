@@ -75,8 +75,22 @@ function nextDelay(elapsedMs: number): number {
   return 3_000;
 }
 
-/** Give up on one answer. A flow can legitimately take a while; not this long. */
-const ANSWER_TIMEOUT_MS = 180_000;
+/**
+ * The backstop, not the expectation.
+ *
+ * A flow that renders a video can legitimately take five minutes: the model
+ * writes a storyboard, writes a composition, gets told the composition is
+ * wrong, writes it again, and only then does a browser draw 150 frames. This
+ * used to stop watching after three minutes and tell the visitor it had not
+ * gone through, while the run went on to finish and save the video. So the
+ * window follows the run for as long as the server says it is running, and
+ * this number exists only so an abandoned tab stops polling eventually.
+ */
+const GIVE_UP_MS = 20 * 60_000;
+/** After this long, say so. Silence and a spinner is how a page reads as broken. */
+const SLOW_MS = 45_000;
+/** A poll can fail because the API is restarting. That is not the answer failing. */
+const POLL_FAILURES_ALLOWED = 5;
 
 const STORAGE_KEY = "basivo.chat.session";
 
@@ -113,6 +127,7 @@ export function ChatWindow({
   const [draft, setDraft] = useState("");
   const [waiting, setWaiting] = useState(false);
   const [live, setLive] = useState<ChatStep[]>([]);
+  const [slow, setSlow] = useState(false);
   const [failure, setFailure] = useState("");
   const session = useRef<string>("");
   const bottom = useRef<HTMLDivElement | null>(null);
@@ -151,6 +166,7 @@ export function ChatWindow({
       setFailure("");
       setDraft("");
       setLive([]);
+      setSlow(false);
       setMessages((all) => [
         ...all,
         { id: crypto.randomUUID(), role: "you", text: trimmed },
@@ -167,14 +183,28 @@ export function ChatWindow({
         const { run_id: runId } = (await started.json()) as { run_id: string };
 
         const began = Date.now();
+        let missed = 0;
         for (;;) {
-          await new Promise((resume) =>
-            setTimeout(resume, nextDelay(Date.now() - began)),
-          );
-          if (Date.now() - began > ANSWER_TIMEOUT_MS) throw new Error("timeout");
+          const waited = Date.now() - began;
+          await new Promise((resume) => setTimeout(resume, nextDelay(waited)));
+          if (waited > SLOW_MS) setSlow(true);
+          if (waited > GIVE_UP_MS) {
+            setFailure(
+              "This is still running after twenty minutes, so the window has stopped " +
+                "watching it. The answer is on the run that was started.",
+            );
+            return;
+          }
 
-          const polled = await fetch(`${base}/${runId}`);
-          if (!polled.ok) throw new Error(String(polled.status));
+          const polled = await fetch(`${base}/${runId}`).catch(() => null);
+          if (!polled || !polled.ok) {
+            // A restarting API answers 502 for a few seconds. Losing an answer
+            // that is still being made over that would be absurd.
+            missed += 1;
+            if (missed > POLL_FAILURES_ALLOWED) throw new Error("unreachable");
+            continue;
+          }
+          missed = 0;
           const state = (await polled.json()) as {
             status: string;
             reply: string;
@@ -198,14 +228,18 @@ export function ChatWindow({
             return;
           }
           if (state.status === "failed" || state.status === "cancelled") {
-            throw new Error(state.error ?? "failed");
+            // The flow's own words, not ours: the server has already decided
+            // what a stranger may be told about why it failed.
+            setFailure(state.error ?? "Something went wrong answering that.");
+            return;
           }
         }
       } catch {
-        setFailure("That did not go through. Try again in a moment.");
+        setFailure("The server could not be reached. Try again in a moment.");
       } finally {
         setWaiting(false);
         setLive([]);
+        setSlow(false);
       }
     },
     [base, waiting],
@@ -265,7 +299,9 @@ export function ChatWindow({
             showSteps={window_.show_activity}
           />
         ))}
-        {waiting && <Working steps={window_.show_activity ? live : []} />}
+        {waiting && (
+          <Working steps={window_.show_activity ? live : []} slow={slow} />
+        )}
         {failure && (
           <p className="text-xs" style={{ color: "var(--status-bad)" }}>
             {failure}
@@ -463,7 +499,7 @@ function Steps({ steps }: { steps: ChatStep[] }) {
 }
 
 /** The same list, live, while the answer is still being made. */
-function Working({ steps }: { steps: ChatStep[] }) {
+function Working({ steps, slow = false }: { steps: ChatStep[]; slow?: boolean }) {
   const latest = steps[steps.length - 1];
   return (
     <div className="flex w-full flex-col items-start gap-1.5">
@@ -484,6 +520,12 @@ function Working({ steps }: { steps: ChatStep[] }) {
           </span>
         )}
       </div>
+      {slow && (
+        <p className="px-1 text-xs text-ink-500">
+          {latest ? `${latest.label} is still running. ` : "Still working. "}
+          Some steps take minutes, and the answer appears here when it is done.
+        </p>
+      )}
       {steps.length > 1 && (
         <div className="w-full max-w-[85%]">
           <StepList steps={steps} />

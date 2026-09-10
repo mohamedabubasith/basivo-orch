@@ -404,6 +404,12 @@ RULES, each of which is a way a video comes out broken:
    seconds of nothing.
 5. Something is visible from frame 0 and something is still moving at the end.
    Fade the first element in over the first 12 frames, not after a second.
+5a. MOVEMENT IS CONTINUOUS, not a fade at each end. In every scene at least
+   one element must have a transform derived from `frame` across the WHOLE of
+   its time on screen: a slow scale from 1 to 1.08, a drift of a few percent,
+   a value counting up. A composition that fades in, holds a still picture and
+   fades out is rejected as "the picture never changes", and it is the single
+   most common reason a first attempt is thrown away.
 6. No <Audio>, <Video> or <OffthreadVideo>, and no captions. Narration and
    subtitles are added around your composition. Adding your own gives the
    viewer two of them.
@@ -714,16 +720,23 @@ def storyboard_scene_problems(
         copy.extend((str(item.get("headline") or ""), str(item.get("supporting_text") or "")))
     copy = [value for value in copy if len(value.strip()) >= 3]
     searchable = re.sub(r"[\W_]+", " ", scene.casefold())
-    present = sum(
-        1
+    missing = [
+        value
         for value in copy
-        if (needle := re.sub(r"[\W_]+", " ", value.casefold()).strip()) and needle in searchable
-    )
+        if not (
+            (needle := re.sub(r"[\W_]+", " ", value.casefold()).strip()) and needle in searchable
+        )
+    ]
+    present = len(copy) - len(missing)
     required = max(1, (len(copy) + 1) // 2) if copy else 0
     if present < required:
+        # Naming the lines, not counting them. "2 of 3 are missing" tells a
+        # model it failed; the lines themselves tell it what to type, and that
+        # is the difference between a second attempt and a fourth.
         problems.append(
             f"Only {present} of {len(copy)} planned text lines appear in the composition. "
-            "Keep the storyboard copy verbatim so required content is not lost."
+            "These are missing and must appear on screen, word for word: "
+            + "; ".join(f'"{value}"' for value in missing[:4])
         )
     return problems
 

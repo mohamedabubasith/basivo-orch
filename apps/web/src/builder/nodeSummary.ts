@@ -16,6 +16,29 @@ const str = (value: unknown): string =>
 /** Model ids are namespaced (`openai/gpt-oss-120b`); the tail identifies it. */
 const shortModel = (model: string): string => model.split("/").pop() ?? model;
 
+/**
+ * Sizes read as sizes, not as the enum values they are stored under.
+ *
+ * A card reading "instagram_square · nemotron-3-super-120b-a12b" is two
+ * identifiers where a person wanted two facts. The canvas is the one place
+ * where every node is glanced at rather than read, so it gets the words.
+ */
+const SIZES: Record<string, string> = {
+  instagram_square: "Square post",
+  instagram_portrait: "Portrait post",
+  story: "Story",
+  twitter_landscape: "X / Twitter",
+  linkedin: "LinkedIn",
+  a4_portrait: "A4 portrait",
+  a4_landscape: "A4 landscape",
+  custom: "Custom size",
+  landscape: "Landscape",
+  square: "Square",
+};
+
+const sizeLabel = (size: string, fallback: string): string =>
+  SIZES[size] ?? SIZES[fallback] ?? fallback;
+
 export function nodeSummary(
   type: string,
   config: Record<string, unknown>,
@@ -88,13 +111,13 @@ export function nodeSummary(
     }
     case "image.ai":
       return [
-        str(config.size) || "instagram_square",
+        sizeLabel(str(config.size), "instagram_square"),
         shortModel(str(config.model)) || "no model",
       ].join(" · ");
     case "video.ai":
       return [
         `${config.duration_seconds ?? 6}s`,
-        str(config.size) || "landscape",
+        sizeLabel(str(config.size), "landscape"),
         // Whether it speaks is the first thing anyone asks of a video node.
         config.narration
           ? `voiced${config.captions === false ? "" : " + captions"}`

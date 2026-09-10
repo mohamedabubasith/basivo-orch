@@ -551,3 +551,26 @@ async def test_a_narrated_composition_shows_its_captions():
     )
     during, after = await probe(job, frames=[6, 20])
     assert frame_difference(during, after) > 1.0
+
+
+def test_a_dropped_line_is_named_rather_than_counted():
+    """A model told "1 of 3 lines are missing" knows it failed. A model told
+    which lines are missing knows what to type, and that is the difference
+    between a second attempt and a fourth."""
+    storyboard = {
+        "scenes": [
+            {"headline": "Rise Bakery", "supporting_text": "Open at six"},
+            {"headline": "Warm every morning", "supporting_text": ""},
+        ]
+    }
+    scene = (
+        'import React from "react";\n'
+        'import {AbsoluteFill} from "remotion";\n'
+        "export default function Scene() {\n"
+        "  return <AbsoluteFill><h1>Rise Bakery</h1></AbsoluteFill>;\n"
+        "}\n"
+    )
+    problems = storyboard_scene_problems(scene, storyboard=storyboard, assets=set())
+    assert problems, "two of three lines are missing and that should be a problem"
+    assert "Open at six" in problems[0]
+    assert "Warm every morning" in problems[0]
