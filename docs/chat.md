@@ -26,6 +26,35 @@ Key the agent's memory on the session:
 
 Without that, every message in one conversation arrives as a stranger.
 
+## Making it a conversation
+
+A chat that answers each message from that message alone is a form with a
+cursor. "Make it blue" then means a blue picture of nothing in particular.
+
+What makes it a conversation is one node with memory, keyed on the session:
+
+```
+Chat  ->  AI Agent (Memory: conversation, key {{ input.session_id }})  ->  AI Image
+```
+
+The agent writes the brief and remembers the last one it wrote. Tell it that
+every message after the first is a change to what it last briefed, and that it
+must reply with the WHOLE brief rather than only the change, because the node
+that renders has not seen the conversation. Then:
+
+> A quote card that says: ship small, ship often. Deep purple.
+>
+> make it deep green instead, and add "Basivo" small at the bottom
+
+produces the same card in green with the name added. The same shape works for
+video, with the agent briefing AI Video.
+
+Worth being plain about what this is: each message renders a NEW file from an
+updated brief. Nothing edits the previous picture pixel by pixel, so a change
+can move other things too. For a poster or a short intro that is usually what
+people want; for "keep everything and nudge this one word", say so in the
+message and the brief carries it.
+
 ## What comes back
 
 The reply is whatever the last node returns: `text`, `reply`, `message` or
