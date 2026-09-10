@@ -98,6 +98,13 @@ class FlowDetail(FlowRead):
     graph: Graph
     version: int
 
+    #: Which version is actually live, when one is. The editor shows the
+    #: version on the canvas beside it: without this, a flow saved four times
+    #: and published once reads as "v4, Published", and the person wonders why
+    #: their edits changed nothing. Null when the flow has never been
+    #: published.
+    published_version: int | None = None
+
     #: When the scheduler will fire this flow next, if it is scheduled and
     #: published. Null otherwise. Shown in the editor so "is my cron actually
     #: armed?" is answerable without reading the database.

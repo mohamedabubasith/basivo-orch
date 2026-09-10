@@ -89,6 +89,7 @@ interface FlowDetail {
   slug: string;
   description: string | null;
   published_version_id: string | null;
+  published_version?: number | null;
   graph: Graph;
   version: number;
   /** When the scheduler fires this next. Null unless it is scheduled and published. */
@@ -817,16 +818,24 @@ function BuilderInner() {
             <span className="rounded-md border border-ink-700 px-1.5 py-0.5 text-[0.66rem] text-ink-400">
               v{flow.version}
             </span>
+            {/* Which version answers in production, not merely whether one
+                does. "v4 · Published" beside a canvas saved four times and
+                published once is a lie people act on: they wire a node, save,
+                and wonder why the live flow still does the old thing. */}
             {dirty ? (
               <span className="text-xs" style={{ color: "var(--status-warn)" }}>
                 Unsaved changes
               </span>
-            ) : flow.published_version_id ? (
+            ) : !flow.published_version_id ? (
+              <span className="text-xs text-ink-500">Draft</span>
+            ) : flow.published_version === flow.version ? (
               <span className="text-xs" style={{ color: "var(--status-good)" }}>
                 Published
               </span>
             ) : (
-              <span className="text-xs text-ink-500">Draft</span>
+              <span className="text-xs" style={{ color: "var(--status-warn)" }}>
+                Saved. v{flow.published_version} is live
+              </span>
             )}
           </div>
         </div>
@@ -1162,6 +1171,8 @@ function BuilderInner() {
             flowId={flow.id}
             publicBase={publicBase}
             isPublished={Boolean(flow.published_version_id)}
+            liveVersion={flow.published_version ?? null}
+            canvasVersion={flow.version}
             nextRunAt={flow.next_run_at}
             suggestions={selectedSuggestions}
             onRename={(name) =>

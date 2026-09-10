@@ -141,6 +141,8 @@ export function Inspector({
   flowId,
   publicBase,
   isPublished,
+  liveVersion,
+  canvasVersion,
   nextRunAt,
   suggestions = [],
   onRename,
@@ -160,6 +162,8 @@ export function Inspector({
   flowId?: string;
   publicBase?: string;
   isPublished?: boolean;
+  liveVersion?: number | null;
+  canvasVersion?: number;
   /** When the scheduler will next fire this flow, if it is armed. */
   nextRunAt?: string | null;
   /** What {{ … }} can refer to from this node — see suggestions.ts. */
@@ -292,7 +296,13 @@ export function Inspector({
         )}
 
         {spec.type === "trigger.chat" && (
-          <ChatSource orgId={orgId} flowId={flowId} isPublished={isPublished} />
+          <ChatSource
+            orgId={orgId}
+            flowId={flowId}
+            isPublished={isPublished}
+            liveVersion={liveVersion}
+            canvasVersion={canvasVersion}
+          />
         )}
 
         {spec.type === "trigger.webhook" && (
@@ -1170,10 +1180,14 @@ function ChatSource({
   orgId,
   flowId,
   isPublished,
+  liveVersion,
+  canvasVersion,
 }: {
   orgId?: string | null;
   flowId?: string;
   isPublished?: boolean;
+  liveVersion?: number | null;
+  canvasVersion?: number;
 }) {
   const [link, setLink] = useState<{ url: string; token: string } | null>(null);
   const [copied, setCopied] = useState("");
@@ -1268,6 +1282,21 @@ function ChatSource({
           {tried && flowId && (
             <ChatWindow flowId={flowId} token={link!.token} className="h-96" />
           )}
+          {liveVersion != null &&
+            canvasVersion != null &&
+            liveVersion !== canvasVersion && (
+              // The window answers from the published version, so a change on
+              // the canvas that has only been saved is invisible here. Said in
+              // the one place someone is looking when they wonder why.
+              <p
+                className="text-xs leading-relaxed"
+                style={{ color: "var(--status-warn)" }}
+              >
+                This window answers from published version {liveVersion}, not
+                the flow on the canvas (v{canvasVersion}). Publish to make your
+                changes live.
+              </p>
+            )}
           <p className="text-xs leading-relaxed text-ink-500">
             Anyone with the link can talk to this flow, and every message is a
             run you pay for. The message arrives as{" "}

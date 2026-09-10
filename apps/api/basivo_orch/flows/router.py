@@ -147,10 +147,28 @@ async def create_flow(
     except ValueError as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
 
+    return await _detail(session, flow, version)
+
+
+async def _detail(
+    session: AsyncSession,
+    flow: Flow,
+    version: FlowVersion,
+    *,
+    next_run_at: datetime | None = None,
+) -> FlowDetail:
+    """One flow, as the editor needs it, including which version is live."""
+    live = (
+        await session.get(FlowVersion, flow.published_version_id)
+        if flow.published_version_id
+        else None
+    )
     return FlowDetail(
         **FlowRead.model_validate(flow).model_dump(),
         graph=Graph.model_validate(version.graph),
         version=version.version,
+        published_version=live.version if live else None,
+        next_run_at=next_run_at,
     )
 
 
@@ -251,11 +269,7 @@ async def install_flow_template(
     except ValueError as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
 
-    return FlowDetail(
-        **FlowRead.model_validate(flow).model_dump(),
-        graph=Graph.model_validate(version.graph),
-        version=version.version,
-    )
+    return await _detail(session, flow, version)
 
 
 @management_router.get("/orgs/{organization_id}/flows/{flow_id}/chat")
@@ -438,11 +452,8 @@ async def read_flow(
     flow = await _load_flow(session, context.organization_id, flow_id)
     version = await service.latest_version(session, flow.id)
     schedule = await session.get(FlowSchedule, flow.id)
-    return FlowDetail(
-        **FlowRead.model_validate(flow).model_dump(),
-        graph=Graph.model_validate(version.graph),
-        version=version.version,
-        next_run_at=schedule.next_run_at if schedule else None,
+    return await _detail(
+        session, flow, version, next_run_at=schedule.next_run_at if schedule else None
     )
 
 
@@ -477,11 +488,7 @@ async def update_flow(
         await session.refresh(flow)
         version = await service.latest_version(session, flow.id)
 
-    return FlowDetail(
-        **FlowRead.model_validate(flow).model_dump(),
-        graph=Graph.model_validate(version.graph),
-        version=version.version,
-    )
+    return await _detail(session, flow, version)
 
 
 @management_router.post("/orgs/{organization_id}/flows/{flow_id}/validate")

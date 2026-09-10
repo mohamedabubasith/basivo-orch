@@ -16,7 +16,7 @@
  * visitors never share one.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
 import { API_BASE } from "../../lib/api";
 
@@ -264,17 +264,93 @@ function Bubble({ role, text }: { role: Role; text: string }) {
   const mine = role === "you";
   return (
     <div className={mine ? "flex justify-end" : "flex justify-start"}>
-      <p
-        className={`max-w-[85%] rounded-2xl px-3.5 py-2 text-sm leading-relaxed whitespace-pre-wrap ${
+      <div
+        className={`max-w-[85%] space-y-1.5 rounded-2xl px-3.5 py-2 text-sm leading-relaxed ${
           mine
             ? "bg-brand-500 text-white"
             : "border border-[var(--edge)] bg-ink-950/40 text-ink-200"
         }`}
       >
-        {text}
-      </p>
+        {mine ? <p className="whitespace-pre-wrap">{text}</p> : <Formatted text={text} />}
+      </div>
     </div>
   );
+}
+
+/**
+ * Just enough markdown for what a model actually writes back.
+ *
+ * Models answer in markdown whether or not anyone asked, so a plain bubble
+ * shows a customer `**Nemotron**` and a wall of asterisks. This handles the
+ * three things that turn up in nearly every reply — bold, inline code and
+ * dash bullets — and leaves everything else as typed.
+ *
+ * It builds React elements rather than HTML. The text comes from a model,
+ * which got it from whatever the flow read, so it is never trusted enough to
+ * be set as markup.
+ */
+function Formatted({ text }: { text: string }) {
+  const blocks: ReactNode[] = [];
+  let bullets: string[] = [];
+
+  const flush = () => {
+    if (bullets.length === 0) return;
+    blocks.push(
+      <ul key={`ul-${blocks.length}`} className="list-disc space-y-1 pl-4">
+        {bullets.map((item, index) => (
+          <li key={index}>{inline(item)}</li>
+        ))}
+      </ul>,
+    );
+    bullets = [];
+  };
+
+  for (const line of text.split("\n")) {
+    const bullet = line.match(/^\s*[-*]\s+(.*)$/);
+    if (bullet) {
+      bullets.push(bullet[1]);
+      continue;
+    }
+    flush();
+    if (line.trim()) {
+      blocks.push(
+        <p key={`p-${blocks.length}`} className="whitespace-pre-wrap">
+          {inline(line)}
+        </p>,
+      );
+    }
+  }
+  flush();
+
+  return <>{blocks}</>;
+}
+
+/** Bold and inline code within one line. */
+function inline(line: string): ReactNode[] {
+  const parts: ReactNode[] = [];
+  const pattern = /\*\*([^*]+)\*\*|`([^`]+)`/g;
+  let last = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = pattern.exec(line))) {
+    if (match.index > last) parts.push(line.slice(last, match.index));
+    if (match[1] !== undefined) {
+      parts.push(
+        <strong key={parts.length} className="font-semibold">
+          {match[1]}
+        </strong>,
+      );
+    } else {
+      parts.push(
+        <code key={parts.length} className="rounded bg-ink-800/60 px-1 py-0.5 font-mono text-[0.8em]">
+          {match[2]}
+        </code>,
+      );
+    }
+    last = match.index + match[0].length;
+  }
+  if (last < line.length) parts.push(line.slice(last));
+  return parts;
 }
 
 /** Three dots, so a slow answer looks like thinking rather than a dead page. */
