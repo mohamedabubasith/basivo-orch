@@ -294,3 +294,88 @@ def test_every_rate_limited_endpoint_takes_the_response_the_limiter_writes_to():
         assert "response" in parameters, f"{name} is rate limited without a response"
         # `from __future__ import annotations` makes these strings.
         assert parameters["response"].annotation in (Response, "Response")
+
+
+async def test_a_video_the_run_made_comes_back_as_an_attachment(session, organization):
+    """A flow that answers with a file has to be able to show it, and the file
+    has to be reachable by someone with the link and nobody else."""
+    from basivo_orch.flows.chat import artifact as serve_artifact
+    from basivo_orch.flows.models import Artifact
+
+    flow = await published(session, organization)
+    accepted = await send(
+        flow.id,
+        chat_token(flow.id),
+        ChatMessage(text="make me a video", session_id="s-1"),
+        _Request(),  # type: ignore[arg-type]
+        Response(),
+        session,
+    )
+    run = await session.get(Run, accepted.run_id)
+    assert run is not None
+
+    clip = Artifact(
+        organization_id=organization.id,
+        run_id=run.id,
+        filename="promo.mp4",
+        content_type="video/mp4",
+        size_bytes=9,
+        data=b"not a mp4",
+    )
+    session.add(clip)
+    await session.flush()
+    run.status = RunStatus.SUCCEEDED
+    run.output = {"result": {"artifact_id": str(clip.id), "url": "/whatever"}}
+    await session.commit()
+
+    replied = await answer(
+        flow.id, chat_token(flow.id), accepted.run_id, _Request(), Response(), session
+    )  # type: ignore[arg-type]
+    assert len(replied.attachments) == 1
+    attached = replied.attachments[0]
+    assert attached.kind == "video"
+    assert attached.url.endswith(f"/artifacts/{clip.id}")
+    # No words and a file is a complete answer, so nothing apologises for it.
+    assert replied.reply == ""
+
+    served = await serve_artifact(
+        flow.id, chat_token(flow.id), clip.id, _Request(), Response(), session
+    )  # type: ignore[arg-type]
+    assert served.body == b"not a mp4"
+    assert served.media_type == "video/mp4"
+    # Without this the deployment-wide same-origin policy turns every video in
+    # a chat window into a broken frame whenever the page and the API are not
+    # the same origin.
+    assert served.headers["cross-origin-resource-policy"] == "cross-origin"
+
+
+async def test_a_file_from_another_flows_run_is_not_served_by_this_link(session, organization):
+    from basivo_orch.flows.chat import artifact as serve_artifact
+    from basivo_orch.flows.models import Artifact
+
+    mine = await published(session, organization)
+    theirs = await published(session, organization)
+    accepted = await send(
+        theirs.id,
+        chat_token(theirs.id),
+        ChatMessage(text="hello", session_id="s-1"),
+        _Request(),  # type: ignore[arg-type]
+        Response(),
+        session,
+    )
+    secret = Artifact(
+        organization_id=organization.id,
+        run_id=accepted.run_id,
+        filename="private.png",
+        content_type="image/png",
+        size_bytes=3,
+        data=b"png",
+    )
+    session.add(secret)
+    await session.commit()
+
+    with pytest.raises(HTTPException) as caught:
+        await serve_artifact(
+            mine.id, chat_token(mine.id), secret.id, _Request(), Response(), session
+        )  # type: ignore[arg-type]
+    assert caught.value.status_code == 404

@@ -36,6 +36,14 @@ import { API_BASE } from "../../lib/api";
 
 type Role = "you" | "them";
 
+export type ChatAttachment = {
+  url: string;
+  kind: "image" | "video" | "audio" | "file";
+  filename: string;
+  content_type: string;
+  size_bytes: number;
+};
+
 export type ChatStep = {
   label: string;
   kind: string;
@@ -49,6 +57,7 @@ type Message = {
   role: Role;
   text: string;
   steps?: ChatStep[];
+  files?: ChatAttachment[];
 };
 
 type Window = {
@@ -171,6 +180,7 @@ export function ChatWindow({
             reply: string;
             error: string | null;
             steps: ChatStep[];
+            attachments: ChatAttachment[];
           };
           setLive(state.steps ?? []);
 
@@ -182,6 +192,7 @@ export function ChatWindow({
                 role: "them",
                 text: state.reply,
                 steps: state.steps ?? [],
+                files: state.attachments ?? [],
               },
             ]);
             return;
@@ -250,6 +261,7 @@ export function ChatWindow({
             role={message.role}
             text={message.text}
             steps={message.steps}
+            files={message.files}
             showSteps={window_.show_activity}
           />
         ))}
@@ -317,11 +329,13 @@ function Bubble({
   role,
   text,
   steps,
+  files,
   showSteps = false,
 }: {
   role: Role;
   text: string;
   steps?: ChatStep[];
+  files?: ChatAttachment[];
   showSteps?: boolean;
 }) {
   const mine = role === "you";
@@ -329,24 +343,93 @@ function Bubble({
     <div
       className={mine ? "flex flex-col items-end" : "flex flex-col items-start"}
     >
-      <div
-        className={`max-w-[85%] space-y-1.5 rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
-          mine
-            ? "bg-brand-500 text-white"
-            : "border border-[var(--edge)] bg-ink-950/40 text-ink-200"
-        }`}
-      >
-        {mine ? (
-          <p className="whitespace-pre-wrap">{text}</p>
-        ) : (
-          <Formatted text={text} />
-        )}
-      </div>
+      {(text || !files?.length) && (
+        <div
+          className={`max-w-[85%] space-y-1.5 rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
+            mine
+              ? "bg-brand-500 text-white"
+              : "border border-[var(--edge)] bg-ink-950/40 text-ink-200"
+          }`}
+        >
+          {mine ? (
+            <p className="whitespace-pre-wrap">{text}</p>
+          ) : (
+            <Formatted text={text} />
+          )}
+        </div>
+      )}
+      {files?.map((file) => (
+        <Attachment key={file.url} file={file} />
+      ))}
       {!mine && showSteps && steps && steps.length > 0 && (
         <Steps steps={steps} />
       )}
     </div>
   );
+}
+
+/**
+ * A file the flow made, shown rather than linked.
+ *
+ * The whole point of a video node answering a chat is that the person sees the
+ * video. A link called `promo.mp4` is a download somebody opens later, if at
+ * all. Everything is served from the chat's own path, so nothing here needs an
+ * account and nothing else in the workspace is reachable through it.
+ */
+function Attachment({ file }: { file: ChatAttachment }) {
+  const url = `${API_BASE}${file.url}`;
+  const frame =
+    "mt-1.5 max-w-[85%] overflow-hidden rounded-2xl border border-[var(--edge)]";
+
+  if (file.kind === "video") {
+    return (
+      <div className={frame}>
+        <video
+          src={url}
+          controls
+          playsInline
+          preload="metadata"
+          className="block max-h-[26rem] w-full bg-black"
+        />
+      </div>
+    );
+  }
+  if (file.kind === "image") {
+    return (
+      <a href={url} target="_blank" rel="noreferrer" className={frame}>
+        <img
+          src={url}
+          alt={file.filename}
+          loading="lazy"
+          className="block max-h-[26rem] w-full object-contain"
+        />
+      </a>
+    );
+  }
+  if (file.kind === "audio") {
+    return (
+      <div className={`${frame} bg-ink-950/40 p-2.5`}>
+        <audio src={url} controls preload="metadata" className="w-72 max-w-full" />
+      </div>
+    );
+  }
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noreferrer"
+      className="mt-1.5 flex max-w-[85%] items-center gap-2 rounded-xl border border-[var(--edge)] px-3 py-2 text-xs text-ink-300 transition-colors hover:border-brand-400"
+    >
+      {file.filename}
+      <span className="text-ink-500">{formatBytes(file.size_bytes)}</span>
+    </a>
+  );
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
 /** What ran, under a finished answer. Closed until somebody wants it. */

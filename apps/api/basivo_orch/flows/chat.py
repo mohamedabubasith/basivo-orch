@@ -24,7 +24,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import uuid
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
@@ -38,6 +38,7 @@ from basivo_orch.flows import service
 from basivo_orch.flows.events import replay
 from basivo_orch.flows.graph import Graph
 from basivo_orch.flows.models import (
+    Artifact,
     Flow,
     FlowVersion,
     NodeExecution,
@@ -112,11 +113,27 @@ class ChatStep(BaseModel):
     detail: str = ""
 
 
+class ChatAttachment(BaseModel):
+    """A file the run made, addressed so the window can show it.
+
+    The url is under the chat's own path and carries its token, which is what
+    lets a stranger see a rendered video without an account and without the
+    artifact route being opened to the world.
+    """
+
+    url: str
+    kind: Literal["image", "video", "audio", "file"]
+    filename: str
+    content_type: str
+    size_bytes: int
+
+
 class ChatReply(BaseModel):
     status: RunStatus
     reply: str = ""
     error: str | None = None
     steps: list[ChatStep] = Field(default_factory=list)
+    attachments: list[ChatAttachment] = Field(default_factory=list)
 
 
 async def _published(
@@ -222,6 +239,57 @@ async def activity(session: AsyncSession, run_id: uuid.UUID) -> list[ChatStep]:
     return steps
 
 
+def _artifact_ids(value: Any, found: list[str]) -> None:
+    """Every artifact id a run's output mentions, in the order written."""
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if key.endswith("artifact_id") and isinstance(item, str) and item:
+                found.append(item)
+            else:
+                _artifact_ids(item, found)
+    elif isinstance(value, list):
+        for item in value:
+            _artifact_ids(item, found)
+
+
+def _kind(content_type: str) -> str:
+    for prefix in ("image", "video", "audio"):
+        if content_type.startswith(prefix):
+            return prefix
+    return "file"
+
+
+async def attachments(
+    session: AsyncSession, run: Run, *, flow_id: uuid.UUID, token: str
+) -> list[ChatAttachment]:
+    """The files this answer came with.
+
+    Taken from the run's own output first — a flow that returns one video means
+    that video, not the narration and the preview still it also wrote — and
+    only failing that from everything the run saved. Nothing is looked up by
+    id from the request, so a link holder cannot fish for other runs' files.
+    """
+    wanted: list[str] = []
+    _artifact_ids(run.output, wanted)
+
+    query = select(Artifact).where(Artifact.run_id == run.id)
+    if wanted:
+        query = query.where(Artifact.id.in_([uuid.UUID(item) for item in dict.fromkeys(wanted)]))
+    rows = (await session.execute(query.order_by(Artifact.created_at))).scalars().all()
+
+    base = f"/chat/{flow_id}/{token}/artifacts"
+    return [
+        ChatAttachment(
+            url=f"{base}/{row.id}",
+            kind=_kind(row.content_type),  # type: ignore[arg-type]
+            filename=row.filename,
+            content_type=row.content_type,
+            size_bytes=row.size_bytes,
+        )
+        for row in rows[:4]
+    ]
+
+
 @router.get("/{flow_id}/{token}", response_model=ChatWindow)
 async def window(
     flow_id: uuid.UUID,
@@ -299,10 +367,14 @@ async def answer(
     steps = await activity(session, run_id) if config.show_activity else []
     if run.status is RunStatus.SUCCEEDED:
         text = reply_text(run.output)
+        files = await attachments(session, run, flow_id=flow_id, token=token)
         return ChatReply(
             status=run.status,
-            reply=text or "The flow finished without anything to say.",
+            # A flow that answers with a video has said plenty. Only a run that
+            # produced neither words nor a file needs explaining.
+            reply=text or ("" if files else "The flow finished without anything to say."),
             steps=steps,
+            attachments=files,
         )
     if run.status in {RunStatus.FAILED, RunStatus.CANCELLED}:
         # The flow's own error is not shown: it is written for the person who
@@ -311,3 +383,46 @@ async def answer(
             status=run.status, error="Something went wrong answering that.", steps=steps
         )
     return ChatReply(status=run.status, steps=steps)
+
+
+@router.get("/{flow_id}/{token}/artifacts/{artifact_id}")
+@limiter.limit(POLL_LIMIT)
+async def artifact(
+    flow_id: uuid.UUID,
+    token: str,
+    artifact_id: uuid.UUID,
+    request: Request,
+    response: Response,
+    session: AsyncSession = Depends(get_async_session),
+) -> Response:
+    """Serve one file a run of THIS flow produced.
+
+    The token admits the caller and the run's flow id is checked against the
+    link's: a chat page can show its own videos and nothing else, so the id in
+    the URL is not a permission any more than it is on the authenticated
+    route.
+    """
+    await _published(session, flow_id, token)
+    row = await session.get(Artifact, artifact_id)
+    if row is None or row.run_id is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, _NOT_FOUND)
+    run = await session.get(Run, row.run_id)
+    if run is None or run.flow_id != flow_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, _NOT_FOUND)
+
+    return Response(
+        content=row.data,
+        media_type=row.content_type,
+        headers={
+            "Content-Disposition": f'inline; filename="{row.filename}"',
+            # Immutable: an artifact's bytes never change once written.
+            "Cache-Control": "private, max-age=86400, immutable",
+            # The rest of this API is same-origin, and rightly so. A chat page
+            # is the exception: the file exists to be shown in a page, the
+            # page may be served from another origin (a separate console host,
+            # an embedded window), and the deployment-wide `same-origin` policy
+            # made every video a broken frame. The link's token is what admits
+            # the reader, not the origin they read from.
+            "Cross-Origin-Resource-Policy": "cross-origin",
+        },
+    )

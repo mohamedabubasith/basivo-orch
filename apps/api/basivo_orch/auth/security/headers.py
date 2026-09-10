@@ -46,7 +46,11 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "no-referrer"
         response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
-        response.headers["Cross-Origin-Resource-Policy"] = "same-origin"
+        # `setdefault`, not assignment: a route that deliberately serves a file
+        # for another origin to display — a rendered video in a published chat
+        # window — has already said so, and overwriting it here turned every
+        # such file into a broken frame with nothing in the log.
+        response.headers.setdefault("Cross-Origin-Resource-Policy", "same-origin")
         response.headers["Permissions-Policy"] = (
             "accelerometer=(), camera=(), geolocation=(), gyroscope=(), "
             "magnetometer=(), microphone=(), payment=(), usb=()"
@@ -54,8 +58,13 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         # Auth responses carry tokens and account state; caching any of it —
         # in the browser or an intermediary — risks serving one user's data to
         # the next.
-        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, private"
-        response.headers["Pragma"] = "no-cache"
+        # Same reasoning: no-store is right for anything carrying tokens or
+        # account state, and wrong for an immutable file a route just chose to
+        # let the browser keep.
+        response.headers.setdefault(
+            "Cache-Control", "no-store, no-cache, must-revalidate, private"
+        )
+        response.headers.setdefault("Pragma", "no-cache")
 
         if self._settings.environment.is_production_like:
             response.headers["Strict-Transport-Security"] = (
