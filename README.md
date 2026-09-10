@@ -76,11 +76,11 @@ Nineteen node types ship today, and none of them is a placeholder.
 | | |
 |---|---|
 | **Triggers** | Run manually, a chat window this hosts and publishes for you, a webhook (GitHub and Jira register themselves), a schedule, a Telegram bot |
-| **Agents and models** | AI Agent with tools, skills, sub-agents, hand over and MCP servers; Write with AI for a plain completion; Chat Memory that survives between runs |
+| **Agents and models** | AI Agent with tools, skills, sub-agents, hand over and MCP servers; Generate with LLM for a plain completion; Conversation State that survives between runs |
 | **Code and data** | Python in a sandbox, HTTP Request, If / Else, Set Variables |
 | **Repositories** | Fix Code and Open PR, Open Issue, Comment on Issue |
 | **Media** | AI Video (describe it, a model writes the animation, we render it and check the frames, and one tick box adds a voice and captions), AI Image (a model writes the page, a browser draws it, so the type is always right) |
-| **Delivery** | Post to Social (Telegram, Discord, Slack, Mastodon, Bluesky), Telegram Reply |
+| **Delivery** | Post to Social Media (Telegram, Discord, Slack, Mastodon, Bluesky), Reply on Telegram |
 
 Every model call reports its tokens and its price, whichever provider it went
 to, and every render reports the seconds it took.

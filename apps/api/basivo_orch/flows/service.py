@@ -127,6 +127,46 @@ async def latest_version(session: AsyncSession, flow_id: uuid.UUID) -> FlowVersi
     return version
 
 
+async def versions(
+    session: AsyncSession, flow_id: uuid.UUID, *, limit: int = 50
+) -> list[FlowVersion]:
+    """The edit history, newest first.
+
+    Versions are append-only, so this is the whole story of a flow: what it
+    looked like at every save, and which of those is the one production runs.
+    """
+    result = await session.execute(
+        select(FlowVersion)
+        .where(FlowVersion.flow_id == flow_id)
+        .order_by(FlowVersion.version.desc())
+        .limit(limit)
+    )
+    return list(result.scalars())
+
+
+async def restore_version(
+    session: AsyncSession, *, flow: Flow, version_number: int, user_id: uuid.UUID | None
+) -> FlowVersion:
+    """Bring an old graph back as a NEW version.
+
+    History is never rewritten, and the old version keeps its number: a run
+    from three weeks ago has to keep describing the graph that actually ran.
+    Restoring is therefore an ordinary save whose contents came from earlier,
+    which also means an undo of a restore is another restore.
+    """
+    result = await session.execute(
+        select(FlowVersion).where(
+            FlowVersion.flow_id == flow.id, FlowVersion.version == version_number
+        )
+    )
+    wanted = result.scalar_one_or_none()
+    if wanted is None:
+        raise ValueError(f"This flow has no version {version_number}.")
+    return await save_version(
+        session, flow=flow, graph=Graph.model_validate(wanted.graph), user_id=user_id
+    )
+
+
 async def save_version(
     session: AsyncSession,
     *,

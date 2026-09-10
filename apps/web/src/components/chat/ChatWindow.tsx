@@ -6,26 +6,49 @@
  * the canvas. Both talk to the same three unauthenticated endpoints, so what
  * is tested in the builder is exactly what a customer gets.
  *
+ * Two things separate this from a chat box over an API. While an answer is
+ * being made the window shows what the flow is doing — which node is running,
+ * which model is thinking, which tools it called — because an agent can take
+ * twenty seconds and a blank window for twenty seconds reads as broken. Once
+ * the answer lands those steps stay behind a disclosure under it, so "why did
+ * it say that" has an answer that does not need the run log. The flow's author
+ * can switch both off for a chat given to customers.
+ *
  * It polls rather than streams. The endpoints are public, and a stream held
- * open per visitor is a cheap way for a stranger to occupy the server; a reply
- * takes seconds. The interval backs off as a run gets long, so a two minute
- * answer costs a handful of requests rather than a hundred.
+ * open per visitor is a cheap way for a stranger to occupy the server; the
+ * interval backs off as a run gets long, so a two minute answer costs a
+ * handful of requests rather than a hundred.
  *
  * The session id lives in this browser and nowhere else. It is what the
  * agent's memory keys on, so a reload continues the conversation and two
  * visitors never share one.
  */
 
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 
 import { API_BASE } from "../../lib/api";
 
 type Role = "you" | "them";
 
+export type ChatStep = {
+  label: string;
+  kind: string;
+  status: string;
+  duration_ms: number | null;
+  detail: string;
+};
+
 type Message = {
   id: string;
   role: Role;
   text: string;
+  steps?: ChatStep[];
 };
 
 type Window = {
@@ -33,6 +56,7 @@ type Window = {
   greeting: string;
   placeholder: string;
   suggestions: string[];
+  show_activity: boolean;
 };
 
 /** How long to wait before asking again, given how long we have waited. */
@@ -79,6 +103,7 @@ export function ChatWindow({
   const [messages, setMessages] = useState<Message[]>([]);
   const [draft, setDraft] = useState("");
   const [waiting, setWaiting] = useState(false);
+  const [live, setLive] = useState<ChatStep[]>([]);
   const [failure, setFailure] = useState("");
   const session = useRef<string>("");
   const bottom = useRef<HTMLDivElement | null>(null);
@@ -87,13 +112,15 @@ export function ChatWindow({
   if (!session.current) session.current = sessionId(flowId);
 
   useEffect(() => {
-    let live = true;
+    let alive = true;
     void fetch(base)
-      .then((response) => (response.ok ? response.json() : Promise.reject(response.status)))
-      .then((drawn: Window) => live && setWindow(drawn))
-      .catch(() => live && setGone(true));
+      .then((response) =>
+        response.ok ? response.json() : Promise.reject(response.status),
+      )
+      .then((drawn: Window) => alive && setWindow(drawn))
+      .catch(() => alive && setGone(true));
     return () => {
-      live = false;
+      alive = false;
     };
   }, [base]);
 
@@ -106,7 +133,7 @@ export function ChatWindow({
   // every render fights the reader when they look back at an earlier answer.
   useEffect(() => {
     bottom.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [messages.length, waiting]);
+  }, [messages.length, waiting, live.length]);
 
   const ask = useCallback(
     async (text: string) => {
@@ -114,6 +141,7 @@ export function ChatWindow({
       if (!trimmed || waiting) return;
       setFailure("");
       setDraft("");
+      setLive([]);
       setMessages((all) => [
         ...all,
         { id: crypto.randomUUID(), role: "you", text: trimmed },
@@ -134,20 +162,27 @@ export function ChatWindow({
           await new Promise((resume) =>
             setTimeout(resume, nextDelay(Date.now() - began)),
           );
-          if (Date.now() - began > ANSWER_TIMEOUT_MS) {
-            throw new Error("timeout");
-          }
+          if (Date.now() - began > ANSWER_TIMEOUT_MS) throw new Error("timeout");
+
           const polled = await fetch(`${base}/${runId}`);
           if (!polled.ok) throw new Error(String(polled.status));
           const state = (await polled.json()) as {
             status: string;
             reply: string;
             error: string | null;
+            steps: ChatStep[];
           };
+          setLive(state.steps ?? []);
+
           if (state.status === "succeeded") {
             setMessages((all) => [
               ...all,
-              { id: runId, role: "them", text: state.reply },
+              {
+                id: runId,
+                role: "them",
+                text: state.reply,
+                steps: state.steps ?? [],
+              },
             ]);
             return;
           }
@@ -159,6 +194,7 @@ export function ChatWindow({
         setFailure("That did not go through. Try again in a moment.");
       } finally {
         setWaiting(false);
+        setLive([]);
       }
     },
     [base, waiting],
@@ -166,7 +202,9 @@ export function ChatWindow({
 
   if (gone) {
     return (
-      <div className={`surface grid place-items-center rounded-2xl p-10 ${className}`}>
+      <div
+        className={`surface grid place-items-center rounded-2xl p-10 ${className}`}
+      >
         <p className="text-sm text-ink-400">
           This chat is not available. The link may have been turned off.
         </p>
@@ -176,7 +214,9 @@ export function ChatWindow({
 
   if (!window_) {
     return (
-      <div className={`surface grid place-items-center rounded-2xl p-10 ${className}`}>
+      <div
+        className={`surface grid place-items-center rounded-2xl p-10 ${className}`}
+      >
         <p className="text-sm text-ink-500">Opening…</p>
       </div>
     );
@@ -185,22 +225,35 @@ export function ChatWindow({
   const fresh = messages.length === 0;
 
   return (
-    <div className={`surface flex flex-col overflow-hidden rounded-2xl ${className}`}>
-      <header className="flex items-center gap-2.5 border-b border-[var(--edge)] px-4 py-3">
-        <span
-          aria-hidden="true"
-          className="h-2 w-2 rounded-full"
-          style={{ background: "var(--status-good)" }}
-        />
-        <h2 className="text-sm font-semibold text-ink-100">{window_.title}</h2>
-      </header>
-
-      <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
-        <Bubble role="them" text={window_.greeting} />
+    <div
+      className={`surface flex flex-col overflow-hidden rounded-2xl ${className}`}
+    >
+      <div className="flex-1 space-y-4 overflow-y-auto px-4 py-5 sm:px-6">
+        {fresh ? (
+          // An empty chat is the hardest screen in any chat product: the
+          // greeting is the only thing telling somebody what to type, so on
+          // an empty window it is the page rather than a first bubble.
+          <div className="mx-auto max-w-md py-10 text-center">
+            <h2 className="text-lg font-semibold text-ink-100">
+              {window_.title}
+            </h2>
+            <p className="mt-2 text-sm leading-relaxed text-ink-400">
+              {window_.greeting}
+            </p>
+          </div>
+        ) : (
+          <Bubble role="them" text={window_.greeting} />
+        )}
         {messages.map((message) => (
-          <Bubble key={message.id} role={message.role} text={message.text} />
+          <Bubble
+            key={message.id}
+            role={message.role}
+            text={message.text}
+            steps={message.steps}
+            showSteps={window_.show_activity}
+          />
         ))}
-        {waiting && <Typing />}
+        {waiting && <Working steps={window_.show_activity ? live : []} />}
         {failure && (
           <p className="text-xs" style={{ color: "var(--status-bad)" }}>
             {failure}
@@ -210,13 +263,13 @@ export function ChatWindow({
       </div>
 
       {fresh && window_.suggestions.length > 0 && (
-        <div className="flex flex-wrap gap-2 px-4 pb-3">
+        <div className="flex flex-wrap justify-center gap-2 px-4 pb-3 sm:px-6">
           {window_.suggestions.map((suggestion) => (
             <button
               key={suggestion}
               type="button"
               onClick={() => void ask(suggestion)}
-              className="rounded-full border border-[var(--edge-strong)] px-3 py-1.5 text-xs text-ink-300 transition-colors hover:border-brand-400 hover:text-ink-100"
+              className="rounded-full border border-[var(--edge-strong)] px-3.5 py-2 text-xs text-ink-300 transition-colors hover:border-brand-400 hover:text-ink-100"
             >
               {suggestion}
             </button>
@@ -225,7 +278,7 @@ export function ChatWindow({
       )}
 
       <form
-        className="flex items-end gap-2 border-t border-[var(--edge)] p-3"
+        className="flex items-end gap-2 border-t border-[var(--edge)] p-3 sm:px-6 sm:py-4"
         onSubmit={(event) => {
           event.preventDefault();
           void ask(draft);
@@ -246,12 +299,12 @@ export function ChatWindow({
           rows={1}
           placeholder={window_.placeholder}
           aria-label="Message"
-          className="max-h-32 min-h-[2.5rem] flex-1 resize-y rounded-xl border border-[var(--edge-strong)] bg-ink-950/40 px-3 py-2 text-sm text-ink-100 outline-none placeholder:text-ink-500 focus:border-brand-400"
+          className="max-h-40 min-h-[2.75rem] flex-1 resize-y rounded-xl border border-[var(--edge-strong)] bg-ink-950/40 px-3.5 py-2.5 text-sm text-ink-100 outline-none placeholder:text-ink-500 focus:border-brand-400"
         />
         <button
           type="submit"
           disabled={waiting || !draft.trim()}
-          className="rounded-xl bg-brand-500 px-3.5 py-2 text-sm font-medium text-white transition-opacity disabled:opacity-40"
+          className="rounded-xl bg-brand-500 px-4 py-2.5 text-sm font-medium text-white transition-opacity disabled:opacity-40"
         >
           Send
         </button>
@@ -260,21 +313,137 @@ export function ChatWindow({
   );
 }
 
-function Bubble({ role, text }: { role: Role; text: string }) {
+function Bubble({
+  role,
+  text,
+  steps,
+  showSteps = false,
+}: {
+  role: Role;
+  text: string;
+  steps?: ChatStep[];
+  showSteps?: boolean;
+}) {
   const mine = role === "you";
   return (
-    <div className={mine ? "flex justify-end" : "flex justify-start"}>
+    <div
+      className={mine ? "flex flex-col items-end" : "flex flex-col items-start"}
+    >
       <div
-        className={`max-w-[85%] space-y-1.5 rounded-2xl px-3.5 py-2 text-sm leading-relaxed ${
+        className={`max-w-[85%] space-y-1.5 rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
           mine
             ? "bg-brand-500 text-white"
             : "border border-[var(--edge)] bg-ink-950/40 text-ink-200"
         }`}
       >
-        {mine ? <p className="whitespace-pre-wrap">{text}</p> : <Formatted text={text} />}
+        {mine ? (
+          <p className="whitespace-pre-wrap">{text}</p>
+        ) : (
+          <Formatted text={text} />
+        )}
       </div>
+      {!mine && showSteps && steps && steps.length > 0 && (
+        <Steps steps={steps} />
+      )}
     </div>
   );
+}
+
+/** What ran, under a finished answer. Closed until somebody wants it. */
+function Steps({ steps }: { steps: ChatStep[] }) {
+  const [open, setOpen] = useState(false);
+  const total = steps.reduce((sum, step) => sum + (step.duration_ms ?? 0), 0);
+
+  return (
+    <div className="mt-1.5 w-full max-w-[85%]">
+      <button
+        type="button"
+        onClick={() => setOpen((was) => !was)}
+        aria-expanded={open}
+        className="flex items-center gap-1.5 rounded-lg px-1.5 py-1 text-xs text-ink-500 transition-colors hover:text-ink-300"
+      >
+        <svg
+          viewBox="0 0 24 24"
+          className={`h-3 w-3 transition-transform ${open ? "rotate-90" : ""}`}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+        >
+          <path d="M9 6l6 6-6 6" />
+        </svg>
+        {steps.length} {steps.length === 1 ? "step" : "steps"}
+        {total > 0 && ` · ${formatMs(total)}`}
+      </button>
+      {open && <StepList steps={steps} />}
+    </div>
+  );
+}
+
+/** The same list, live, while the answer is still being made. */
+function Working({ steps }: { steps: ChatStep[] }) {
+  const latest = steps[steps.length - 1];
+  return (
+    <div className="flex w-full flex-col items-start gap-1.5">
+      <div className="flex items-center gap-2.5 rounded-2xl border border-[var(--edge)] bg-ink-950/40 px-4 py-3">
+        <span className="flex gap-1">
+          {[0, 1, 2].map((dot) => (
+            <span
+              key={dot}
+              className="h-1.5 w-1.5 animate-bounce rounded-full bg-ink-400"
+              style={{ animationDelay: `${dot * 0.15}s` }}
+            />
+          ))}
+        </span>
+        {latest && (
+          <span className="text-xs text-ink-400">
+            {latest.label}
+            {latest.detail ? ` · ${latest.detail}` : ""}
+          </span>
+        )}
+      </div>
+      {steps.length > 1 && (
+        <div className="w-full max-w-[85%]">
+          <StepList steps={steps} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StepList({ steps }: { steps: ChatStep[] }) {
+  return (
+    <ol className="mt-1 space-y-1.5 rounded-xl border border-[var(--edge)] bg-ink-950/40 p-3">
+      {steps.map((step, index) => (
+        <li key={index} className="flex items-baseline gap-2 text-xs">
+          <span
+            aria-hidden="true"
+            className="h-1.5 w-1.5 shrink-0 rounded-full"
+            style={{ background: tone(step.status) }}
+          />
+          <span className="shrink-0 text-ink-200">{step.label}</span>
+          <span className="shrink-0 text-ink-500">{step.kind}</span>
+          {step.detail && (
+            <span className="truncate text-ink-400" title={step.detail}>
+              {step.detail}
+            </span>
+          )}
+          <span className="ml-auto shrink-0 font-mono text-ink-500">
+            {step.duration_ms != null ? formatMs(step.duration_ms) : "…"}
+          </span>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+function tone(status: string): string {
+  if (status === "succeeded") return "var(--status-good)";
+  if (status === "failed") return "var(--status-bad)";
+  return "var(--status-warn)";
+}
+
+function formatMs(ms: number): string {
+  return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
 }
 
 /**
@@ -342,7 +511,10 @@ function inline(line: string): ReactNode[] {
       );
     } else {
       parts.push(
-        <code key={parts.length} className="rounded bg-ink-800/60 px-1 py-0.5 font-mono text-[0.8em]">
+        <code
+          key={parts.length}
+          className="rounded bg-ink-800/60 px-1 py-0.5 font-mono text-[0.8em]"
+        >
           {match[2]}
         </code>,
       );
@@ -351,21 +523,4 @@ function inline(line: string): ReactNode[] {
   }
   if (last < line.length) parts.push(line.slice(last));
   return parts;
-}
-
-/** Three dots, so a slow answer looks like thinking rather than a dead page. */
-function Typing() {
-  return (
-    <div className="flex justify-start">
-      <span className="flex gap-1 rounded-2xl border border-[var(--edge)] bg-ink-950/40 px-3.5 py-3">
-        {[0, 1, 2].map((dot) => (
-          <span
-            key={dot}
-            className="h-1.5 w-1.5 animate-bounce rounded-full bg-ink-400"
-            style={{ animationDelay: `${dot * 0.15}s` }}
-          />
-        ))}
-      </span>
-    </div>
-  );
 }

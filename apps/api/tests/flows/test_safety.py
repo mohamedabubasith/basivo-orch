@@ -101,6 +101,25 @@ def test_an_embedded_reference_interpolates() -> None:
     assert render_value("Hi {{ trigger.payload.email }}!", CONTEXT) == "Hi a@b.com!"
 
 
+def test_an_optional_reference_is_empty_when_the_branch_did_not_run() -> None:
+    """The join after a branch. Either refunds or delivery answers, never both,
+    so the node that writes the reply must be able to name each of them without
+    the run dying on whichever one was skipped."""
+    context = {"input": {"refunds": {"text": "Refunded in three days."}}}
+    assert (
+        render_value("{{ input.refunds.text? }}{{ input.delivery.text? }}", context)
+        == "Refunded in three days."
+    )
+    assert render_value("{{ input.delivery.text? }}", context) is None
+
+
+def test_a_reference_without_the_marker_is_still_strict() -> None:
+    """A silent empty prompt is how a flow ends up asking a model about nothing
+    and paying for the answer, so the default stays loud."""
+    with pytest.raises(TemplateError, match="not available"):
+        render_value("{{ input.delivery.text }}", {"input": {}})
+
+
 def test_list_indices_resolve() -> None:
     assert render_value("{{ trigger.payload.tags.1 }}", CONTEXT) == "y"
 

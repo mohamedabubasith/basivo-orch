@@ -89,11 +89,21 @@ interface FlowDetail {
   slug: string;
   description: string | null;
   published_version_id: string | null;
+  /** Which version is actually live, when one is. */
   published_version?: number | null;
   graph: Graph;
   version: number;
   /** When the scheduler fires this next. Null unless it is scheduled and published. */
   next_run_at: string | null;
+}
+
+/** One row of the flow's history. */
+interface VersionSummary {
+  version: number;
+  created_at: string;
+  published_at: string | null;
+  nodes: number;
+  summary: string;
 }
 
 interface NodeExecution {
@@ -191,7 +201,7 @@ function BuilderInner() {
   const [selected, setSelected] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState<
-    null | "save" | "validate" | "publish" | "run"
+    null | "save" | "validate" | "publish" | "run" | "restore"
   >(null);
   const [banner, setBanner] = useState<{
     tone: "ok" | "bad";
@@ -203,6 +213,7 @@ function BuilderInner() {
   const [testPanelOpen, setTestPanelOpen] = useState(false);
   const [testInput, setTestInput] = useState<string>("");
   const [endpointsOpen, setEndpointsOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [publicBase, setPublicBase] = useState<string>("");
   //: Seconds since the current run started, so a multi-minute agent flow shows
   //: movement instead of an unexplained spinner.
@@ -557,6 +568,32 @@ function BuilderInner() {
     }
   }
 
+  async function restore(version: number) {
+    setBusy("restore");
+    setBanner(null);
+    try {
+      const detail = await api.post<FlowDetail>(`${base}/versions/${version}/restore`, {});
+      setFlow(detail);
+      const canvas = toCanvas(detail.graph, specMap);
+      setNodes(canvas.nodes);
+      setEdges(canvas.edges);
+      setDirty(false);
+      setHistoryOpen(false);
+      setBanner({
+        tone: "ok",
+        text: `Version ${version} is back, saved as version ${detail.version}. Publish to make it live.`,
+      });
+    } catch (err) {
+      setBanner({
+        tone: "bad",
+        text:
+          err instanceof ApiError ? err.message : "Could not restore that version.",
+      });
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function save(): Promise<boolean> {
     setBusy("save");
     setBanner(null);
@@ -895,6 +932,24 @@ function BuilderInner() {
           <Button onClick={() => void publish()} loading={busy === "publish"}>
             Publish
           </Button>
+          <div className="relative">
+            <Button
+              variant="secondary"
+              onClick={() => setHistoryOpen((open) => !open)}
+            >
+              History
+            </Button>
+            {historyOpen && (
+              <HistoryPanel
+                base={base}
+                canvasVersion={flow.version}
+                liveVersion={flow.published_version ?? null}
+                busy={busy === "restore"}
+                onRestore={(version) => void restore(version)}
+                onClose={() => setHistoryOpen(false)}
+              />
+            )}
+          </div>
           {flow.published_version_id && (
             <div className="relative">
               <Button
@@ -1193,6 +1248,135 @@ function BuilderInner() {
           </NodeDialog>
         )}
       </div>
+    </div>
+  );
+}
+
+/* --------------------------------------------------------------- history --- */
+
+/**
+ * Every version this flow has had, and a way back to one.
+ *
+ * Versions were already append-only and already carried what ran; there was
+ * simply no way to look at them. A person who wires a node wrongly, saves, and
+ * wants yesterday's graph back had to rebuild it by hand — with the old one
+ * sitting in the database the whole time.
+ *
+ * Restoring does not publish. It puts the old graph on the canvas as a new
+ * version, so going live stays a deliberate press of Publish, and the restore
+ * itself can be undone by restoring what came before it.
+ */
+function HistoryPanel({
+  base,
+  canvasVersion,
+  liveVersion,
+  busy,
+  onRestore,
+  onClose,
+}: {
+  base: string;
+  canvasVersion: number;
+  liveVersion: number | null;
+  busy: boolean;
+  onRestore: (version: number) => void;
+  onClose: () => void;
+}) {
+  const [versions, setVersions] = useState<VersionSummary[] | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    void api
+      .get<VersionSummary[]>(`${base}/versions`)
+      .then((rows) => alive && setVersions(rows))
+      .catch(() => alive && setFailed(true));
+    return () => {
+      alive = false;
+    };
+  }, [base]);
+
+  return (
+    <div className="surface absolute top-full right-0 z-30 mt-2 max-h-[70vh] w-[420px] overflow-y-auto rounded-2xl p-4 shadow-xl shadow-black/40">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-medium text-ink-100">History</p>
+          <p className="mt-1 text-xs leading-relaxed text-ink-500">
+            Every save is a version. Restoring puts one back on the canvas as a
+            new version; nothing goes live until you publish.
+          </p>
+        </div>
+        <button
+          onClick={onClose}
+          aria-label="Close history"
+          className="rounded-lg p-1.5 text-ink-500 transition-colors hover:bg-ink-800 hover:text-ink-200"
+        >
+          <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none">
+            <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="1.8" />
+          </svg>
+        </button>
+      </div>
+
+      {failed && (
+        <p className="mt-4 text-xs" style={{ color: "var(--status-bad)" }}>
+          Could not read this flow's history.
+        </p>
+      )}
+      {!versions && !failed && (
+        <p className="mt-4 text-xs text-ink-500">Reading the history…</p>
+      )}
+
+      <ol className="mt-3 space-y-1.5">
+        {(versions ?? []).map((row) => {
+          const onCanvas = row.version === canvasVersion;
+          const live = row.version === liveVersion;
+          return (
+            <li
+              key={row.version}
+              className="flex items-start gap-3 rounded-xl border border-[var(--edge)] px-3 py-2.5"
+            >
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="font-mono text-xs text-ink-200">
+                    v{row.version}
+                  </span>
+                  {live && (
+                    <span
+                      className="rounded-md px-1.5 py-0.5 text-[0.65rem]"
+                      style={{
+                        color: "var(--status-good)",
+                        border: "1px solid color-mix(in srgb, var(--status-good) 40%, transparent)",
+                      }}
+                    >
+                      Live
+                    </span>
+                  )}
+                  {onCanvas && (
+                    <span className="rounded-md border border-ink-700 px-1.5 py-0.5 text-[0.65rem] text-ink-400">
+                      On the canvas
+                    </span>
+                  )}
+                </div>
+                <p className="mt-1 truncate text-xs text-ink-400" title={row.summary}>
+                  {row.summary || `${row.nodes} nodes`}
+                </p>
+                <p className="mt-0.5 text-[0.68rem] text-ink-500">
+                  {new Date(row.created_at).toLocaleString()}
+                </p>
+              </div>
+              {!onCanvas && (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => onRestore(row.version)}
+                  className="shrink-0 rounded-lg border border-ink-600 px-2.5 py-1.5 text-xs text-ink-300 transition-colors hover:border-brand-400 hover:text-ink-100 disabled:opacity-40"
+                >
+                  Restore
+                </button>
+              )}
+            </li>
+          );
+        })}
+      </ol>
     </div>
   );
 }

@@ -33,7 +33,7 @@ class ManualTriggerNode(Node):
         "with exactly one trigger; pick this one when nothing external should start it."
     )
     needs = ("Nothing. Press Run, or POST to the flow's run endpoint with a JSON body.",)
-    example = "Run Manually -> AI Agent -> Post to Social"
+    example = "Run Manually -> AI Agent -> Post to Social Media"
     tier = 1
     category = "trigger"
     is_trigger = True
@@ -167,6 +167,20 @@ class ChatTriggerConfig(BaseModel):
         description="Up to four. They appear as buttons until the first message is sent.",
     )
 
+    #: Whether a visitor sees the steps behind an answer: which node ran,
+    #: which model answered, which tools it called. On, because a person
+    #: waiting on a slow agent deserves to know it is working; off for a
+    #: customer-facing bot where the machinery is nobody else's business.
+    show_activity: bool = Field(
+        default=True,
+        title="Show what the flow is doing",
+        description=(
+            "Visitors see each step as it runs, and can open the steps behind a finished "
+            "answer: the nodes, the model, the tools it called. No prompts or outputs are "
+            "shown. Turn it off for a chat you give to customers."
+        ),
+    )
+
     @field_validator("suggestions")
     @classmethod
     def _no_blanks(cls, value: list[str]) -> list[str]:
@@ -240,7 +254,7 @@ class ScheduleTriggerNode(Node):
     needs = (
         ("A cron expression or an interval. The flow must be published for the schedule to fire."),
     )
-    example = "Schedule -> HTTP Request -> AI Agent -> Post to Social"
+    example = "Schedule -> HTTP Request -> AI Agent -> Post to Social Media"
     tier = 1
     category = "trigger"
     is_trigger = True
@@ -308,7 +322,7 @@ class TelegramTriggerNode(Node):
             "publishing."
         ),
     )
-    example = "Telegram Bot -> Chat Memory -> AI Agent -> Telegram Reply"
+    example = "Telegram Bot -> Conversation State -> AI Agent -> Reply on Telegram"
     tier = 1
     category = "trigger"
     is_trigger = True

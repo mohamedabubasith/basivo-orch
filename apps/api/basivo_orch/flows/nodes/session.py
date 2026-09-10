@@ -57,7 +57,7 @@ class SessionConfig(BaseModel):
 
 class SessionNode(Node):
     type = "session.state"
-    label = "Chat Memory"
+    label = "Conversation State"
     description = "Remember photos, brief and progress between messages of one chat."
     when = (
         "A conversation spans many messages and later ones need what came earlier: the photos "
@@ -65,7 +65,7 @@ class SessionNode(Node):
         "trigger."
     )
     needs = ("The Telegram Bot trigger at the start of the flow",)
-    example = "Telegram Bot -> Chat Memory -> AI Agent"
+    example = "Telegram Bot -> Conversation State -> AI Agent"
     tier = 1
     category = "data"
     config_model = SessionConfig

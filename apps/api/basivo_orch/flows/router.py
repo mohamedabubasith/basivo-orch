@@ -63,6 +63,7 @@ from basivo_orch.flows.schemas import (
     RunRequest,
     TelegramConnect,
     TemplateInstall,
+    VersionSummary,
 )
 from basivo_orch.flows.streaming import SSE_HEADERS, event_stream
 from basivo_orch.flows.webhooks import (
@@ -270,6 +271,72 @@ async def install_flow_template(
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
 
     return await _detail(session, flow, version)
+
+
+@management_router.get(
+    "/orgs/{organization_id}/flows/{flow_id}/versions", response_model=list[VersionSummary]
+)
+async def list_versions(
+    flow_id: uuid.UUID,
+    context: OrgContext = Depends(require(Permission.FLOW_READ)),
+    session: AsyncSession = Depends(get_async_session),
+) -> list[VersionSummary]:
+    """Every save this flow has had, newest first.
+
+    Versions are append-only and cheap, so the history is the flow's whole
+    story: which one is live, which one you are looking at, and what each of
+    them was made of.
+    """
+    flow = await _load_flow(session, context.organization_id, flow_id)
+    rows = await service.versions(session, flow.id)
+    return [
+        VersionSummary(
+            version=row.version,
+            created_at=row.created_at,
+            published_at=row.published_at,
+            nodes=len(row.graph.get("nodes", [])),
+            summary=_shape_of(row.graph),
+        )
+        for row in rows
+    ]
+
+
+@management_router.post(
+    "/orgs/{organization_id}/flows/{flow_id}/versions/{version}/restore",
+    response_model=FlowDetail,
+)
+async def restore_version(
+    flow_id: uuid.UUID,
+    version: int,
+    context: OrgContext = Depends(require(Permission.FLOW_UPDATE)),
+    session: AsyncSession = Depends(get_async_session),
+) -> FlowDetail:
+    """Bring an old graph back, as a new version on top.
+
+    Nothing is rewritten and nothing goes live: the restored graph lands on
+    the canvas as the newest version, and publishing it is a separate,
+    deliberate act.
+    """
+    flow = await _load_flow(session, context.organization_id, flow_id)
+    try:
+        restored = await service.restore_version(
+            session, flow=flow, version_number=version, user_id=context.user.id
+        )
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
+    return await _detail(session, flow, restored)
+
+
+def _shape_of(graph: dict[str, Any]) -> str:
+    """What a version was made of, in the words on the canvas."""
+    labels: list[str] = []
+    for node in graph.get("nodes", [])[:6]:
+        node_type = str(node.get("type", ""))
+        cls = node_registry.REGISTRY.get(node_type)
+        labels.append(cls.label if cls else node_type)
+    if len(graph.get("nodes", [])) > 6:
+        labels.append("…")
+    return " → ".join(labels)
 
 
 @management_router.get("/orgs/{organization_id}/flows/{flow_id}/chat")

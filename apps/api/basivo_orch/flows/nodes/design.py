@@ -209,7 +209,7 @@ class AiImageNode(Node):
         ),
         "Photos from the trigger or an earlier node, when the picture should show them.",
     )
-    example = "Schedule -> Write with AI -> AI Image -> Post to Social"
+    example = "Schedule -> Generate with LLM -> AI Image -> Post to Social Media"
     tier = 2
     category = "design"
     config_model = AiImageConfig

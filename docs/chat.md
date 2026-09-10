@@ -30,13 +30,26 @@ Without that, every message in one conversation arrives as a stranger.
 
 The reply is whatever the last node returns: `text`, `reply`, `message` or
 `answer` if it is an object, the string itself if it is one. An AI Agent and
-Write with AI both return `text`, so a flow of Chat to Agent needs no wiring
+Generate with LLM both return `text`, so a flow of Chat to Agent needs no wiring
 at all.
 
 A run that fails answers "Something went wrong answering that." The flow's own
 error is not shown to the visitor: it names repositories, models and
 credentials, and it is written for the person who built the flow. The real
 error is on the run page as usual.
+
+## What the visitor sees while it thinks
+
+An agent can take a minute. A blank window for a minute reads as broken, so
+the window shows the steps as they happen — which node is running, which model
+is thinking, which tools it called, how long each took — and keeps them behind
+a disclosure under the finished answer.
+
+Only the shape of the work is shown, never its content: node names, node
+types, status, duration, the model's name, the names of tools called. No
+prompts, no outputs, no credentials, no repository names. Turn the whole thing
+off with **Show what the flow is doing** on the Chat node when the machinery is
+nobody else's business.
 
 ## The link
 
@@ -69,5 +82,8 @@ way to occupy the server. A reply takes seconds; a poll costs a row read.
   useless for a script.
 - A run has three minutes to answer before the page gives up on it. The run
   itself carries on and is visible on the run page.
+- The window answers from the PUBLISHED version. Saving is not publishing:
+  the editor says "Saved. v2 is live" when they differ, and so does the Chat
+  node's panel.
 - The window keeps no transcript. A reload starts an empty window; the agent
   still remembers, because its memory is on the server and keyed by session.

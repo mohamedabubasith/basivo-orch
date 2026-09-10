@@ -544,7 +544,7 @@ class AgentNode(Node):
         ),
         "A trigger before it, or any node whose output it should work on",
     )
-    example = "Telegram Bot -> AI Agent -> Telegram Reply"
+    example = "Telegram Bot -> AI Agent -> Reply on Telegram"
     tier = 2
     category = "ai"
     config_model = AgentConfig

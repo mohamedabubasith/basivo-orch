@@ -28,14 +28,24 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from basivo_orch.auth.security.ratelimit import limiter
 from basivo_orch.auth.settings import get_settings as get_auth_settings
 from basivo_orch.db import get_async_session
 from basivo_orch.flows import service
+from basivo_orch.flows.events import replay
 from basivo_orch.flows.graph import Graph
-from basivo_orch.flows.models import Flow, FlowVersion, Run, RunStatus, TriggerKind
+from basivo_orch.flows.models import (
+    Flow,
+    FlowVersion,
+    NodeExecution,
+    Run,
+    RunStatus,
+    TriggerKind,
+)
+from basivo_orch.flows.nodes import REGISTRY
 from basivo_orch.flows.nodes.triggers import ChatTriggerConfig
 
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -76,6 +86,9 @@ class ChatWindow(BaseModel):
     greeting: str
     placeholder: str
     suggestions: list[str]
+    #: Whether visitors see the steps behind an answer. The flow's author
+    #: decides; see `ChatTriggerConfig.show_activity`.
+    show_activity: bool = True
 
 
 class ChatAccepted(BaseModel):
@@ -83,10 +96,27 @@ class ChatAccepted(BaseModel):
     status: RunStatus
 
 
+class ChatStep(BaseModel):
+    """One thing that happened while the answer was being made.
+
+    Deliberately thin. This is shown to strangers, so it carries what a person
+    waiting is entitled to see — which step, whether it finished, how long it
+    took, which model, which tools — and nothing that belongs to the flow's
+    owner: no prompts, no outputs, no credentials, no repository names.
+    """
+
+    label: str
+    kind: str
+    status: str
+    duration_ms: int | None = None
+    detail: str = ""
+
+
 class ChatReply(BaseModel):
     status: RunStatus
     reply: str = ""
     error: str | None = None
+    steps: list[ChatStep] = Field(default_factory=list)
 
 
 async def _published(
@@ -138,6 +168,60 @@ def reply_text(output: dict[str, Any] | None) -> str:
     return ""
 
 
+async def activity(session: AsyncSession, run_id: uuid.UUID) -> list[ChatStep]:
+    """What the flow did, in the words a visitor can be shown.
+
+    Two sources, because they answer different halves of "what is taking so
+    long": the node executions say which step is running, and the model events
+    say what the model did inside one — which tools it called, how long it
+    thought, which model answered.
+    """
+    executions = (
+        (
+            await session.execute(
+                select(NodeExecution)
+                .where(NodeExecution.run_id == run_id)
+                .order_by(NodeExecution.started_at)
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    tools: dict[str, list[str]] = {}
+    models: dict[str, str] = {}
+    for event in await replay(session, run_id):
+        data = event.data or {}
+        node_id = str(data.get("node_id") or "")
+        if data.get("step") == "llm.response":
+            if model := str(data.get("model") or ""):
+                models[node_id] = model
+            called = [str(name) for name in (data.get("tool_calls") or []) if name]
+            if called:
+                tools.setdefault(node_id, []).extend(called)
+        elif data.get("step") == "agent.handover" and (to := data.get("to")):
+            tools.setdefault(node_id, []).append(f"handed over to {to}")
+
+    steps: list[ChatStep] = []
+    for execution in executions:
+        cls = REGISTRY.get(execution.node_type)
+        detail = models.get(execution.node_id, "")
+        if called := tools.get(execution.node_id):
+            # Named, not counted: "searched the docs" is worth waiting for and
+            # "3 tool calls" is not.
+            detail = ", ".join(list(dict.fromkeys(called))[:4])
+        steps.append(
+            ChatStep(
+                label=execution.node_name or (cls.label if cls else execution.node_type),
+                kind=cls.label if cls else execution.node_type,
+                status=str(execution.status),
+                duration_ms=execution.duration_ms,
+                detail=detail,
+            )
+        )
+    return steps
+
+
 @router.get("/{flow_id}/{token}", response_model=ChatWindow)
 async def window(
     flow_id: uuid.UUID,
@@ -151,6 +235,7 @@ async def window(
         greeting=config.greeting,
         placeholder=config.placeholder,
         suggestions=config.suggestions,
+        show_activity=config.show_activity,
     )
 
 
@@ -201,19 +286,28 @@ async def answer(
     response: Response,
     session: AsyncSession = Depends(get_async_session),
 ) -> ChatReply:
-    """Where the reply is up to. Terminal states carry the words or the fault."""
-    await _published(session, flow_id, token)
+    """Where the reply is up to, and what has happened so far.
+
+    The steps come back on every poll, not only at the end: a person watching a
+    blank window for twenty seconds wants to know the agent is calling a tool,
+    and that is precisely when it is worth telling them.
+    """
+    _, _, config = await _published(session, flow_id, token)
     run = await session.get(Run, run_id)
     if run is None or run.flow_id != flow_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, _NOT_FOUND)
+    steps = await activity(session, run_id) if config.show_activity else []
     if run.status is RunStatus.SUCCEEDED:
         text = reply_text(run.output)
         return ChatReply(
             status=run.status,
             reply=text or "The flow finished without anything to say.",
+            steps=steps,
         )
     if run.status in {RunStatus.FAILED, RunStatus.CANCELLED}:
         # The flow's own error is not shown: it is written for the person who
         # built the flow, and can name repositories, models and credentials.
-        return ChatReply(status=run.status, error="Something went wrong answering that.")
-    return ChatReply(status=run.status)
+        return ChatReply(
+            status=run.status, error="Something went wrong answering that.", steps=steps
+        )
+    return ChatReply(status=run.status, steps=steps)

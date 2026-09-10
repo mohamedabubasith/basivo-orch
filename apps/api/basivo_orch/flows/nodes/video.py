@@ -916,7 +916,7 @@ class AiVideoNode(Node):
         ),
         "Images from the trigger or an earlier node, when the video should show them.",
     )
-    example = "Schedule -> Write with AI -> AI Video -> Post to Social"
+    example = "Schedule -> Generate with LLM -> AI Video -> Post to Social Media"
     tier = 2
     category = "design"
     config_model = AiVideoConfig

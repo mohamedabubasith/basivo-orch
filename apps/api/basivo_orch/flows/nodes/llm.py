@@ -81,7 +81,7 @@ class LlmGenerateConfig(BaseModel):
 
 class LlmGenerateNode(Node):
     type = "llm.generate"
-    label = "Write with AI"
+    label = "Generate with LLM"
     description = "One model call that writes text. No tools, no memory, no loop."
     when = (
         "The step only needs words written: a post, a summary, a subject line, a set of fields. "
@@ -94,7 +94,7 @@ class LlmGenerateNode(Node):
         ),
         "A trigger before it, or any node whose output the prompt should write from",
     )
-    example = "Schedule -> Write with AI -> AI Video -> Post to Social"
+    example = "Schedule -> Generate with LLM -> AI Video -> Post to Social Media"
     tier = 2
     category = "ai"
     config_model = LlmGenerateConfig

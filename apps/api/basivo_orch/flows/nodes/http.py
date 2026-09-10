@@ -144,7 +144,7 @@ class HttpRequestNode(Node):
         "A trigger before it, or any node whose output it should work on",
         "The endpoint's URL and any token it wants, ideally from a credential.",
     )
-    example = "Schedule -> HTTP Request -> Set Variables -> Post to Social"
+    example = "Schedule -> HTTP Request -> Set Variables -> Post to Social Media"
     tier = 1
     category = "utility"
     config_model = HttpRequestConfig

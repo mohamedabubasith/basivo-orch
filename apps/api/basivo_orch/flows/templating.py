@@ -14,6 +14,13 @@ So a reference is a path: dotted keys and integer indices, resolved against
 plain data. No calls, no operators, no attribute access on Python objects. If
 that turns out to be too little, the answer is a named, audited helper
 (`{{ upper(vars.name) }}` implemented in `FILTERS`), not a general evaluator.
+
+One marker exists beyond the path itself: a trailing `?` means "empty if this
+did not happen". It is for the node that joins a branch — `{{ input.refunds.text? }}`
+in a flow where either refunds or delivery answers — where the missing key is
+the normal case rather than a mistake. Everywhere else a missing reference
+stays an error, because a silent empty prompt is how a flow ends up asking a
+model about nothing and charging for the answer.
 """
 
 from __future__ import annotations
@@ -42,7 +49,22 @@ def _lookup(context: dict[str, Any], path: str) -> Any:
     Only dict keys and list indices. Anything else is a lookup failure rather
     than an attribute access, which is what keeps `{{ x.__class__ }}` from
     being a foothold.
+
+    A path ending in `?` is optional: it resolves to nothing rather than
+    raising when the branch that would have produced it did not run.
     """
+    optional = path.endswith("?")
+    if optional:
+        path = path[:-1].rstrip()
+    try:
+        return _walk(context, path)
+    except TemplateError:
+        if optional:
+            return None
+        raise
+
+
+def _walk(context: dict[str, Any], path: str) -> Any:
     parts = [p for p in path.split(".") if p]
     if not parts:
         raise TemplateError("Empty reference.")

@@ -111,6 +111,22 @@ class FlowDetail(FlowRead):
     next_run_at: datetime | None = None
 
 
+class VersionSummary(BaseModel):
+    """One row of a flow's history."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    version: int
+    created_at: datetime
+    published_at: datetime | None = None
+    #: How big the graph was, so a person scanning the list can see where the
+    #: flow grew or lost half its nodes without opening each one.
+    nodes: int = 0
+    #: The node types in it, in graph order. Reading "chat, agent" tells you
+    #: which version this was far faster than a timestamp does.
+    summary: str = ""
+
+
 class GraphProblems(BaseModel):
     """Returned as 422 when a graph will not execute."""
 

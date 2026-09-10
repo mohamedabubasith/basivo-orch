@@ -1,4 +1,4 @@
-"""The Write with AI node.
+"""The Generate with LLM node.
 
 Everything worth testing here is what we wrote around one `ainvoke`: template
 resolution, the system prompt, the JSON contract and what happens when the
@@ -47,7 +47,7 @@ def make_context(
         run_id=uuid.uuid4(),
         organization_id=uuid.uuid4(),
         node_id="write_1",
-        node_name="Write with AI",
+        node_name="Generate with LLM",
         attempt=1,
         input=node_input if node_input is not None else {"topic": "otters"},
         outputs=outputs or {},
