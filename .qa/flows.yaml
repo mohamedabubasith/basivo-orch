@@ -170,3 +170,34 @@ flows:
       - expect the sidebar to have no Platform group and no Admin link, because the signed-in account is not platform staff
       - open /app/admin
       - expect the page to say this area is for platform staff, and no workspace figures to be shown
+
+  - id: tools-and-mcp-page
+    depends_on: login
+    watch:
+      - apps/web/src/routes/app/Toolbox.tsx
+      - apps/api/basivo_orch/toolbox/**
+    steps:
+      - open /app/tools
+      - expect a Tools section and an MCP servers section
+      - expect a New tool button and an Add MCP server button
+
+  - id: builder-version-history
+    depends_on: login
+    watch:
+      - apps/web/src/routes/app/Builder.tsx
+    steps:
+      - open /app/flows
+      - open the first flow in the list
+      - click History
+      - expect a list of versions, the newest marked as being on the canvas
+
+  - id: custom-dropdowns-are-ours
+    depends_on: login
+    watch:
+      - apps/web/src/components/fields.tsx
+      - apps/web/src/builder/Inspector.tsx
+    steps:
+      - open /app/credentials
+      - click New credential
+      - open the provider dropdown
+      - expect a list of providers with a tick beside the chosen one, not the operating system's own menu
