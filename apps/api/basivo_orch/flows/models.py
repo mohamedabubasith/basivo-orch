@@ -85,6 +85,10 @@ class TriggerKind(enum.StrEnum):
     WEBHOOK = "webhook"
     SCHEDULE = "schedule"
     API = "api"
+    #: A person typing in the chat page a flow publishes. Distinct from
+    #: WEBHOOK because "who started this run" is the first question asked of a
+    #: run log, and "a webhook" is the wrong answer when it was a customer.
+    CHAT = "chat"
 
 
 class Flow(Base):

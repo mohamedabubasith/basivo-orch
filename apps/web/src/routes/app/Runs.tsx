@@ -68,6 +68,7 @@ const TRIGGERS: Record<string, { label: string; hue: string; glyph?: ReactNode }
   {
     manual: { label: "Manual", hue: "var(--color-brand-400)" },
     webhook: { label: "Webhook", hue: "var(--color-accent-500)" },
+    chat: { label: "Chat", hue: "var(--color-accent-500)" },
     schedule: { label: "Scheduled", hue: "var(--status-warn)" },
     api: {
       label: "API",

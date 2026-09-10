@@ -1183,7 +1183,7 @@ function ChatSource({
     if (!orgId || !flowId || !isPublished) return;
     let live = true;
     void api
-      .get<{ url: string; token: string }>(`/orgs/${orgId}/flows/${flowId}/chat`)
+      .get<{ url: string; token: string }>(`/api/v1/orgs/${orgId}/flows/${flowId}/chat`)
       .then((answer) => live && setLink(answer))
       .catch(() => live && setLink(null));
     return () => {

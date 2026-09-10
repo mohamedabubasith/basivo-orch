@@ -9,7 +9,7 @@ from __future__ import annotations
 import uuid
 
 import pytest
-from fastapi import HTTPException
+from fastapi import HTTPException, Response
 from sqlalchemy import select
 
 from basivo_orch.flows import service
@@ -23,7 +23,7 @@ from basivo_orch.flows.chat import (
     window,
 )
 from basivo_orch.flows.graph import Graph
-from basivo_orch.flows.models import Run, RunStatus
+from basivo_orch.flows.models import Run, RunStatus, TriggerKind
 from basivo_orch.flows.nodes.triggers import ChatTriggerConfig
 
 CHAT_GRAPH = {
@@ -110,12 +110,16 @@ async def test_a_message_starts_a_run_carrying_the_session(session, organization
         chat_token(flow.id),
         ChatMessage(text="Where is my order?", session_id="s-1"),
         _Request(),  # type: ignore[arg-type]
+        Response(),
         session,
     )
 
     assert accepted.status is RunStatus.QUEUED
     run = await session.get(Run, accepted.run_id)
     assert run is not None
+    # "Who started this?" is the first question asked of a run log, and "a
+    # webhook" is the wrong answer when it was a person in a chat window.
+    assert run.trigger is TriggerKind.CHAT
     payload = run.input["payload"]
     assert payload["text"] == "Where is my order?"
     # The agent's memory is keyed on this. Without it every message in a
@@ -186,10 +190,13 @@ async def test_the_answer_is_the_agents_words_once_the_run_succeeds(session, org
         chat_token(flow.id),
         ChatMessage(text="hello", session_id="s-1"),
         _Request(),  # type: ignore[arg-type]
+        Response(),
         session,
     )
 
-    waiting = await answer(flow.id, chat_token(flow.id), accepted.run_id, _Request(), session)  # type: ignore[arg-type]
+    waiting = await answer(
+        flow.id, chat_token(flow.id), accepted.run_id, _Request(), Response(), session
+    )  # type: ignore[arg-type]
     assert waiting.status is RunStatus.QUEUED
     assert waiting.reply == ""
 
@@ -199,7 +206,9 @@ async def test_the_answer_is_the_agents_words_once_the_run_succeeds(session, org
     run.output = {"result": {"text": "Your order ships tomorrow.", "usage": {}}}
     await session.commit()
 
-    done = await answer(flow.id, chat_token(flow.id), accepted.run_id, _Request(), session)  # type: ignore[arg-type]
+    done = await answer(
+        flow.id, chat_token(flow.id), accepted.run_id, _Request(), Response(), session
+    )  # type: ignore[arg-type]
     assert done.reply == "Your order ships tomorrow."
     assert done.error is None
 
@@ -213,6 +222,7 @@ async def test_a_failed_run_says_so_without_quoting_the_flows_error(session, org
         chat_token(flow.id),
         ChatMessage(text="hello", session_id="s-1"),
         _Request(),  # type: ignore[arg-type]
+        Response(),
         session,
     )
     run = await session.get(Run, accepted.run_id)
@@ -221,7 +231,9 @@ async def test_a_failed_run_says_so_without_quoting_the_flows_error(session, org
     run.error = "Credential 8f2c for github/acme-private was rejected."
     await session.commit()
 
-    replied = await answer(flow.id, chat_token(flow.id), accepted.run_id, _Request(), session)  # type: ignore[arg-type]
+    replied = await answer(
+        flow.id, chat_token(flow.id), accepted.run_id, _Request(), Response(), session
+    )  # type: ignore[arg-type]
     assert replied.error and "acme-private" not in replied.error
     assert replied.reply == ""
 
@@ -235,11 +247,12 @@ async def test_a_run_from_another_flow_cannot_be_read_through_this_link(session,
         chat_token(other.id),
         ChatMessage(text="hello", session_id="s-1"),
         _Request(),  # type: ignore[arg-type]
+        Response(),
         session,
     )
 
     with pytest.raises(HTTPException) as caught:
-        await answer(flow.id, chat_token(flow.id), accepted.run_id, _Request(), session)  # type: ignore[arg-type]
+        await answer(flow.id, chat_token(flow.id), accepted.run_id, _Request(), Response(), session)  # type: ignore[arg-type]
     assert caught.value.status_code == 404
 
 
@@ -264,3 +277,20 @@ def test_a_chat_page_needs_no_configuration_at_all():
     config = ChatTriggerConfig()
     assert config.title and config.greeting and config.placeholder
     assert config.suggestions == []
+
+
+def test_every_rate_limited_endpoint_takes_the_response_the_limiter_writes_to():
+    """SlowAPI writes its headers onto the endpoint's `response` argument and
+    raises if there is not one. That raise is a 500, and a 500 skips the CORS
+    middleware, so in a browser it arrives as a CORS error about a request that
+    was really a crash. The suite runs with rate limiting off, which is exactly
+    why this is checked by signature rather than by exercising it."""
+    import inspect
+
+    from basivo_orch.flows import chat as module
+
+    for name in ("send", "answer"):
+        parameters = inspect.signature(getattr(module, name)).parameters
+        assert "response" in parameters, f"{name} is rate limited without a response"
+        # `from __future__ import annotations` makes these strings.
+        assert parameters["response"].annotation in (Response, "Response")

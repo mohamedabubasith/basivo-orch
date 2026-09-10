@@ -26,7 +26,7 @@ import hmac
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -163,6 +163,12 @@ async def send(
     token: str,
     message: ChatMessage,
     request: Request,
+    # `response` is not decoration: the rate limiter writes its headers onto
+    # it, and raises if the endpoint does not take one. Without it every send
+    # was a 500, which reaches a browser as a CORS error because an unhandled
+    # exception skips the CORS middleware. Found by running it, not by a test:
+    # the suite has rate limiting switched off.
+    response: Response,
     session: AsyncSession = Depends(get_async_session),
 ) -> ChatAccepted:
     """Take a message and start a run. The answer is collected by polling."""
@@ -171,7 +177,7 @@ async def send(
         session,
         flow=flow,
         version=version,
-        trigger=TriggerKind.WEBHOOK,
+        trigger=TriggerKind.CHAT,
         payload={
             "text": message.text,
             "session_id": message.session_id,
@@ -192,6 +198,7 @@ async def answer(
     token: str,
     run_id: uuid.UUID,
     request: Request,
+    response: Response,
     session: AsyncSession = Depends(get_async_session),
 ) -> ChatReply:
     """Where the reply is up to. Terminal states carry the words or the fault."""
