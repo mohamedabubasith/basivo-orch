@@ -389,7 +389,23 @@ class AgentConfig(BaseModel):
 
     # -- transport -------------------------------------------------------------
     base_url: str = Field(default="", max_length=300, description="Overrides the credential's.")
-    request_timeout_seconds: float = Field(default=120.0, ge=5, le=600)
+    request_timeout_seconds: float = Field(
+        default=90.0,
+        ge=5,
+        le=600,
+        title="Wait for the model",
+        description="Seconds to wait for one model call before giving up on it.",
+    )
+    #: Retries multiply the wait: two of them on a 90 second timeout is four
+    #: and a half minutes for what looked like one call. One is enough to ride
+    #: out a blip; a provider that is properly stuck should say so quickly.
+    model_retries: int = Field(
+        default=1,
+        ge=0,
+        le=5,
+        title="Retry a failed model call",
+        description="How many times to retry one call before the node fails. Each retry waits.",
+    )
 
 
 def _handover_tools(
@@ -599,10 +615,25 @@ class AgentNode(Node):
 
     max_attempts = 2
     retry_backoff_seconds = 2.0
+    #: A fallback only. `budget_seconds` works the real ceiling out from the
+    #: settings, because "eleven minutes" is right for fifteen iterations of a
+    #: slow model and absurd for two of a fast one.
     #: Generous: the ceiling is the loop (`max_iterations` / `max_tool_calls`),
     #: and a slow tool should not be killed mid-call by a timeout tuned for a
     #: single HTTP request.
     timeout_seconds = 660.0
+
+    @classmethod
+    def budget_seconds(cls, config: AgentConfig) -> float:
+        """What this agent, as configured, is allowed to spend.
+
+        Every turn is one model call plus whatever its tools take. Twenty
+        seconds a turn for tools is generous for an HTTP call and a search;
+        anything slower is a tool that should carry its own limit. Capped,
+        because a person is usually at the other end of this.
+        """
+        per_turn = config.request_timeout_seconds * (1 + config.model_retries) + 20
+        return float(min(15 * 60, max(60.0, per_turn * config.max_iterations + 30)))
 
     async def run(self, config: AgentConfig, ctx: NodeContext) -> NodeResult:
         # The MCP sessions live exactly as long as the run: opened before the
@@ -653,6 +684,7 @@ class AgentNode(Node):
             max_tokens=config.max_tokens,
             top_p=config.top_p,
             request_timeout=config.request_timeout_seconds,
+            max_retries=config.model_retries,
             stop=config.stop_sequences or None,
         )
 
@@ -841,6 +873,10 @@ class AgentNode(Node):
                 entry="main",
                 prompt=prompt,
                 max_iterations=config.max_iterations,
+                # One turn's silence, not the node's whole budget: a provider
+                # that has stopped answering should be called out in a minute
+                # and a half, not in ten.
+                stall_seconds=config.request_timeout_seconds * (1 + config.model_retries) + 30,
                 cost_limit_usd=config.cost_limit_usd,
                 totals=totals,
                 history=history,
@@ -927,6 +963,7 @@ class AgentNode(Node):
             max_iterations=config.max_iterations,
             max_tool_calls=config.max_tool_calls,
             cost_limit_usd=config.cost_limit_usd,
+            stall_seconds=_stall_window(config),
             provider=config.provider,
             model_name=config.model,
             totals=totals,
@@ -993,6 +1030,16 @@ class AgentNode(Node):
 # ---------------------------------------------------------------------------
 # Model construction
 # ---------------------------------------------------------------------------
+
+
+def _stall_window(config: AgentConfig) -> float:
+    """How long one turn may go silent before the model is declared stuck.
+
+    One turn's silence, not the node's whole budget: a provider that has
+    stopped answering should be called out in a couple of minutes rather than
+    in ten, and the difference is what a person waiting reads as broken.
+    """
+    return config.request_timeout_seconds * (1 + config.model_retries) + 30
 
 
 async def _execute_tool(

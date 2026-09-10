@@ -26,9 +26,11 @@ delegation is a step on the log with its own tokens.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from collections.abc import Awaitable, Callable
+from contextlib import suppress
 from dataclasses import dataclass, field
 from typing import Annotated, Any
 
@@ -184,6 +186,8 @@ async def run_agent(
     max_iterations: int,
     max_tool_calls: int,
     cost_limit_usd: float | None,
+    #: How long one turn may go silent before the model is declared stuck.
+    stall_seconds: float = 180.0,
     provider: str,
     model_name: str,
     totals: RunTotals | None = None,
@@ -209,12 +213,35 @@ async def run_agent(
     turn_started = time.perf_counter()
     final_text = ""
 
+    # A stalled provider does not close the connection: it holds it open and
+    # sends nothing, so the HTTP client's own timeout never fires and the run
+    # sits there for as long as the node's ceiling allows. This watches the
+    # STREAM instead: no chunk within the window means the model has stopped
+    # answering, whatever the socket thinks.
+    stream = agent.astream(
+        {"messages": [*as_messages(history), ("user", prompt)]},
+        stream_mode=["updates"],
+        config={"recursion_limit": recursion_limit_for(max_iterations)},
+    ).__aiter__()
+
     try:
-        async for _, chunk in agent.astream(
-            {"messages": [*as_messages(history), ("user", prompt)]},
-            stream_mode=["updates"],
-            config={"recursion_limit": recursion_limit_for(max_iterations)},
-        ):
+        while True:
+            try:
+                _, chunk = await asyncio.wait_for(stream.__anext__(), timeout=stall_seconds)
+            except StopAsyncIteration:
+                break
+            except TimeoutError:
+                await ctx.step(
+                    "agent.stalled",
+                    {"agent": label, "model": model_name, "waited_seconds": stall_seconds},
+                )
+                with suppress(Exception):
+                    await stream.aclose()
+                raise NodeError(
+                    f"{model_name} stopped responding after {int(stall_seconds)} seconds "
+                    "without finishing. That is the provider, not the flow: try a faster "
+                    "model, or raise 'Wait for the model' on this node."
+                ) from None
             for node_name, payload in (chunk or {}).items():
                 for message in (payload or {}).get("messages", []) or []:
                     kind = type(message).__name__
@@ -419,6 +446,10 @@ async def run_team(
     prompt: str,
     max_iterations: int,
     cost_limit_usd: float | None,
+    #: How long one turn may go silent before the model is declared stuck. The
+    #: same guard the single-agent path has, for the same reason: a provider
+    #: that stops sending holds the connection open and nothing else notices.
+    stall_seconds: float = 180.0,
     totals: RunTotals | None = None,
     history: list[dict[str, Any]] | None = None,
 ) -> RunTotals:
@@ -464,12 +495,32 @@ async def run_team(
         # compiled graph of its own, and without it the transferring agent's
         # turn — and its tokens — never surface at all. The namespace names
         # the agent that spoke; the parent-level updates name the routing.
-        async for namespace, _, chunk in app.astream(
+        stream = app.astream(
             {"messages": [*as_messages(history), ("user", prompt)]},
             stream_mode=["updates"],
             subgraphs=True,
             config={"recursion_limit": recursion_limit_for(max_iterations) * max(1, len(members))},
-        ):
+        ).__aiter__()
+        while True:
+            try:
+                namespace, _, chunk = await asyncio.wait_for(
+                    stream.__anext__(), timeout=stall_seconds
+                )
+            except StopAsyncIteration:
+                break
+            except TimeoutError:
+                await ctx.step(
+                    "agent.stalled",
+                    {"agent": speaking, "waited_seconds": stall_seconds},
+                )
+                with suppress(Exception):
+                    await stream.aclose()
+                raise NodeError(
+                    f"The model answering as {speaking} stopped responding after "
+                    f"{int(stall_seconds)} seconds. That is the provider, not the flow: try "
+                    "a faster model, or raise 'Wait for the model' on this node."
+                ) from None
+
             inside = namespace[0].split(":")[0] if namespace else ""
 
             # The handover is recorded when the new agent starts speaking,

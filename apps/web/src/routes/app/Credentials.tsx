@@ -18,7 +18,7 @@ import {
   type FormEvent,
 } from "react";
 
-import { ApiError, api } from "../../lib/api";
+import { ApiError, api, isSessionEnded } from "../../lib/api";
 import { useWorkspace } from "../../lib/workspace";
 import {
   Alert,
@@ -80,7 +80,11 @@ export function Credentials() {
         await api.get<Credential[]>(`/api/v1/orgs/${orgId}/credentials`),
       );
       setError(null);
-    } catch {
+    } catch (err) {
+      // A 401 is the session ending, and the session handler is already
+      // taking them to the sign-in screen. Saying the data failed sends
+      // somebody looking for a problem that is not there.
+      if (isSessionEnded(err)) return;
       setError("Could not load credentials.");
       setCredentials([]);
     }

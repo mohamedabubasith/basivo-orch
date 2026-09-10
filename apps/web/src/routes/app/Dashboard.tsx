@@ -2,7 +2,7 @@ import { motion } from "motion/react";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
-import { api } from "../../lib/api";
+import { api, isSessionEnded } from "../../lib/api";
 import { useAuth } from "../../lib/auth";
 import { useWorkspace } from "../../lib/workspace";
 import {
@@ -83,7 +83,11 @@ export function Dashboard() {
         ),
       );
       setError(null);
-    } catch {
+    } catch (err) {
+      // A 401 is the session ending, and the session handler is already
+      // taking them to the sign-in screen. Saying the data failed sends
+      // somebody looking for a problem that is not there.
+      if (isSessionEnded(err)) return;
       setError("Could not load your analytics.");
     } finally {
       setLoading(false);

@@ -21,7 +21,7 @@ import {
   type FormEvent,
 } from "react";
 
-import { ApiError, api } from "../../lib/api";
+import { ApiError, api, isSessionEnded } from "../../lib/api";
 import { cx } from "../../lib/cx";
 import { useWorkspace } from "../../lib/workspace";
 import {
@@ -76,7 +76,11 @@ export function Skills() {
     try {
       setSkills(await api.get<SkillSummary[]>(`/api/v1/orgs/${orgId}/skills`));
       setError(null);
-    } catch {
+    } catch (err) {
+      // A 401 is the session ending, and the session handler is already
+      // taking them to the sign-in screen. Saying the data failed sends
+      // somebody looking for a problem that is not there.
+      if (isSessionEnded(err)) return;
       setError("Could not load the skill library.");
       setSkills([]);
     }

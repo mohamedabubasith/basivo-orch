@@ -10,6 +10,8 @@ network call or an API key.
 
 from __future__ import annotations
 
+import asyncio
+
 import uuid
 
 import httpx
@@ -493,3 +495,84 @@ async def test_the_handover_is_logged_before_the_receiving_agent_answers(monkeyp
         if kind == "llm.response" and data["agent"] == "billing"
     )
     assert handover_at < billing_spoke_at, kinds
+
+
+async def test_the_model_client_is_told_how_long_to_wait_and_how_often_to_retry(monkeypatch):
+    """Retries multiply the wait. Two of them on a ninety second timeout is four
+    and a half minutes for what a person sees as one call, which is how a chat
+    window ends up looking stuck on a busy free endpoint."""
+    asked: dict[str, object] = {}
+
+    async def capture(ctx, **kwargs):
+        asked.update(kwargs)
+        return FakeChatModel(respond=lambda _messages: says("done"))
+
+    monkeypatch.setattr("basivo_orch.flows.nodes.agent.build_chat_model", capture)
+
+    config = AgentConfig(prompt="hello", model="m")
+    assert config.model_retries == 1, "one retry rides out a blip; more hides a stuck provider"
+    assert config.request_timeout_seconds <= 90
+
+    recorder = _Recorder()
+    async with httpx.AsyncClient() as client:
+        await AgentNode().run(config, make_context(recorder, http=client))
+
+    assert asked["request_timeout"] == config.request_timeout_seconds
+    assert asked["max_retries"] == config.model_retries
+
+
+async def test_a_model_that_stops_sending_is_given_up_on(monkeypatch, http_client):
+    """The hang this was written for: a provider that holds the connection open
+    and sends nothing. The HTTP client's own timeout never fires, because the
+    socket is alive, so the run sat there until the node's whole budget was
+    gone. The stream is watched instead of the socket."""
+    from basivo_orch.flows.nodes import agent_runtime
+
+    class NeverAnswers:
+        """An agent whose stream opens and then goes quiet."""
+
+        def astream(self, *args, **kwargs):
+            async def generator():
+                await asyncio.sleep(30)
+                yield ("updates", {})
+
+            return generator()
+
+    # Imported inside the function, so the patch goes on the source module.
+    monkeypatch.setattr(
+        "langchain.agents.create_agent", lambda *a, **k: NeverAnswers(), raising=False
+    )
+
+    recorder = _Recorder()
+    with pytest.raises(NodeError, match="stopped responding"):
+        await agent_runtime.run_agent(
+            make_context(recorder, http=http_client),
+            model=object(),
+            prompt="hello",
+            system="",
+            tools=[],
+            max_iterations=3,
+            max_tool_calls=3,
+            cost_limit_usd=None,
+            stall_seconds=0.2,
+            model_name="a-model",
+            provider="test",
+        )
+
+    stalled = [data for kind, data in recorder.steps if kind == "agent.stalled"]
+    assert stalled and stalled[0]["waited_seconds"] == 0.2
+
+
+def test_an_agents_budget_comes_from_what_it_was_asked_to_do():
+    """A class-wide ceiling has to be set for the worst case, which makes it
+    useless for the common one. Two fast turns should not be allowed eleven
+    minutes, and fifteen slow ones should not be cut off at two."""
+    quick = AgentConfig(
+        prompt="x", model="m", max_iterations=2, request_timeout_seconds=30, model_retries=0
+    )
+    patient = AgentConfig(
+        prompt="x", model="m", max_iterations=15, request_timeout_seconds=120, model_retries=2
+    )
+    assert AgentNode.budget_seconds(quick) < 3 * 60
+    assert AgentNode.budget_seconds(patient) == 15 * 60, "capped: someone is waiting"
+    assert AgentNode.retry_on_timeout is False, "a timed-out agent must not be run again"

@@ -225,6 +225,11 @@ class Node(ABC):
     max_attempts: ClassVar[int] = 1
     retry_backoff_seconds: ClassVar[float] = 1.0
     timeout_seconds: ClassVar[float] = 60.0
+    #: Whether a node that ran out of time is worth running again. Usually not:
+    #: a node that just burned its whole budget burns it again, and the person
+    #: waiting pays twice. Nodes whose timeout means "the network blinked" set
+    #: this to True.
+    retry_on_timeout: ClassVar[bool] = False
 
     #: Whether running this node twice with the same input is harmless.
     #:
@@ -249,6 +254,18 @@ class Node(ABC):
     @abstractmethod
     async def run(self, config: Any, ctx: NodeContext) -> NodeResult:
         """Do the work. Raise `NodeError` to fail with a readable message."""
+
+    @classmethod
+    def budget_seconds(cls, config: Any) -> float:
+        """How long THIS configuration is allowed to take.
+
+        A class-wide ceiling has to be set for the worst case, which makes it
+        useless for the common one: an agent allowed six model calls of ninety
+        seconds needs ten minutes, and the same node asked for one call needs
+        two. A node that can work its own budget out from its settings says so
+        here, and the engine stops it at the honest number.
+        """
+        return cls.timeout_seconds
 
     @classmethod
     def describe(cls) -> dict[str, Any]:

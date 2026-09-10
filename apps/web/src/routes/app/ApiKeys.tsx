@@ -17,7 +17,7 @@ import {
   type ReactNode,
 } from "react";
 
-import { ApiError, api } from "../../lib/api";
+import { ApiError, api, isSessionEnded } from "../../lib/api";
 import { loadConfig } from "../../lib/config";
 import { useWorkspace } from "../../lib/workspace";
 import {
@@ -69,7 +69,11 @@ export function ApiKeys() {
     try {
       setKeys(await api.get<ApiKey[]>(`/api/v1/orgs/${orgId}/api-keys`));
       setError(null);
-    } catch {
+    } catch (err) {
+      // A 401 is the session ending, and the session handler is already
+      // taking them to the sign-in screen. Saying the data failed sends
+      // somebody looking for a problem that is not there.
+      if (isSessionEnded(err)) return;
       setError("Could not load API keys.");
       setKeys([]);
     }

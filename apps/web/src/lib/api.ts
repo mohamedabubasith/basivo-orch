@@ -207,6 +207,18 @@ export function setSessionEndedHandler(handler: SessionEndedHandler): void {
   onSessionEnded = handler;
 }
 
+/**
+ * Whether this failure was the session ending rather than the thing failing.
+ *
+ * A page that catches every error the same way tells somebody whose session
+ * expired that their credentials could not be loaded, which sends them looking
+ * for a problem with their credentials. The session handler is already taking
+ * them to the sign-in screen; the page has nothing to add.
+ */
+export function isSessionEnded(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 401;
+}
+
 export interface RequestOptions {
   method?: string;
   /** Sent as JSON. */

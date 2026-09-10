@@ -752,7 +752,8 @@ class Engine:
                 async with gate:
                     if implementation.heavy and time.perf_counter() - waited > 1.0:
                         await progress("Waiting for the renderer. Another heavy step is using it")
-                    async with asyncio.timeout(implementation.timeout_seconds):
+                    budget = implementation.budget_seconds(config)
+                    async with asyncio.timeout(budget):
                         result = await implementation.run(config, ctx)
 
                 finished = datetime.now(UTC)
@@ -781,9 +782,15 @@ class Engine:
 
             except Exception as exc:
                 if isinstance(exc, TimeoutError):
+                    # Retrying a node that just spent its whole budget spends it
+                    # again, and whoever is waiting pays twice for the same
+                    # answer. Only nodes whose timeout really means "the network
+                    # blinked" opt into that.
+                    limit = implementation.budget_seconds(config)
                     exc = NodeError(
-                        f"{node.type} exceeded its {implementation.timeout_seconds}s limit.",
-                        retryable=True,
+                        f"{node.name or node.type} ran out of time after {int(limit)}s. "
+                        "Give it a faster model, fewer steps, or a longer limit.",
+                        retryable=implementation.retry_on_timeout,
                     )
 
                 finished = datetime.now(UTC)

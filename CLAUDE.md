@@ -32,6 +32,32 @@ cd apps/web && npx tsc -b --force          # the real typecheck — plain `tsc -
 cd apps/web && npx oxlint src && npm run build
 ```
 
+## No patch fixes
+
+Every change here is production code, including the small ones. A patch fix is
+one that makes the symptom go away without the cause being understood, and it
+is always more expensive than it looks: the next person reads it as intent, it
+survives every refactor, and the real fault surfaces again somewhere less
+convenient.
+
+In practice that means:
+
+- **Find the cause before writing anything.** A chat window that hung for
+  twelve minutes was not fixed by a longer spinner: the model was holding an
+  idle connection open, so the HTTP timeout could never fire, and the fix was
+  to watch the stream and to give each node a budget derived from its own
+  settings. Read until the mechanism is clear, then change it.
+- **Fix it where every caller passes**, not on the path in the ticket. A guard
+  in one node when three call the same helper is three bugs, two of them
+  waiting.
+- **No special cases for one screen, no defaults chosen to hide a failure, no
+  retry loop standing in for a fix.** A timeout that is raised until the
+  problem stops appearing is a longer wait, not a repair.
+- **Leave the check behind.** Non-trivial logic ships with the smallest test
+  that fails if it breaks, and the test names the failure it prevents.
+- **Say so when a change is deliberately partial.** A `ponytail:` comment
+  naming the ceiling and the upgrade path is honest; silence is not.
+
 ## Adding a node type — the checklist is enforced, not advisory
 
 Every new node ships with ALL of the following, in the same change. Two of

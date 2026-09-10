@@ -128,6 +128,10 @@ export function ChatWindow({
   const [waiting, setWaiting] = useState(false);
   const [live, setLive] = useState<ChatStep[]>([]);
   const [slow, setSlow] = useState(false);
+  //: Seconds since the message was sent. A window that says "still running"
+  //: for two minutes with no number reads as stuck; the same window with a
+  //: clock on it reads as working, which is the truth.
+  const [elapsed, setElapsed] = useState(0);
   const [failure, setFailure] = useState("");
   const session = useRef<string>("");
   const bottom = useRef<HTMLDivElement | null>(null);
@@ -152,6 +156,17 @@ export function ChatWindow({
     if (!renameDocument || !window_) return;
     document.title = window_.title;
   }, [renameDocument, window_]);
+
+  useEffect(() => {
+    if (!waiting) return;
+    const started = Date.now();
+    setElapsed(0);
+    const tick = setInterval(
+      () => setElapsed(Math.round((Date.now() - started) / 1000)),
+      1000,
+    );
+    return () => clearInterval(tick);
+  }, [waiting]);
 
   // Follow the conversation down, but only for new messages: a scroll on
   // every render fights the reader when they look back at an earlier answer.
@@ -300,7 +315,11 @@ export function ChatWindow({
           />
         ))}
         {waiting && (
-          <Working steps={window_.show_activity ? live : []} slow={slow} />
+          <Working
+            steps={window_.show_activity ? live : []}
+            slow={slow}
+            elapsed={elapsed}
+          />
         )}
         {failure && (
           <p className="text-xs" style={{ color: "var(--status-bad)" }}>
@@ -499,7 +518,15 @@ function Steps({ steps }: { steps: ChatStep[] }) {
 }
 
 /** The same list, live, while the answer is still being made. */
-function Working({ steps, slow = false }: { steps: ChatStep[]; slow?: boolean }) {
+function Working({
+  steps,
+  slow = false,
+  elapsed = 0,
+}: {
+  steps: ChatStep[];
+  slow?: boolean;
+  elapsed?: number;
+}) {
   const latest = steps[steps.length - 1];
   return (
     <div className="flex w-full flex-col items-start gap-1.5">
@@ -513,17 +540,17 @@ function Working({ steps, slow = false }: { steps: ChatStep[]; slow?: boolean })
             />
           ))}
         </span>
-        {latest && (
-          <span className="text-xs text-ink-400">
-            {latest.label}
-            {latest.detail ? ` · ${latest.detail}` : ""}
-          </span>
-        )}
+        <span className="text-xs text-ink-400">
+          {latest ? latest.label : "Working"}
+          {elapsed > 2 && ` · ${clock(elapsed)}`}
+          {latest?.detail ? ` · ${latest.detail}` : ""}
+        </span>
       </div>
       {slow && (
         <p className="px-1 text-xs text-ink-500">
           {latest ? `${latest.label} is still running. ` : "Still working. "}
-          Some steps take minutes, and the answer appears here when it is done.
+          Some steps take minutes; a slow model is the usual reason. The answer
+          appears here when it is done.
         </p>
       )}
       {steps.length > 1 && (
@@ -569,6 +596,13 @@ function tone(status: string): string {
 
 function formatMs(ms: number): string {
   return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
+}
+
+/** Seconds as a person counts them. */
+function clock(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes}m ${String(seconds % 60).padStart(2, "0")}s`;
 }
 
 /**

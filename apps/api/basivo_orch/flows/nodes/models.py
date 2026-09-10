@@ -74,6 +74,7 @@ async def build_chat_model(
     max_tokens: int | None = None,
     top_p: float | None = None,
     request_timeout: float | None = None,
+    max_retries: int | None = None,
     stop: list[str] | None = None,
 ) -> BaseChatModel:
     """Resolve a credential and return a ready chat model.
@@ -110,6 +111,12 @@ async def build_chat_model(
         common["top_p"] = top_p
     if request_timeout is not None:
         common["timeout"] = request_timeout
+    if max_retries is not None:
+        # The client's own default is two silent retries, each waiting the full
+        # timeout. On a busy free endpoint that turns one slow call into six
+        # minutes of a person watching a chat window with nothing to read. A
+        # flow that wants patience can still ask for it.
+        common["max_retries"] = max_retries
     if stop:
         common["stop"] = stop
 
