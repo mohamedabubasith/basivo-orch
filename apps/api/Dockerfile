@@ -95,11 +95,17 @@ RUN apt-get update \
         ca-certificates \
         gnupg \
         curl \
-    # Node 22 for the video renderer and Claude Code. From nodesource rather
-    # than Debian, which ships 18.
+    # Node 22 for the video renderer and the coding agents. From nodesource
+    # rather than Debian, which ships 18.
     && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
-    && npm install -g @anthropic-ai/claude-code@2.1.259 \
+    # Three coding agents, pinned. Claude Code and Codex run on the
+    # workspace's own credential; OpenCode is the free one, and the reason a
+    # workspace with no key at all can still have its code fixed.
+    && npm install -g \
+        @anthropic-ai/claude-code@2.1.259 \
+        @openai/codex@0.154.0 \
+        opencode-ai@1.15.13 \
     && npm cache clean --force \
     && apt-get purge -y gnupg \
     && apt-get autoremove -y \
@@ -193,6 +199,31 @@ RUN mkdir -p "$XDG_CACHE_HOME" \
     && node -e "require('@remotion/renderer').ensureBrowser().then(() => console.log('remotion browser ok'))" \
     && chmod -R a+rX "$XDG_CACHE_HOME" /opt/basivo/remotion
 
+# A cold OpenCode home costs two things on its first real session: a one time
+# sqlite migration, and a 57MB package install it performs for itself. Every
+# run gets a throwaway HOME by design, so both are paid here instead, once, by
+# doing a real session against the free model.
+#
+# That makes this the model's smoke test as well: if the free model is gone or
+# renamed, no packages land and the build fails here rather than on somebody's
+# first flow. The run's own exit status is not the check, because a model
+# having a bad minute should not fail a deploy; the packages are.
+ENV BASIVO_OPENCODE_HOME_TEMPLATE=/opt/basivo/opencode
+RUN set -e; \
+    mkdir -p /opt/basivo/opencode/work; \
+    cd /opt/basivo/opencode/work; \
+    HOME=/opt/basivo/opencode \
+    XDG_DATA_HOME=/opt/basivo/opencode/data \
+    XDG_CONFIG_HOME=/opt/basivo/opencode/config \
+    XDG_CACHE_HOME=/opt/basivo/opencode/cache \
+    opencode run --pure --dir . -m "${BASIVO_OPENCODE_MODEL:-opencode/big-pickle}" \
+        "Reply with the single word OK." || true; \
+    test -d /opt/basivo/opencode/config/opencode/node_modules \
+        || (echo "OpenCode did not warm: the free model may have been renamed" && exit 1); \
+    rm -rf /opt/basivo/opencode/work; \
+    chmod -R a+rX /opt/basivo/opencode
+
+
 # Everything the render path shells out to, checked once here rather than on
 # the first render — a missing tool should fail the build, not a queued run.
 RUN set -e; \
@@ -201,6 +232,9 @@ RUN set -e; \
     node --version; \
     test -d /opt/basivo/remotion/node_modules/remotion && echo "remotion ok"; \
     claude --version; \
+    codex --version; \
+    opencode --version; \
+    test -d /opt/basivo/opencode/config/opencode/node_modules && echo "opencode warmed"; \
     test -s /opt/basivo/speech/voices-v1.0.bin && echo "voice model ok"
 
 

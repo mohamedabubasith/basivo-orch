@@ -866,7 +866,7 @@ async def test_an_anthropic_credential_runs_claude_code_and_opens_the_pr(monkeyp
         "reason": "Anthropic credential, Claude Code installed",
     }
     kinds = [kind for kind, _ in recorder.steps]
-    assert "fix.claude_code" in kinds and "fix.committed" in kinds and "pr.opened" in kinds
+    assert "fix.agent" in kinds and "fix.committed" in kinds and "pr.opened" in kinds
     assert not any(kind.startswith("llm.") for kind in kinds), "no builtin model turns"
     # The key is in no step.
     assert "sk-ant-secret" not in json.dumps([data for _, data in recorder.steps])
@@ -1085,9 +1085,9 @@ async def test_a_non_numeric_issue_number_is_a_clear_error_not_a_bad_request(mon
 def test_the_prompts_let_the_ticket_ask_for_more_than_a_bug_fix():
     """The first prompt allowed defects only, so a rewrite ticket was refused
     and the agent fixed an unrelated bug instead. Pinned so it stays fixed."""
-    from basivo_orch.flows.nodes.gitops import CLAUDE_CODE_PROMPT, SYSTEM_PROMPT
+    from basivo_orch.flows.nodes.gitops import CLI_AGENT_PROMPT, SYSTEM_PROMPT
 
-    for prompt in (SYSTEM_PROMPT, CLAUDE_CODE_PROMPT):
+    for prompt in (SYSTEM_PROMPT, CLI_AGENT_PROMPT):
         assert "The ticket is your task" in prompt
         assert "new feature, a rewrite" in prompt
         assert "Never write credentials" in prompt
@@ -1311,7 +1311,13 @@ async def test_skills_and_mcp_servers_reach_claude_code(monkeypatch, tmp_path):
     assert seen["mcp_config"]["mcpServers"]["docs"]["headers"] == {
         "Authorization": "Bearer tok-mcp"
     }
-    assert seen["extra_allowed_tools"] == ["mcp__docs"]
+    # The workspace's own server keeps its name and its tool pattern, and our
+    # documentation server rides beside it under a name of its own.
+    assert seen["extra_allowed_tools"] == ["mcp__docs", "mcp__basivo_docs"]
+    assert seen["mcp_config"]["mcpServers"]["basivo_docs"]["args"] == [
+        "-m",
+        "basivo_orch.flows.nodes.docs_mcp",
+    ]
     assert ("mcp.configured", {"servers": ["docs"]}) in recorder.steps
 
 
