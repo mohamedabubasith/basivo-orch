@@ -4,7 +4,7 @@
 
 # Basivo
 
-**Agent pipelines that end in something real: a pull request, a video, a post, a reply.**
+**Agent pipelines that end in something real: a pull request, a video, a post, a deployed app.**
 
 [![CI](https://github.com/mohamedabubasith/basivo-orch/actions/workflows/ci.yml/badge.svg)](https://github.com/mohamedabubasith/basivo-orch/actions/workflows/ci.yml)
 [![Security](https://github.com/mohamedabubasith/basivo-orch/actions/workflows/security.yml/badge.svg)](https://github.com/mohamedabubasith/basivo-orch/actions/workflows/security.yml)
@@ -13,7 +13,7 @@
 
 <img src="docs/media/basivo.gif" width="860" alt="Basivo: the triggers, the canvas, the agent, the renders, and where the result lands">
 
-<sub>Made by this repository's own video node. The full forty two second film, with the run page and the receipt, is
+<sub>Made by this repository's own video node. The full film, with the App Builder, the run page and the receipt, is
 <a href="https://github.com/mohamedabubasith/basivo-orch/raw/main/docs/media/basivo.mp4">here</a>.</sub>
 
 </div>
@@ -24,13 +24,24 @@ You draw a pipeline on a canvas, and it runs without you. What comes out the
 other end is a thing, not a log line: a pull request, a rendered MP4, a voice
 track, a montage, a post in a channel, a reply to the person who asked.
 
-Inside a flow there are nineteen node types. An agent with real tools, skills,
+Inside a flow there are eighteen node types. An agent with real tools, skills,
 sub-agents, MCP servers and hand over. A plain completion when no tools are
-needed. Python in a sandbox, HTTP, conditionals, variables, chat memory that
-survives between runs. Two media nodes: describe a video and get an MP4, with a
-voice if you tick the box; describe a picture and get a PNG whose type is
-always right. Delivery: a pull request, an issue comment, a post to Telegram,
-Discord, Slack, Mastodon or Bluesky.
+needed. Python in a sandbox, HTTP, web search, conditionals, variables, chat
+memory that survives between runs. Two media nodes: describe a video and get an
+MP4, with a voice if you tick the box; describe a picture and get a PNG whose
+type is always right. Delivery: a pull request, an issue comment, a post to
+Telegram, Discord, Slack, Mastodon or Bluesky.
+
+Beside the canvas there is the **App Builder**. Describe a frontend in a chat
+and watch it appear next to what you typed: a real build at a real address, not
+a mock-up. Say what you want different and it changes. Every clean build is a
+version you can deploy, go back to, or download as a project that runs
+anywhere. Deploy gives you a link to send to anyone; Unpublish takes it down
+again.
+
+**A key is optional.** A free coding agent is built in, so a new workspace can
+fix a bug and build an app before it has saved a single credential. Save your
+own Anthropic or OpenAI key and the work goes to Claude Code or Codex instead.
 
 Something has to start it, and there are six ways: a chat window this hosts for
 you at a link you can embed; a webhook you own, which
@@ -68,17 +79,20 @@ pipeline you cannot price is a pipeline you cannot run twice.
   while it happens.
 - **An invitation or a montage.** Photos and a few fields in, a rendered MP4
   out, addressed to the person who asked for it.
+- **A landing page, without opening an editor.** Describe it in the App
+  Builder, correct it in the same chat, deploy the version you like, and send
+  the link. Take the code with you whenever you want it.
 
 ### The whole palette
 
-Nineteen node types ship today, and none of them is a placeholder.
+Eighteen node types ship today, and none of them is a placeholder.
 
 | | |
 |---|---|
 | **Triggers** | Run manually, a chat window this hosts and publishes for you, a webhook (GitHub and Jira register themselves), a schedule, a Telegram bot |
 | **Agents and models** | AI Agent with tools, skills, sub-agents, hand over and MCP servers; Generate with LLM for a plain completion; Conversation State that survives between runs |
-| **Code and data** | Python in a sandbox, HTTP Request, If / Else, Set Variables |
-| **Repositories** | Fix Code and Open PR, Open Issue, Comment on Issue |
+| **Code and data** | Python in a sandbox, HTTP Request, Search the Web, If / Else, Set Variables |
+| **Repositories** | Fix Code and Open PR (on your key, or on the free agent), Open Issue, Comment on Issue |
 | **Media** | AI Video (describe it, a model writes the animation, we render it and check the frames, and one tick box adds a voice and captions), AI Image (a model writes the page, a browser draws it, so the type is always right) |
 | **Delivery** | Post to Social Media (Telegram, Discord, Slack, Mastodon, Bluesky), Reply on Telegram |
 
@@ -93,7 +107,8 @@ People ask which tool this replaces, so here is the honest version.
 |---|---|---|
 | n8n, Zapier | General automation with an AI node added to the palette. Video, if you need it, is a service you run beside them. | Built around the agent, and the render is a node on the same canvas. React goes in, an MP4 comes out. |
 | Flowise and other chat builders | Aimed at a chat window, and that is the whole surface. | Chat is one trigger of six: drag the Chat node on, publish, and you get a hosted window to open or embed. The same flow can also run on a schedule and leave a file behind while nobody watches. |
-| Hosted agent products | Model spend folded into a subscription you cannot see inside. | Your own keys, billed by the provider at their price, with tokens and dollars on every node of every run. |
+| Hosted agent products | Model spend folded into a subscription you cannot see inside. | Your own keys, billed by the provider at their price, with tokens and dollars on every node of every run. A free coding agent for the workspaces that have no key at all. |
+| Lovable, v0 and the app builders | A chat that writes a frontend, in a product that does nothing else. | The same thing, beside the automation: describe an app, deploy it at an address you can share, unpublish it, download the code. The flow that fills it with data is one canvas away. |
 
 The setup difference is the one you feel first. Connecting a repository
 elsewhere means copying a webhook URL into GitHub settings, pasting a secret,
@@ -102,7 +117,7 @@ and tick the events; publishing the flow registers the hook and holds the
 secret. If you delete the flow, the hook goes with it.
 
 Where the others win: n8n and Zapier connect to hundreds of applications. This
-has nineteen node types. If the job is moving rows between SaaS tools, use
+has eighteen node types. If the job is moving rows between SaaS tools, use
 one of those and take the afternoon off.
 
 ## Building one

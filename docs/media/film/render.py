@@ -29,16 +29,21 @@ PR = {"number": 9, "title": "Autofix: Remove the old pricing script now that the
       "branch": "basivo/autofix-cf60f477", "added": 6, "removed": 23, "files": 4}
 PROPS = {"tagline": "Draw the pipeline. It runs itself.", "url": "orch.basivo.in",
          "consoleUrl": "console.basivo.in", "pr": PR, "shots": SHOTS, "voiceOver": False}
-SECONDS = 42.0
+SECONDS = 52.0
 
 SCRIPT = (
     "Basivo. Draw the pipeline, and it runs itself. "
     "It starts however your work starts. A GitHub issue, a Jira ticket, your own webhook, "
     "a timetable, a Telegram message, or you pressing run. There is nothing to wire up by hand. "
-    "Then you draw the flow on one canvas, from twenty three node types: agents, Python, HTTP, "
-    "renders, posts. "
-    "The agent is a real agent. Tools, skills, sub-agents, MCP servers, hand over, and your own model keys. "
+    "Then you draw the flow on one canvas, from eighteen node types: agents, Python, HTTP, "
+    "renders, posts and apps. "
+    "The agent is a real agent. Tools, skills, sub-agents, MCP servers, hand over, and your own "
+    "model keys. Or no key at all: a free coding agent is built in. "
     "And it makes more than text. React goes in, an MP4 comes out: renders, montages, a voice over the top. "
+    "It also builds applications. Describe the page you want, and watch it appear beside what you typed. "
+    "Change your mind, and it changes. Every build is a version you can deploy, or go back to. "
+    "Press deploy and you get an address anyone can open. Unpublish it and it is gone. "
+    "Take the code whenever you like: it is yours, and it runs anywhere. "
     "Then it delivers. A pull request, a comment, or a post to Telegram, Discord, Slack, Mastodon or Bluesky. "
     "Every node reports itself while the run is going: status, duration, tokens, and what they cost. "
     "One real run took thirty six seconds and nine cents. "
@@ -53,7 +58,7 @@ def job(seconds, props=None, **kw):
                      background="#eef1f7", quality="high", assets=ASSETS, **kw)
 
 async def sheet():
-    frames = [int(SECONDS * 30 * p / 100) for p in (14, 27, 40, 51, 63, 73, 81, 89, 97)]
+    frames = [int(SECONDS * 30 * p / 100) for p in (3, 12, 23, 34, 43, 54, 58, 65, 73, 81, 88, 97)]
     stills = await probe(job(SECONDS), frames=frames, scale=0.5)
     for name, data in zip(frames, stills):
         open(f"{HERE}/p{name}.png", "wb").write(data)

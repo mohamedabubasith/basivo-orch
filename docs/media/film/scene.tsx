@@ -251,16 +251,16 @@ export default function Scene({ tagline, url, consoleUrl, pr, shots, voiceOver }
   return (
     <AbsoluteFill style={{ backgroundColor: "#eef1f7" }}>
       {/* Who this is. Three seconds, no longer: the viewer came for the tool. */}
-      <Sequence from={at(0)} durationInFrames={len(0, 8)}>
-        <Beat length={len(0, 8)}>
+      <Sequence from={at(0)} durationInFrames={len(0, 7)}>
+        <Beat length={len(0, 7)}>
           <Opening unit={unit} tagline={tagline} />
         </Beat>
       </Sequence>
 
       {/* Every way a flow can start, together, because leading with one of
           them made the whole product look like a GitHub bot. */}
-      <Sequence from={at(8)} durationInFrames={len(8, 20)}>
-        <Beat length={len(8, 20)}>
+      <Sequence from={at(7)} durationInFrames={len(7, 17)}>
+        <Beat length={len(7, 17)}>
           <TriggerWall unit={unit} />
           {showLower ? (
             <Lower
@@ -274,14 +274,14 @@ export default function Scene({ tagline, url, consoleUrl, pr, shots, voiceOver }
       </Sequence>
 
       {/* The pipeline drawing itself, one node at a time. */}
-      <Sequence from={at(20)} durationInFrames={len(20, 34)}>
-        <Beat length={len(20, 34)}>
+      <Sequence from={at(17)} durationInFrames={len(17, 29)}>
+        <Beat length={len(17, 29)}>
           <Pipeline unit={unit} />
           {showLower ? (
             <Lower
               step="It runs"
               line="Draw it once, on one canvas"
-              detail="Twenty three node types. Agents, Python, HTTP, renders, posts."
+              detail="Eighteen node types. Agents, Python, HTTP, renders, posts, apps."
               from={8}
             />
           ) : null}
@@ -289,14 +289,14 @@ export default function Scene({ tagline, url, consoleUrl, pr, shots, voiceOver }
       </Sequence>
 
       {/* What the agent node actually holds. */}
-      <Sequence from={at(34)} durationInFrames={len(34, 45)}>
-        <Beat length={len(34, 45)}>
+      <Sequence from={at(29)} durationInFrames={len(29, 39)}>
+        <Beat length={len(29, 39)}>
           <AgentCard unit={unit} />
           {showLower ? (
             <Lower
               step="It thinks"
               line="An agent, not a prompt box"
-              detail="Tools, skills, sub-agents, MCP servers, hand over. Your model keys."
+              detail="Tools, skills, sub-agents, MCP servers, hand over. Your keys, or ours for free."
               from={8}
             />
           ) : null}
@@ -304,8 +304,8 @@ export default function Scene({ tagline, url, consoleUrl, pr, shots, voiceOver }
       </Sequence>
 
       {/* Three real files this product rendered. */}
-      <Sequence from={at(45)} durationInFrames={len(45, 57)}>
-        <Beat length={len(45, 57)}>
+      <Sequence from={at(39)} durationInFrames={len(39, 48)}>
+        <Beat length={len(39, 48)}>
           <Outputs unit={unit} />
           {showLower ? (
             <Lower
@@ -318,9 +318,26 @@ export default function Scene({ tagline, url, consoleUrl, pr, shots, voiceOver }
         </Beat>
       </Sequence>
 
+      {/* The App Builder: the newest half of the product, and the only part a
+          person uses without drawing anything. */}
+      <Sequence from={at(48)} durationInFrames={len(48, 61)}>
+        <Beat length={len(48, 61)}>
+          <AbsoluteFill style={{ backgroundColor: "#eef1f7" }} />
+          <AppBuilder unit={unit} />
+          {showLower ? (
+            <Lower
+              step="It builds"
+              line="Describe an app, watch it appear"
+              detail="A real build at a real address. Deploy it, unpublish it, or take the code."
+              from={8}
+            />
+          ) : null}
+        </Beat>
+      </Sequence>
+
       {/* And then it delivers, which is the part demos usually skip. */}
-      <Sequence from={at(57)} durationInFrames={len(57, 68)}>
-        <Beat length={len(57, 68)}>
+      <Sequence from={at(61)} durationInFrames={len(61, 69)}>
+        <Beat length={len(61, 69)}>
           <Delivery unit={unit} pr={pr} />
           {showLower ? (
             <Lower
@@ -334,14 +351,14 @@ export default function Scene({ tagline, url, consoleUrl, pr, shots, voiceOver }
       </Sequence>
 
       {/* The real run page, with the real numbers on it. */}
-      <Sequence from={at(68)} durationInFrames={len(68, 78)}>
-        <Beat length={len(68, 78)}>
+      <Sequence from={at(69)} durationInFrames={len(69, 78)}>
+        <Beat length={len(69, 78)}>
           <Camera
             file={shots.run.file}
             aspect={shots.run.aspect}
             from={shots.run.page}
             to={shots.run.timeline}
-            length={len(68, 78)}
+            length={len(69, 78)}
           >
             <Ring rect={grow(shots.run.autofix, 1.03)} from={26} label="36.0s, tokens and cost" />
           </Camera>
@@ -521,7 +538,7 @@ const Pipeline: React.FC<{ unit: number }> = ({ unit: base }) => {
   const nodes = [
     { icon: ICONS.github, name: "GitHub issue", note: "trigger.webhook" },
     { icon: ICONS.agent, name: "AI Agent", note: "agent.llm" },
-    { icon: ICONS.video, name: "Make a Video", note: "video.render" },
+    { icon: ICONS.video, name: "AI Video", note: "video.ai" },
     { icon: ICONS.post, name: "Post to Social", note: "social.post" },
   ];
   return (
@@ -840,9 +857,9 @@ const Outputs: React.FC<{ unit: number }> = ({ unit: base }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
   const cards = [
-    { file: "out-video.png", label: "Feature launch", note: "video.render" },
-    { file: "out-montage.png", label: "Photo montage", note: "video.montage" },
-    { file: "out-quote.png", label: "Customer quote", note: "video.generate" },
+    { file: "out-video.png", label: "Feature launch", note: "video.ai" },
+    { file: "out-montage.png", label: "Photo montage", note: "video.ai" },
+    { file: "out-quote.png", label: "Customer quote", note: "video.ai" },
   ];
   return (
     <AbsoluteFill style={{ justifyContent: "center", alignItems: "center" }}>
@@ -876,6 +893,243 @@ const Outputs: React.FC<{ unit: number }> = ({ unit: base }) => {
             </div>
           );
         })}
+      </div>
+    </AbsoluteFill>
+  );
+};
+
+
+/**
+ * The App Builder: a sentence on the left, a real page on the right.
+ *
+ * The hardest thing to show about this feature is that the preview is not a
+ * mock-up of the app, it is the app, at the address the share link serves. So
+ * the page here assembles the way a real build lands: all at once, after the
+ * agent has finished, with the deployed badge and the address arriving after
+ * it rather than with it.
+ */
+const AppBuilder: React.FC<{ unit: number }> = ({ unit: base }) => {
+  const unit = base * 1.05;
+  const frame = useCurrentFrame();
+  const { fps } = useVideoConfig();
+  const rise = (delay: number, damping = 18) =>
+    spring({ frame: frame - delay, fps, config: { damping } });
+
+  const asked = rise(2);
+  const replied = rise(26);
+  const built = rise(30, 16);
+  const deployed = rise(52, 14);
+  const address = rise(60, 15);
+
+  const card = {
+    background: "#ffffff",
+    borderRadius: unit * 1.1,
+    border: "1px solid rgba(16,19,34,0.07)",
+  };
+
+  const products = ["Country sourdough", "Honey buns", "Seeded loaf"];
+
+  return (
+    <AbsoluteFill
+      style={{
+        justifyContent: "center",
+        alignItems: "center",
+        // Lifted, because the lower third owns the bottom of the frame and
+        // an address sliding underneath it is an address nobody can read.
+        paddingBottom: unit * 7,
+      }}
+    >
+      <div
+        style={{
+          ...card,
+          position: "relative",
+          width: unit * 58,
+          padding: unit * 1.4,
+          display: "flex",
+          gap: unit * 1.4,
+          boxShadow: "0 30px 70px rgba(16,19,34,0.16)",
+        }}
+      >
+        {/* Deployed belongs to the app, so it sits on the app. */}
+        <span
+          style={{
+            position: "absolute",
+            top: unit * 2.1,
+            right: unit * 2.1,
+            zIndex: 2,
+            opacity: deployed,
+            transform: `translateY(${(1 - deployed) * unit * 0.5}px)`,
+            fontFamily: FONT,
+            fontSize: unit * 0.85,
+            fontWeight: 650,
+            color: GOOD,
+            background: "rgba(255,255,255,0.94)",
+            border: "1px solid rgba(15,157,104,0.35)",
+            borderRadius: 999,
+            padding: `${unit * 0.3}px ${unit * 0.8}px`,
+          }}
+        >
+          Deployed v1
+        </span>
+        {/* The conversation. Two bubbles: what they asked, what it says back. */}
+        <div
+          style={{
+            width: unit * 20,
+            display: "flex",
+            flexDirection: "column",
+            gap: unit * 0.9,
+          }}
+        >
+          <div
+            style={{
+              opacity: asked,
+              transform: `translateY(${(1 - asked) * unit}px)`,
+              alignSelf: "flex-end",
+              maxWidth: "92%",
+              background: "rgba(109,74,255,0.12)",
+              borderRadius: `${unit * 0.9}px ${unit * 0.9}px ${unit * 0.25}px ${unit * 0.9}px`,
+              padding: `${unit * 0.7}px ${unit * 0.85}px`,
+              fontFamily: FONT,
+              fontSize: unit * 0.92,
+              lineHeight: 1.45,
+              color: INK,
+            }}
+          >
+            A landing page for a bakery called Sunrise, with the menu and the opening hours
+          </div>
+          <div
+            style={{
+              opacity: replied,
+              transform: `translateY(${(1 - replied) * unit}px)`,
+              alignSelf: "flex-start",
+              maxWidth: "92%",
+              background: "#f3f5fa",
+              borderRadius: `${unit * 0.9}px ${unit * 0.9}px ${unit * 0.9}px ${unit * 0.25}px`,
+              padding: `${unit * 0.7}px ${unit * 0.85}px`,
+              fontFamily: FONT,
+              fontSize: unit * 0.92,
+              lineHeight: 1.45,
+              color: MUTED,
+            }}
+          >
+            Built the page: header, three products with prices, and the hours.
+            <span style={{ fontFamily: MONO, color: BRAND, marginLeft: unit * 0.4 }}>v1</span>
+          </div>
+
+          {/* The box they type the next change into. The conversation does not
+              end at the first build, and an empty column would say it did. */}
+          <div
+            style={{
+              opacity: rise(64) * 0.9,
+              marginTop: "auto",
+              border: "1px solid rgba(16,19,34,0.12)",
+              borderRadius: unit * 0.7,
+              padding: `${unit * 0.6}px ${unit * 0.8}px`,
+              fontFamily: FONT,
+              fontSize: unit * 0.88,
+              color: "#9aa1b5",
+            }}
+          >
+            Add a photo of the shop and a phone number
+          </div>
+        </div>
+
+        {/* The app itself, at its own address. */}
+        <div
+          style={{
+            flex: 1,
+            borderRadius: unit * 0.9,
+            overflow: "hidden",
+            border: "1px solid rgba(16,19,34,0.08)",
+            background: "#fffaf2",
+            minHeight: unit * 21,
+            opacity: built,
+            transform: `scale(${0.985 + built * 0.015})`,
+            transformOrigin: "center",
+            padding: unit * 1.4,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: unit * 0.5,
+          }}
+        >
+          <p
+            style={{
+              fontFamily: FONT,
+              fontSize: unit * 0.72,
+              letterSpacing: unit * 0.12,
+              textTransform: "uppercase",
+              color: "#c07d2a",
+              margin: 0,
+            }}
+          >
+            Bakery and cafe
+          </p>
+          <p style={{ fontFamily: FONT, fontSize: unit * 2.6, fontWeight: 760, color: "#3b2412", margin: 0 }}>
+            Sunrise
+          </p>
+          <p style={{ fontFamily: FONT, fontSize: unit * 0.95, color: "#7a5a3c", margin: 0 }}>
+            Slow sourdough, baked before the sun comes up
+          </p>
+          <div style={{ display: "flex", gap: unit * 0.7, marginTop: unit * 0.8 }}>
+            {products.map((name, index) => {
+              const show = rise(34 + index * 4);
+              return (
+                <div
+                  key={name}
+                  style={{
+                    ...card,
+                    opacity: show,
+                    transform: `translateY(${(1 - show) * unit * 0.8}px)`,
+                    width: unit * 8.4,
+                    padding: unit * 0.7,
+                  }}
+                >
+                  <div
+                    style={{
+                      height: unit * 3,
+                      borderRadius: unit * 0.6,
+                      background: "linear-gradient(135deg,#ffd88a,#f59435)",
+                    }}
+                  />
+                  <p style={{ fontFamily: FONT, fontSize: unit * 0.78, fontWeight: 650, color: "#3b2412", margin: `${unit * 0.5}px 0 0` }}>
+                    {name}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      {/* The address anyone can open. */}
+      <div style={{ display: "flex", alignItems: "center", gap: unit * 0.8, marginTop: unit * 1.2 }}>
+        <span
+          style={{
+            opacity: address,
+            transform: `translateY(${(1 - address) * unit * 0.6}px)`,
+            fontFamily: MONO,
+            fontSize: unit * 0.95,
+            color: INK,
+            background: "#ffffff",
+            border: "1px solid rgba(16,19,34,0.1)",
+            borderRadius: 999,
+            padding: `${unit * 0.35}px ${unit * 0.9}px`,
+          }}
+        >
+          apps.basivo.in/sunrise-bakery-k3d9
+        </span>
+        <span
+          style={{
+            opacity: address,
+            fontFamily: FONT,
+            fontSize: unit * 0.9,
+            color: MUTED,
+          }}
+        >
+          send it to anyone
+        </span>
       </div>
     </AbsoluteFill>
   );
