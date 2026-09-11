@@ -153,6 +153,7 @@ class AppBuildNode(Node):
             source=source,
             engine=engine,
             workspace=ws.TempWorkspace(),
+            title=str(opened.get("name") or ""),
             api_key=credential.api_key if credential else "",
             base_url=credential.base_url if credential else None,
             model=config.model if not engine.free else "",

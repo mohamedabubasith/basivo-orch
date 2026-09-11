@@ -187,3 +187,45 @@ async def test_a_saved_tree_holds_the_files_and_not_the_build():
         assert not any(path.startswith("node_modules/") for path in stored)
     finally:
         await workspace.discard(root)
+
+
+async def test_the_tab_carries_the_project_name_not_the_placeholder():
+    """The shipped index.html says "New app". Left there it becomes the browser
+    tab, the bookmark, and the name on a link somebody was sent."""
+    workspace = ws.TempWorkspace()
+    agent = FakeAgent([{"src/App.tsx": HEADING % "Hello"}])
+    result = await turns.run_turn(
+        message="a page",
+        history=[],
+        source=None,
+        engine=agent,
+        workspace=workspace,
+        title="Sunrise Bakery",
+    )
+
+    root = await workspace.open(result.source)
+    try:
+        assert "<title>Sunrise Bakery</title>" in (root / "index.html").read_text()
+    finally:
+        await workspace.discard(root)
+
+
+async def test_a_title_the_agent_chose_is_left_alone():
+    workspace = ws.TempWorkspace()
+    page = "<!doctype html><html><head><title>Fresh Bread Daily</title></head><body>"
+    page += '<div id="root"></div><script type="module" src="/src/main.tsx"></script></body></html>'
+    agent = FakeAgent([{"src/App.tsx": HEADING % "Hello", "index.html": page}])
+    result = await turns.run_turn(
+        message="a page",
+        history=[],
+        source=None,
+        engine=agent,
+        workspace=workspace,
+        title="Sunrise Bakery",
+    )
+
+    root = await workspace.open(result.source, "Sunrise Bakery")
+    try:
+        assert "<title>Fresh Bread Daily</title>" in (root / "index.html").read_text()
+    finally:
+        await workspace.discard(root)

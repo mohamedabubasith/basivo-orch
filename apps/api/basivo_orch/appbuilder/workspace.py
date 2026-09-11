@@ -62,6 +62,13 @@ WRITABLE: tuple[str, ...] = ("src/", "public/", "index.html")
 #: directory of hundreds of megabytes.
 NOT_SOURCE: tuple[str, ...] = ("node_modules/", "dist/", "AGENTS.md", ".git/")
 
+#: What the shipped `index.html` says before anybody has built anything. Left
+#: in place it becomes the browser tab, the bookmark and the name on a shared
+#: link, so it is replaced with the project's name the first time a turn opens
+#: a project. The agent may still write its own title; this only replaces the
+#: placeholder, never a decision somebody made.
+PLACEHOLDER_TITLE = "New app"
+
 #: A frontend that does not fit in this is not a frontend, it is an asset
 #: dump, and both halves have to fit in an artifact row.
 MAX_SOURCE_BYTES = 8 * 1024 * 1024
@@ -87,7 +94,7 @@ class BuildResult:
 class Workspace(Protocol):
     """One project's files, for the length of one turn."""
 
-    async def open(self, source: bytes | None) -> Path:
+    async def open(self, source: bytes | None, title: str = "") -> Path:
         """Lay out the tree and return its root."""
         ...
 
@@ -180,10 +187,10 @@ class TempWorkspace:
     #: Kept so the caller can delete the directory it was given a path into.
     _roots: dict[Path, tempfile.TemporaryDirectory] = field(default_factory=dict)
 
-    async def open(self, source: bytes | None) -> Path:
-        return await asyncio.to_thread(self._open, source)
+    async def open(self, source: bytes | None, title: str = "") -> Path:
+        return await asyncio.to_thread(self._open, source, title)
 
-    def _open(self, source: bytes | None) -> Path:
+    def _open(self, source: bytes | None, title: str = "") -> Path:
         holder = tempfile.TemporaryDirectory(prefix="basivo-app-")
         root = Path(holder.name) / "app"
         if source:
@@ -211,6 +218,9 @@ class TempWorkspace:
         # the same reason. These are not the agent's files.
         for name in ("package.json", "vite.config.ts", "tsconfig.json"):
             shutil.copyfile(TEMPLATE_ROOT / name, root / name)
+
+        if title:
+            _name_the_page(root / "index.html", title)
 
         self._roots[root] = holder
         return root
@@ -266,6 +276,17 @@ class TempWorkspace:
         holder = self._roots.pop(root, None)
         if holder is not None:
             await asyncio.to_thread(holder.cleanup)
+
+
+def _name_the_page(index: Path, title: str) -> None:
+    """Give the tab the project's name, if nothing better is there yet."""
+    try:
+        html = index.read_text(encoding="utf-8")
+    except OSError:
+        return
+    placeholder = f"<title>{PLACEHOLDER_TITLE}</title>"
+    if placeholder in html:
+        index.write_text(html.replace(placeholder, f"<title>{title}</title>"), encoding="utf-8")
 
 
 def _tail(text: str, limit: int = 4000) -> str:

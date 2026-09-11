@@ -224,6 +224,7 @@ async def apply(
             .all()
         )
         return {
+            "name": project.name,
             "source_artifact_id": str(project.source_artifact_id)
             if project.source_artifact_id
             else "",
@@ -277,9 +278,16 @@ def _as_uuid(value: Any) -> uuid.UUID | None:
 
 
 async def publish(session: AsyncSession, *, project: AppProject, version: AppVersion) -> None:
-    """Point the share link at a version. This is the whole of Deploy."""
+    """Point the share link at a version. This is the whole of Deploy.
+
+    Refreshed afterwards, because `updated_at` is set by the database on
+    update: without this the next read of it is a lazy load, and a lazy load
+    inside an async request is the MissingGreenlet that turns a successful
+    deploy into a 500 the browser reports as a CORS failure.
+    """
     project.published_version_id = version.id
     await session.commit()
+    await session.refresh(project)
 
 
 async def restore(session: AsyncSession, *, project: AppProject, version: AppVersion) -> None:
@@ -290,3 +298,4 @@ async def restore(session: AsyncSession, *, project: AppProject, version: AppVer
     """
     project.source_artifact_id = version.source_artifact_id
     await session.commit()
+    await session.refresh(project)

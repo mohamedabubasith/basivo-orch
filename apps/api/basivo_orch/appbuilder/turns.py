@@ -91,6 +91,7 @@ async def run_turn(
     source: bytes | None,
     engine: CodingEngine,
     workspace: ws.Workspace,
+    title: str = "",
     api_key: str = "",
     base_url: str | None = None,
     model: str = "",
@@ -110,7 +111,7 @@ async def run_turn(
         if step:
             await step(kind, data)
 
-    root = await workspace.open(source)
+    root = await workspace.open(source, title)
     try:
         before = ws.snapshot(root)
         await record("app.opened", {"files": len(before), "first_turn": source is None})

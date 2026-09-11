@@ -34,6 +34,7 @@ import { ApiError, api, isSessionEnded } from "../../lib/api";
 import { cx } from "../../lib/cx";
 import { useWorkspace } from "../../lib/workspace";
 import { Alert, Button, Pill, Spinner } from "../../components/ui";
+import { Formatted } from "../../components/chat/markdown";
 import { RelativeTime } from "./bits";
 import type { AppProject } from "./Apps";
 
@@ -308,14 +309,15 @@ function Conversation({ turns, running }: { turns: Turn[]; running: boolean }) {
             {turn.prompt}
           </p>
           {turn.status === "built" && turn.reply && (
-            <p className="mr-auto max-w-[85%] rounded-2xl rounded-bl-sm bg-ink-800/70 px-3.5 py-2.5 text-sm text-ink-200">
-              {turn.reply}
+            <div className="mr-auto max-w-[85%] space-y-2 rounded-2xl rounded-bl-sm bg-ink-800/70 px-3.5 py-2.5 text-sm text-ink-200">
+              {/* The agent writes markdown whether or not it was asked to, so
+                  this is the chat window's own renderer rather than raw text
+                  with the asterisks showing. */}
+              <Formatted text={turn.reply} />
               {turn.version && (
-                <span className="ml-2 text-xs text-ink-500">
-                  v{turn.version}
-                </span>
+                <p className="text-xs text-ink-500">v{turn.version}</p>
               )}
-            </p>
+            </div>
           )}
           {turn.status === "failed" && (
             <p className="mr-auto max-w-[85%] rounded-2xl rounded-bl-sm border border-[color-mix(in_oklab,var(--status-bad)_35%,transparent)] bg-[color-mix(in_oklab,var(--status-bad)_10%,transparent)] px-3.5 py-2.5 text-sm text-ink-200">

@@ -33,7 +33,8 @@ import tarfile
 import uuid
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Request, Response, status
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -73,7 +74,11 @@ CONTENT_TYPES: dict[str, str] = {
 #: An opaque origin for the page, whatever host serves it. Without
 #: `allow-same-origin` the document cannot touch cookies or storage of the
 #: host, which is what makes serving generated code survivable.
-SANDBOX = "sandbox allow-scripts allow-forms allow-popups allow-modals"
+#:
+#: `frame-ancestors` is here because the page is meant to be framed: the
+#: builder shows it beside the chat. It also replaces `X-Frame-Options`, which
+#: the security middleware leaves off once a route has stated this.
+SANDBOX = "sandbox allow-scripts allow-forms allow-popups allow-modals; frame-ancestors *"
 
 
 def project_token(project_id: uuid.UUID) -> str:
@@ -86,15 +91,26 @@ def apps_origin() -> str:
     """Where built apps are served from.
 
     Its own host in any real deployment: generated JavaScript and the console
-    should not share an origin even with the sandbox in place.
+    should not share an origin even with the sandbox in place. Unset, it falls
+    back to this API rather than to the console, because this API is what
+    actually answers `/p/...`; pointing at the console gives a link that loads
+    the console's own single page app instead of somebody's site.
     """
     configured = os.environ.get("BASIVO_APPS_ORIGIN", "").strip().rstrip("/")
-    return configured or str(get_auth_settings().frontend_base_url).rstrip("/")
+    return configured or str(get_auth_settings().public_base_url).rstrip("/")
 
 
 def site_url(project: AppProject, version: int | None = None) -> str:
+    """The address of a built app, always ending in a slash.
+
+    The slash is load bearing. A built page asks for `./assets/app.js`, and
+    from `/p/<id>/<token>/v3` that resolves to `/p/<id>/<token>/assets/app.js`,
+    one directory too high, so the page loads and nothing on it works. From
+    `/p/<id>/<token>/v3/` it resolves inside the version. The route redirects
+    the unslashed form rather than trusting every caller to remember.
+    """
     path = f"/p/{project.id}/{project_token(project.id)}"
-    return f"{apps_origin()}{path}" + (f"/v{version}" if version else "")
+    return f"{apps_origin()}{path}" + (f"/v{version}/" if version else "/")
 
 
 # ---------------------------------------------------------------------------
@@ -377,6 +393,7 @@ async def delete_project(
 @public.get("/{project_id}/{token}", include_in_schema=False)
 @public.get("/{project_id}/{token}/{path:path}", include_in_schema=False)
 async def site(
+    request: Request,
     project_id: uuid.UUID,
     token: Annotated[str, Path(max_length=64)],
     path: str = "",
@@ -388,6 +405,12 @@ async def site(
     project = await session.get(AppProject, project_id)
     if project is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found.")
+
+    # A directory has to end in a slash or the page's own relative asset
+    # requests climb out of it. Redirect rather than serve something that
+    # half works.
+    if _is_directory(path) and not request.url.path.endswith("/"):
+        return RedirectResponse(request.url.path + "/", status_code=308)
 
     wanted, inside = _split_version(path)
     version = await _serving_version(session, project, wanted)
@@ -426,8 +449,20 @@ async def site(
                 else "no-cache, must-revalidate"
             ),
             "Cross-Origin-Resource-Policy": "cross-origin",
+            # The sandbox gives the document an opaque origin, so the page's
+            # own script and stylesheet arrive here as cross-origin requests
+            # from "null". Without this they are blocked and the page renders
+            # as an empty white box, which is exactly what a person would
+            # report as "the preview is broken".
+            "Access-Control-Allow-Origin": "*",
         },
     )
+
+
+def _is_directory(path: str) -> bool:
+    """True for the site root and for a bare version, which name directories."""
+    head, _, rest = path.partition("/")
+    return not path or (not rest and head.startswith("v") and head[1:].isdigit())
 
 
 def _split_version(path: str) -> tuple[int | None, str]:

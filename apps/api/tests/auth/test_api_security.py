@@ -130,3 +130,21 @@ async def test_refresh_renews_the_access_cookie(client, user, password) -> None:
     assert refreshed.status_code == 200
     assert settings.cookie_name in refreshed.cookies
     assert settings.refresh_cookie_name in refreshed.cookies
+
+
+async def test_a_route_that_serves_a_document_keeps_its_own_policy(client) -> None:
+    """The App Builder serves generated pages under a sandbox policy, which is
+    stricter than the API's in the way that matters: an opaque origin, so the
+    page cannot reach the host's cookies. The API policy would stop the page
+    loading its own script, and X-Frame-Options DENY would stop the builder
+    showing it beside the chat."""
+    from basivo_orch.appbuilder.router import SANDBOX
+
+    assert SANDBOX.startswith("sandbox ")
+    assert "allow-same-origin" not in SANDBOX
+    assert "frame-ancestors" in SANDBOX
+
+    # And the middleware leaves both of those alone.
+    response = await client.get("/auth/csrf")
+    assert response.headers["x-frame-options"] == "DENY"
+    assert "frame-ancestors" in response.headers["content-security-policy"]

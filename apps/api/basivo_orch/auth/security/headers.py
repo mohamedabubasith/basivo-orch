@@ -41,10 +41,25 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response = await call_next(request)
 
         is_docs = request.url.path.startswith(DOCS_PATHS)
-        response.headers["Content-Security-Policy"] = DOCS_CSP if is_docs else API_CSP
+        # `setdefault` again, and for a sharper reason than the ones below: a
+        # route that serves a *document* rather than JSON has to state its own
+        # policy, and the API policy would stop that document loading its own
+        # script and stylesheet. The App Builder serves generated pages under
+        # a sandbox policy, which is stricter than this one in the way that
+        # matters: no same-origin access at all.
+        route_policy = response.headers.get("Content-Security-Policy")
+        if route_policy is None:
+            response.headers["Content-Security-Policy"] = DOCS_CSP if is_docs else API_CSP
         response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["X-Frame-Options"] = "DENY"
-        response.headers["Referrer-Policy"] = "no-referrer"
+        # Frame control, said once. A route that serves a document states its
+        # own `frame-ancestors`, which is the modern and more expressive of the
+        # two; adding this header as well would contradict it, and a browser
+        # honouring both takes the stricter answer, which breaks the preview
+        # with nothing in any log to explain it. Everything else, including
+        # every JSON response, still gets it.
+        if route_policy is None or "frame-ancestors" not in route_policy:
+            response.headers["X-Frame-Options"] = "DENY"
+        response.headers.setdefault("Referrer-Policy", "no-referrer")
         response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
         # `setdefault`, not assignment: a route that deliberately serves a file
         # for another origin to display — a rendered video in a published chat

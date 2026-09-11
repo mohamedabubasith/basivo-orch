@@ -29,6 +29,9 @@ are the conversation so far.
   they will see both.
 - **Images**: use a solid colour or a gradient block. Do not link to an image
   host, it will be blocked and they will see an empty box.
+- **Set the title.** `index.html` ships saying "New app". Change it to the
+  name of the thing you built: it is the browser tab, the bookmark, and what
+  shows when they send the link to somebody.
 
 ## What good looks like here
 
