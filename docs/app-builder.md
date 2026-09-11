@@ -398,9 +398,9 @@ New section, `Apps`, above Flows.
 | 1 | `CodingEngine` interface, three implementations, `git.autofix` moved onto it, credential made optional for free engines | `pytest` covers engine choice, redaction and the tool limits | done |
 | 1b | Docs MCP server, wired into all three engines, tick box on both nodes | a turn that must read current documentation gets the page, and the run log shows the search | done |
 | 2 | Worker image: pinned `opencode` and `codex` CLIs beside Claude Code, a warmed OpenCode home, the template, its baked `node_modules`, `AGENTS.md` | `vite build` of the untouched template runs in the image offline, and all three CLIs answer `--version` in the image test | agents done, template to do |
-| 3 | Data model, migration, `Workspace`, `app.build` node, project CRUD, the turn lock | an API level test drives three turns, the third correcting the second, and gets three versions | |
-| 4 | Serving: apps origin, tokens, CSP, version and published routes | a published version loads in a browser, a wrong token gives 404 | |
-| 5 | Console: list, builder, preview, version rail with Undo, Deploy and Share | a person builds, corrects, undoes and deploys without touching an editor | |
+| 3 | Data model, migration, `Workspace`, `app.build` node, project CRUD, the turn lock | an API level test drives two turns, the second correcting the first, and gets two versions | done |
+| 4 | Serving: apps origin, tokens, CSP, version and published routes, public slugs, unpublish, code download, the site cache | a published version loads in a browser, a wrong token gives 404, a hundred requests cost one read | done |
+| 5 | Console: list, builder, preview, version rail with Undo, Deploy, Share, Unpublish, Download code, starter prompts | a person builds, corrects, undoes and deploys without touching an editor | done, live tested |
 | 6 | Free tier metering, engine selection from saved credentials | the limit message names the limit and the reset | |
 | 7 | basivo-qa flows for the new screens, docs, landing page mention | `/qa` covers create, turn, deploy and share | |
 
@@ -420,9 +420,22 @@ load bearing:
   and a 57MB package install it performs on its first real session. Both are
   warmed into the image now, with `config` shared by symlink and `data` copied
   per run, because sessions are a tenant's and packages are not.
-- **The free model is slow**, around a minute for a trivial edit. That is
-  fine for a repair and it is the reason the App Builder shows what it is
-  doing rather than a spinner.
+- **The free model is slow**, thirty seconds to a minute for a small edit and
+  several minutes for a whole page. That is fine for a repair and it is the
+  reason the App Builder shows what it is doing and how long it has been.
+- **The free model goes quiet.** On a demanding first message it stopped
+  streaming with the socket open, and no overall timeout notices that for ten
+  minutes. Streaming agents print an event per token, so silence is the
+  signal: a stall watchdog kills an agent that prints nothing for two
+  minutes and says so. And a turn is closed however its agent ends, at the
+  node and again by reconciling against the run, because a project that says
+  "working" forever is the one failure a person cannot recover from.
+- **A sandboxed page is a foreign origin to itself.** With no
+  `allow-same-origin` the document's origin is opaque, so its own script and
+  stylesheet arrive as cross-origin requests from `null` and need
+  `Access-Control-Allow-Origin` or the page renders as a white box with no
+  error anyone can see. And a directory address needs its trailing slash, or
+  relative asset paths resolve one level too high.
 
 ## What beta leaves out, deliberately
 
