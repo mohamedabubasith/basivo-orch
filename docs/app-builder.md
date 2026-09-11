@@ -138,6 +138,92 @@ it is unsure of, and to answer from what it read rather than from memory. That
 last sentence is the one that stopped the agent inventing sports headlines, and
 it works here for the same reason.
 
+## Turns, and what a session really is
+
+The repair node is one shot on purpose: a ticket arrives, an agent fixes it, a
+pull request opens, nobody says "actually, make the button blue". The App
+Builder is the opposite. The first message produces an app, and every message
+after it is a correction: move that, connect this, undo the last thing. So the
+question is what carries between messages, and whether that needs a machine
+kept running for each person.
+
+**The source tree is the memory.** Not an agent session, not a transcript of
+tool calls: the files. A coding agent is built to walk into a directory it has
+never seen and work out what is there, which is the same thing it does on turn
+nine as on turn one. So what a project stores between turns is the tree, the
+built output, and a short account of each turn, and none of that is tied to
+which engine ran.
+
+That is what makes the engine swappable mid-project. Every CLI here can resume
+its own session (`--session` for OpenCode, `--resume` for Claude Code, `exec
+resume` for Codex), and using those would look tempting and be a trap: the
+session store is opaque, it is invalidated by a CLI upgrade, it can hold
+prompts we would rather not keep, and it pins a project to the engine that
+started it. Resuming is an optimisation we can add per engine later, under the
+same contract, when a measurement says it pays.
+
+### One turn, start to finish
+
+1. **Take the project lock.** One turn at a time. A second message while a
+   turn is running queues rather than starting a rival agent in the same tree,
+   because two agents editing one directory produce a mess neither of them
+   can explain.
+2. **Restore the tree** into a working directory. On a worker that just ran
+   this project the directory is still there and is reused, which is a cache
+   and never state: a cold worker restores from the stored tar and nothing
+   behaves differently.
+3. **Write the context**: `AGENTS.md` (the house rules, unchanged every turn)
+   and a short `CONVERSATION.md` holding the last few turns as one line each,
+   plus what the previous build said. The person's new message is the prompt.
+4. **Run the engine**, file tools only.
+5. **Diff and gate**: writes outside `src/`, `index.html` and `public/` are
+   refused, and the turn fails with what it tried to touch.
+6. **Build.** On a failure the build log goes back to the agent once, and once
+   only. A second failure is reported with the error, because a repair loop
+   that cannot converge is how twelve minutes disappear.
+7. **Store** the tree and the `dist`, append the turn, create the version, and
+   let the preview reload.
+
+### Why not a live container for each person
+
+The obvious design is a sandbox per user, kept warm, running `vite dev` with
+hot reload behind a proxy. It is what the hosted builders do, and for beta it
+optimises the wrong thing. The numbers from the spike: the free agent takes
+about a minute to make a small edit, `node_modules` is baked into the image so
+there is no install, and a production build of a page this size is a couple of
+seconds. A warm dev server would save two seconds out of sixty, and would cost
+a scheduler, a reaper for idle containers, a proxy with its own authentication,
+per user memory, and stickiness between a person and a machine.
+
+So: no container per person in beta. Ephemeral working directories on stateless
+workers, and the turn feels like a session because the project state is real,
+not because a process is being kept alive.
+
+### The seam, so that changing this later is not a rewrite
+
+Everything above sits behind one small protocol, and the container version is
+a second implementation rather than a new design:
+
+```python
+class Workspace(Protocol):
+    async def open(self, project_id, source: bytes | None) -> Path: ...
+    async def build(self, path: Path) -> BuildResult:  # dist bytes, log, ok
+    async def close(self, path: Path) -> bytes: ...    # the tree, to store
+```
+
+`TempWorkspace` is the beta. `ContainerWorkspace` arrives the first time
+somebody needs something a directory cannot give: installing a package the
+template does not carry, running the tests, a dev server with hot reload, or
+anything with a backend. That is the trigger to build it, and not before.
+
+### Undo, which is the feature this shape gives away free
+
+Versions are immutable and every clean build makes one, so "that made it
+worse" is restoring version four as the current tree. One button, one write,
+no agent involved. A person who can undo will try things, and a person who
+cannot will stop asking for changes, which is the difference between a builder
+they keep using and one they abandon.
+
 ## Data model
 
 Mirrors Flows, which is already the shape people understand here.
@@ -147,8 +233,11 @@ app_project    id, organization_id, name, slug, engine, template,
                published_version_id, created_by, created_at, updated_at
 app_version    id, project_id, version (int, per project), source_artifact_id,
                build_artifact_id, build_log, engine, turn_id, created_at
-app_turn       id, project_id, run_id, prompt, reply, status, created_at
+app_turn       id, project_id, run_id, prompt, reply, summary, status, created_at
 ```
+
+The project carries `source_artifact_id` of its own: the tree as it stands
+after the last successful turn, which is what the next turn opens.
 
 - **Source and build output are artefacts**, one gzipped tar each, stored the
   way posters are stored today and for the same reasons: the API and the worker
@@ -260,9 +349,9 @@ New section, `Apps`, above Flows.
 | 1 | `CodingEngine` interface, three implementations, `git.autofix` moved onto it, credential made optional for free engines | `pytest` covers engine choice, redaction and the tool limits | done |
 | 1b | Docs MCP server, wired into all three engines, tick box on both nodes | a turn that must read current documentation gets the page, and the run log shows the search | done |
 | 2 | Worker image: pinned `opencode` and `codex` CLIs beside Claude Code, a warmed OpenCode home, the template, its baked `node_modules`, `AGENTS.md` | `vite build` of the untouched template runs in the image offline, and all three CLIs answer `--version` in the image test | agents done, template to do |
-| 3 | Data model, migration, `app.build` node, project CRUD | an API level test drives two turns and gets two versions | |
+| 3 | Data model, migration, `Workspace`, `app.build` node, project CRUD, the turn lock | an API level test drives three turns, the third correcting the second, and gets three versions | |
 | 4 | Serving: apps origin, tokens, CSP, version and published routes | a published version loads in a browser, a wrong token gives 404 | |
-| 5 | Console: list, builder, preview, version rail, Deploy and Share | a person builds and deploys a page without touching an editor | |
+| 5 | Console: list, builder, preview, version rail with Undo, Deploy and Share | a person builds, corrects, undoes and deploys without touching an editor | |
 | 6 | Free tier metering, engine selection from saved credentials | the limit message names the limit and the reset | |
 | 7 | basivo-qa flows for the new screens, docs, landing page mention | `/qa` covers create, turn, deploy and share | |
 
