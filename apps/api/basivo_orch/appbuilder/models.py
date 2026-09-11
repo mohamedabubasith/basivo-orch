@@ -27,6 +27,7 @@ from datetime import datetime
 
 from sqlalchemy import (
     DateTime,
+    Enum,
     ForeignKey,
     Index,
     Integer,
@@ -166,7 +167,9 @@ class AppTurn(Base):
     reply: Mapped[str] = mapped_column(Text(), default="")
     #: Why a failed turn failed, in words a person can act on.
     error: Mapped[str] = mapped_column(Text(), default="")
-    status: Mapped[TurnStatus] = mapped_column(String(16), default=TurnStatus.QUEUED)
+    status: Mapped[TurnStatus] = mapped_column(
+        Enum(TurnStatus, native_enum=False, length=16), default=TurnStatus.QUEUED
+    )
 
     created_by: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("user.id", ondelete="SET NULL"), default=None

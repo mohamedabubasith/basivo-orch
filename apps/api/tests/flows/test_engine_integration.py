@@ -1569,7 +1569,6 @@ async def test_a_search_feeds_the_node_after_it(session, make_run, monkeypatch):
     assert run.output["result"]["text"].startswith("Otters hold hands")
 
 
-
 EXERCISED_NODE_TYPES = {
     "web.search",
     "trigger.chat",
@@ -1591,6 +1590,7 @@ EXERCISED_NODE_TYPES = {
     "llm.generate",
     "git.ticket",
     "git.autofix",
+    "app.build",
 }
 
 
@@ -2004,3 +2004,184 @@ async def test_the_video_node_revises_until_the_composition_actually_shows_somet
         (await session.execute(select(Artifact).where(Artifact.run_id == run.id))).scalars().all()
     )
     assert len(stored) == 1 and stored[0].content_type == "video/mp4"
+
+
+# ---------------------------------------------------------------------------
+# The App Builder
+# ---------------------------------------------------------------------------
+
+
+async def test_two_messages_build_an_app_and_the_second_one_corrects_the_first(
+    session, make_run, organization, monkeypatch
+):
+    """The builder's whole promise, through the engine twice.
+
+    Message one makes a page and version one. Message two opens *that* page
+    rather than the template, changes it, and makes version two. Everything
+    between is real: the node, the version rows, the artifacts, and the Vite
+    build over the template we ship.
+    """
+    import pytest as _pytest
+
+    from basivo_orch.appbuilder import service
+    from basivo_orch.appbuilder import workspace as ws
+    from basivo_orch.appbuilder.models import AppVersion, TurnStatus
+    from basivo_orch.flows.nodes.engines import EngineResult
+
+    if not ws.is_installed():
+        _pytest.skip("the app template's node_modules is not installed here")
+
+    seen: list[str] = []
+
+    class Agent:
+        name, label, free = "opencode", "OpenCode (free)", True
+
+        def available(self) -> bool:
+            return True
+
+        def drives(self, provider: str) -> bool:
+            return True
+
+        async def run(self, *, cwd, prompt, **kwargs):
+            seen.append(prompt)
+            heading = "Sunrise Bakery and Cafe" if len(seen) > 1 else "Sunrise Bakery"
+            (cwd / "src" / "App.tsx").write_text(
+                "export default function App() {\n"
+                f'  return <h1 className="text-3xl">{heading}</h1>;\n'
+                "}\n"
+            )
+            return EngineResult(text=f"Set the heading to {heading}.")
+
+    monkeypatch.setitem(
+        __import__("basivo_orch.flows.nodes.engines", fromlist=["ENGINES"]).ENGINES,
+        "opencode",
+        Agent(),
+    )
+
+    project = await service.create_project(session, organization_id=organization.id, name="Bakery")
+    graph = Graph.model_validate(
+        {
+            "nodes": [
+                {"id": "start", "type": "trigger.manual", "config": {}},
+                {
+                    "id": "build",
+                    "type": "app.build",
+                    "config": {"project_id": str(project.id), "engine": "opencode"},
+                },
+            ],
+            "edges": [{"source": "start", "target": "build"}],
+        }
+    )
+
+    first, _ = await service.start_turn(session, project=project, message="A page for a bakery")
+    run = await run_graph(
+        session,
+        make_run,
+        graph,
+        payload={"message": "A page for a bakery", "turn_id": str(first.id)},
+    )
+    assert run.status is RunStatus.SUCCEEDED, run.error
+    assert run.output["result"]["version"] == 1
+
+    await session.refresh(first)
+    await session.refresh(project)
+    assert first.status == TurnStatus.BUILT
+    assert project.source_artifact_id is not None, "the tree is what the next turn opens"
+
+    second, _ = await service.start_turn(
+        session, project=project, message="call it Sunrise Bakery and Cafe"
+    )
+    run = await run_graph(
+        session,
+        make_run,
+        graph,
+        payload={
+            "message": "call it Sunrise Bakery and Cafe",
+            "turn_id": str(second.id),
+        },
+    )
+    assert run.status is RunStatus.SUCCEEDED, run.error
+    assert run.output["result"]["version"] == 2
+
+    # The second turn was told about the first, and opened its files.
+    assert "A page for a bakery" in seen[1]
+    assert "Read the files before changing them." in seen[1]
+
+    versions = (
+        (
+            await session.execute(
+                select(AppVersion)
+                .where(AppVersion.project_id == project.id)
+                .order_by(AppVersion.version)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert [v.version for v in versions] == [1, 2]
+    # Both halves of every version: the site to serve, and the tree to undo to.
+    assert all(v.build_artifact_id and v.source_artifact_id for v in versions)
+
+    built = await session.get(Artifact, versions[1].build_artifact_id)
+    assert built is not None and built.size_bytes > 0
+
+
+async def test_a_turn_that_will_not_build_keeps_the_app_that_worked(
+    session, make_run, organization, monkeypatch
+):
+    """A failed turn must not replace a working app, or the preview goes blank."""
+    import pytest as _pytest
+
+    from basivo_orch.appbuilder import service
+    from basivo_orch.appbuilder import workspace as ws
+    from basivo_orch.appbuilder.models import TurnStatus
+    from basivo_orch.flows.nodes.engines import EngineResult
+
+    if not ws.is_installed():
+        _pytest.skip("the app template's node_modules is not installed here")
+
+    class Agent:
+        name, label, free = "opencode", "OpenCode (free)", True
+
+        def available(self) -> bool:
+            return True
+
+        def drives(self, provider: str) -> bool:
+            return True
+
+        async def run(self, *, cwd, prompt, **kwargs):
+            (cwd / "src" / "App.tsx").write_text("export default function App() { return <h1> }")
+            return EngineResult(text="Tried.")
+
+    monkeypatch.setitem(
+        __import__("basivo_orch.flows.nodes.engines", fromlist=["ENGINES"]).ENGINES,
+        "opencode",
+        Agent(),
+    )
+
+    project = await service.create_project(session, organization_id=organization.id, name="Broken")
+    graph = Graph.model_validate(
+        {
+            "nodes": [
+                {"id": "start", "type": "trigger.manual", "config": {}},
+                {
+                    "id": "build",
+                    "type": "app.build",
+                    "config": {"project_id": str(project.id), "engine": "opencode"},
+                },
+            ],
+            "edges": [{"source": "start", "target": "build"}],
+        }
+    )
+    turn, _ = await service.start_turn(session, project=project, message="a page")
+
+    run = await run_graph(
+        session, make_run, graph, payload={"message": "a page", "turn_id": str(turn.id)}
+    )
+
+    assert run.status is RunStatus.FAILED
+    assert "does not build" in (run.error or "")
+    await session.refresh(turn)
+    await session.refresh(project)
+    assert turn.status == TurnStatus.FAILED and turn.error
+    assert project.source_artifact_id is None, "nothing broken was stored"

@@ -433,6 +433,19 @@ class Engine:
                 **kwargs,
             )
 
+    async def _app_state(self, **kwargs: Any) -> dict[str, Any]:
+        """Open or finish one App Builder turn. See `appbuilder/service.apply`.
+
+        Behind `self._db` like every other database call here: nodes in a wave
+        share one AsyncSession, which permits one operation at a time.
+        """
+        from basivo_orch.appbuilder import service
+
+        async with self._db:
+            return await service.apply(
+                self.session, organization_id=self.run.organization_id, **kwargs
+            )
+
     def _downstream(self, node_id: str, port: str) -> list[dict[str, str]]:
         """Which nodes are wired to one of this node's output ports.
 
@@ -738,6 +751,7 @@ class Engine:
                 load_toolbox=self._load_toolbox,
                 record_skill_load=self._record_skill_load,
                 session_state=self._session_state,
+                app_state=self._app_state,
                 downstream=lambda port, _id=node.id: self._downstream(_id, port),
                 http=http,
             )

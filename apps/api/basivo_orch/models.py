@@ -7,6 +7,7 @@ autogenerate will cheerfully emit a ``DROP TABLE`` for it.
 
 from __future__ import annotations
 
+from basivo_orch.appbuilder import models as app_models  # noqa: F401
 from basivo_orch.auth import models as auth_models  # noqa: F401  (registers auth tables)
 from basivo_orch.billing import models as billing_models  # noqa: F401
 from basivo_orch.credentials import models as credential_models  # noqa: F401
@@ -17,6 +18,7 @@ from basivo_orch.toolbox import models as toolbox_models  # noqa: F401
 
 __all__ = [
     "Base",
+    "app_models",
     "auth_models",
     "billing_models",
     "credential_models",

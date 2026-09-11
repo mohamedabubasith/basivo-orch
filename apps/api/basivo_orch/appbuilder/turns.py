@@ -34,6 +34,11 @@ HISTORY_TURNS = 6
 #: How much of a failed build the agent is shown. The error is at the end.
 BUILD_ERROR_CHARS = 2500
 
+#: How long one agent pass may take. The free agent is the slow one, about a
+#: minute for a small edit, and a first message that builds a whole page is
+#: several minutes of real work. Past this it has stopped making progress.
+AGENT_TIMEOUT_SECONDS = 600.0
+
 
 @dataclass
 class TurnResult:

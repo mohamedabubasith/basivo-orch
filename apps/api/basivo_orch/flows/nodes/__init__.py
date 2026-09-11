@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import Any
 
 from basivo_orch.flows.nodes.agent import AgentNode
+from basivo_orch.flows.nodes.app_build import AppBuildNode
 from basivo_orch.flows.nodes.base import (
     DEFAULT_PORT,
     Node,
@@ -56,6 +57,7 @@ _NODES: tuple[type[Node], ...] = (
     AutofixNode,
     CommentNode,
     SessionNode,
+    AppBuildNode,
     AiImageNode,
     AiVideoNode,
     SocialPostNode,

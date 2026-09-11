@@ -25,6 +25,7 @@ from typing import Any
 from sqlalchemy import (
     JSON,
     BigInteger,
+    Boolean,
     DateTime,
     Enum,
     Float,
@@ -35,6 +36,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    false,
     func,
 )
 from sqlalchemy.dialects.postgresql import JSONB
@@ -89,6 +91,10 @@ class TriggerKind(enum.StrEnum):
     #: WEBHOOK because "who started this run" is the first question asked of a
     #: run log, and "a webhook" is the wrong answer when it was a customer.
     CHAT = "chat"
+    #: A message in the App Builder. Its runs are turns of a project, and a
+    #: run log that called them manual would send somebody looking for a
+    #: person who pressed a button.
+    APP = "app"
 
 
 class Flow(Base):
@@ -115,6 +121,11 @@ class Flow(Base):
         ForeignKey("flow_version.id", ondelete="SET NULL", use_alter=True),
         default=None,
     )
+
+    #: Made by another part of the product rather than drawn by a person: an
+    #: App Builder project owns one. Hidden from the flows list, because a
+    #: person who opens it can only break their app.
+    system: Mapped[bool] = mapped_column(Boolean(), default=False, server_default=false())
 
     created_by: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("user.id", ondelete="SET NULL"), default=None

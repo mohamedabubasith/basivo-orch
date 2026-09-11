@@ -138,6 +138,11 @@ class NodeContext:
     #: for why the whole operation lives on that side rather than here.
     session_state: Callable[..., Awaitable[dict[str, Any]]] | None = None
 
+    #: Open an App Builder project, or finish a turn of it. Engine-provided
+    #: for the same reason as everything above: the node knows how to run a
+    #: coding agent over a directory, not how this product stores projects.
+    app_state: Callable[..., Awaitable[dict[str, Any]]] | None = None
+
     #: Nodes wired to one of this node's output ports, as
     #: [{"id", "name", "type", "purpose"}]. How an agent discovers the
     #: colleagues it may hand over to: the edges on the canvas are the team.

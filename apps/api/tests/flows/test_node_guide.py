@@ -35,6 +35,10 @@ def test_examples_name_real_nodes() -> None:
     """An example chain of labels that do not exist teaches the wrong thing."""
     labels = {cls.label for cls in registry.REGISTRY.values()}
     for node_type, cls in registry.REGISTRY.items():
+        if cls.hidden:
+            # Never on the palette, so its example is prose about where the
+            # node comes from rather than a chain someone could draw.
+            continue
         for step in cls.example.replace(", or", " ").split("->"):
             step = step.strip()
             assert step in labels, f"{node_type} example names {step!r}, not a node"
@@ -44,7 +48,7 @@ def test_non_trigger_nodes_say_what_comes_before_them() -> None:
     """The question behind "how is it started" is answered in `needs`."""
     feeders = ("trigger", "earlier node", "from the trigger", "photos", "text from", "number from")
     for node_type, cls in registry.REGISTRY.items():
-        if cls.is_trigger:
+        if cls.is_trigger or cls.hidden:
             continue
         text = " ".join(cls.needs).lower()
         assert any(word in text for word in feeders), f"{node_type}: {cls.needs}"
