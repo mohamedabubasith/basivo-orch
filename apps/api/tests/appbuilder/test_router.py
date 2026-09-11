@@ -384,3 +384,28 @@ async def test_deploying_answers_with_the_project_it_just_changed(session, organ
     assert api._project_read(project, [version], False).published_version is None
     await service.restore(session, project=project, version=version)
     assert project.updated_at is not None
+
+
+async def test_a_turn_whose_run_died_is_closed_so_the_next_message_can_go(session, organization):
+    """A worker that dies mid-turn never calls finish. Without reconciling
+    against the run, the project says "working" until somebody edits the
+    database, which is the one failure a person cannot recover from."""
+    from basivo_orch.appbuilder.models import TurnStatus
+    from basivo_orch.flows.models import Run, RunStatus
+
+    project = await service.create_project(session, organization_id=organization.id, name="Stuck")
+    turn, run = await service.start_turn(session, project=project, message="a page")
+    assert await service.busy(session, project) is True
+
+    stored = await session.get(Run, run.id)
+    stored.status = RunStatus.FAILED
+    stored.error = "Node 'build' failed: OpenCode did not finish within 600s."
+    await session.commit()
+
+    assert await service.busy(session, project) is False
+    await session.refresh(turn)
+    assert turn.status == TurnStatus.FAILED
+    assert turn.error.startswith("OpenCode did not finish"), "the node prefix is for the run log"
+
+    # And the next message goes through.
+    await service.start_turn(session, project=project, message="try again, smaller")

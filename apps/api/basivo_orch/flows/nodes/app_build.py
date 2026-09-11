@@ -147,22 +147,41 @@ class AppBuildNode(Node):
             }
             allowed.append("mcp__basivo_docs")
 
-        result = await turns.run_turn(
-            message=message,
-            history=[(item["prompt"], item.get("reply", "")) for item in opened.get("history", [])],
-            source=source,
-            engine=engine,
-            workspace=ws.TempWorkspace(),
-            title=str(opened.get("name") or ""),
-            api_key=credential.api_key if credential else "",
-            base_url=credential.base_url if credential else None,
-            model=config.model if not engine.free else "",
-            timeout_seconds=turns.AGENT_TIMEOUT_SECONDS,
-            mcp_servers=servers or None,
-            allowed_mcp_tools=tuple(allowed),
-            progress=ctx.progress,
-            step=ctx.step,
-        )
+        try:
+            result = await turns.run_turn(
+                message=message,
+                history=[
+                    (item["prompt"], item.get("reply", "")) for item in opened.get("history", [])
+                ],
+                source=source,
+                engine=engine,
+                workspace=ws.TempWorkspace(),
+                title=str(opened.get("name") or ""),
+                api_key=credential.api_key if credential else "",
+                base_url=credential.base_url if credential else None,
+                model=config.model if not engine.free else "",
+                timeout_seconds=turns.AGENT_TIMEOUT_SECONDS,
+                mcp_servers=servers or None,
+                allowed_mcp_tools=tuple(allowed),
+                progress=ctx.progress,
+                step=ctx.step,
+            )
+        except Exception as exc:
+            # An agent that timed out or stalled raises before the turn has a
+            # result. The turn must still be closed, or the project stays
+            # "working" forever and nobody can send another message: that is
+            # the failure a person cannot recover from, so it is handled
+            # first and the error is re-raised for the run log afterwards.
+            await ctx.app_state(
+                action="finish",
+                project_id=config.project_id,
+                turn_id=turn_id,
+                ok=False,
+                reply="",
+                error=str(exc)[:4000],
+                engine=engine.name,
+            )
+            raise
 
         stored: dict[str, Any] = {}
         if result.ok:

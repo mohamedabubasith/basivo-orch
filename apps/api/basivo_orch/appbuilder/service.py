@@ -23,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from basivo_orch.appbuilder import serving
 from basivo_orch.appbuilder.models import AppProject, AppTurn, AppVersion, TurnStatus
-from basivo_orch.flows.models import Flow, FlowVersion, Run, TriggerKind
+from basivo_orch.flows.models import Flow, FlowVersion, Run, RunStatus, TriggerKind
 from basivo_orch.flows.service import create_run, enqueue
 
 #: How many earlier messages a turn is told about. The agent reads the files
@@ -157,13 +157,7 @@ async def start_turn(
     working from a tree the other is replacing, and the person would get back
     a mixture neither of them can explain.
     """
-    running = await session.execute(
-        select(AppTurn).where(
-            AppTurn.project_id == project.id,
-            AppTurn.status.in_([TurnStatus.QUEUED, TurnStatus.RUNNING]),
-        )
-    )
-    if running.scalars().first():
+    if await busy(session, project):
         raise ValueError("This app is still working on the previous message.")
 
     flow = await session.get(Flow, project.flow_id) if project.flow_id else None
@@ -191,6 +185,48 @@ async def start_turn(
     await session.refresh(turn)
     enqueue(run)
     return turn, run
+
+
+_NODE_PREFIX = re.compile(r"^Node '[^']*'(?: \([^)]*\))? failed: ")
+
+
+def _plain(error: str | None) -> str:
+    """A run's error, as a sentence for the chat rather than a line for a log.
+
+    The engine names the node that failed, which is right for the run log and
+    noise beside a message a person typed.
+    """
+    text = _NODE_PREFIX.sub("", (error or "").strip())
+    return (text or "The build stopped before it finished. Send the message again.")[:4000]
+
+
+async def busy(session: AsyncSession, project: AppProject) -> bool:
+    """Is a turn genuinely in flight.
+
+    A turn's own status says queued or running, but the run is the authority
+    on whether anything is still happening: a worker that died mid-turn never
+    calls finish, and without this check the project would say "working"
+    until somebody edited the database. A turn whose run has ended is closed
+    here, with the run's error, and the answer is no.
+    """
+    rows = await session.execute(
+        select(AppTurn).where(
+            AppTurn.project_id == project.id,
+            AppTurn.status.in_([TurnStatus.QUEUED, TurnStatus.RUNNING]),
+        )
+    )
+    open_turns = list(rows.scalars().all())
+    still = False
+    for turn in open_turns:
+        run = await session.get(Run, turn.run_id) if turn.run_id else None
+        if run is not None and run.status in (RunStatus.QUEUED, RunStatus.RUNNING):
+            still = True
+            continue
+        turn.status = TurnStatus.FAILED
+        turn.error = _plain(run.error if run is not None else "")
+    if open_turns:
+        await session.commit()
+    return still
 
 
 # ---------------------------------------------------------------------------

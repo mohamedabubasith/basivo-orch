@@ -2185,3 +2185,58 @@ async def test_a_turn_that_will_not_build_keeps_the_app_that_worked(
     await session.refresh(project)
     assert turn.status == TurnStatus.FAILED and turn.error
     assert project.source_artifact_id is None, "nothing broken was stored"
+
+
+async def test_an_agent_that_raises_still_closes_the_turn(
+    session, make_run, organization, monkeypatch
+):
+    """A stall or a timeout raises before there is a result. The turn must be
+    closed with that error, or the project stays busy forever."""
+    from basivo_orch.appbuilder import service
+    from basivo_orch.appbuilder.models import TurnStatus
+    from basivo_orch.flows.nodes.base import NodeError
+
+    class Agent:
+        name, label, free = "opencode", "OpenCode (free)", True
+
+        def available(self) -> bool:
+            return True
+
+        def drives(self, provider: str) -> bool:
+            return True
+
+        async def run(self, **kwargs):
+            raise NodeError(
+                "OpenCode stopped responding: nothing for 120 seconds while it was working."
+            )
+
+    monkeypatch.setitem(
+        __import__("basivo_orch.flows.nodes.engines", fromlist=["ENGINES"]).ENGINES,
+        "opencode",
+        Agent(),
+    )
+    project = await service.create_project(session, organization_id=organization.id, name="Quiet")
+    graph = Graph.model_validate(
+        {
+            "nodes": [
+                {"id": "start", "type": "trigger.manual", "config": {}},
+                {
+                    "id": "build",
+                    "type": "app.build",
+                    "config": {"project_id": str(project.id), "engine": "opencode"},
+                },
+            ],
+            "edges": [{"source": "start", "target": "build"}],
+        }
+    )
+    turn, _ = await service.start_turn(session, project=project, message="a page")
+
+    run = await run_graph(
+        session, make_run, graph, payload={"message": "a page", "turn_id": str(turn.id)}
+    )
+
+    assert run.status is RunStatus.FAILED
+    await session.refresh(turn)
+    assert turn.status == TurnStatus.FAILED
+    assert "stopped responding" in turn.error
+    assert await service.busy(session, project) is False

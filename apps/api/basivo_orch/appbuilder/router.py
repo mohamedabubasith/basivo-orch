@@ -146,15 +146,7 @@ async def _versions(session: AsyncSession, project: AppProject) -> list[AppVersi
 
 
 async def _busy(session: AsyncSession, project: AppProject) -> bool:
-    from basivo_orch.appbuilder.models import TurnStatus
-
-    rows = await session.execute(
-        select(AppTurn.id).where(
-            AppTurn.project_id == project.id,
-            AppTurn.status.in_([TurnStatus.QUEUED, TurnStatus.RUNNING]),
-        )
-    )
-    return rows.scalars().first() is not None
+    return await service.busy(session, project)
 
 
 @router.get("", response_model=list[ProjectRead])
