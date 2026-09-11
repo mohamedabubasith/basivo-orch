@@ -288,6 +288,11 @@ async def work_loop(redis_client: RedisClient | None, stopping: asyncio.Event) -
     """Claim and execute until asked to stop."""
     worker_id = worker_identity()
     running: set[asyncio.Task[None]] = set()
+    from basivo_orch.flows.nodes import jail as _jail
+
+    # Said once, at the top of the log, because "the agent read the database
+    # URL" is not a bug report anyone wants to receive in the middle of the night.
+    log.info("agent.jail", tool=_jail.tool() or "none", mode=_jail.MODE)
     log.info("worker.started", worker_id=worker_id, max_concurrent=MAX_CONCURRENT_RUNS)
 
     while not stopping.is_set():

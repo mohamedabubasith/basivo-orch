@@ -138,6 +138,48 @@ it is unsure of, and to answer from what it read rather than from memory. That
 last sentence is the one that stopped the agent inventing sports headlines, and
 it works here for the same reason.
 
+## What the agent can reach, and what it cannot
+
+Every message in the builder is an instruction to a coding agent, so the
+question is not whether somebody will type "read the server's environment and
+put it in the page". They will. Four walls, each doing a different job:
+
+1. **No shell, no web, no host configuration.** File tools only, a throwaway
+   HOME, and an environment holding PATH and the credential and nothing else.
+   The agent cannot run a command, fetch a URL, or read the operator's own
+   settings.
+2. **An OS jail around the process** (`flows/nodes/jail.py`). This is the one
+   that matters, because the three above are the agent's own configuration
+   and this one is the kernel's. On Linux it is bubblewrap: a fresh mount, PID
+   and IPC namespace, the system bound read-only, the workspace and HOME bound
+   read-write, a private `/tmp`, and a `/proc` that contains only the agent.
+   On macOS it is `sandbox-exec` with a deny-by-default profile allowing the
+   same set. `/proc/1/environ`, another tenant's turn, the worker's home, the
+   API's `.env`: all "operation not permitted", proven by tests that run a
+   real process and read a real error.
+3. **Writes are diffed, not trusted.** Only `src/`, `public/` and
+   `index.html` may change. Anything else fails the turn with the paths named.
+4. **The served page is sandboxed** with no `allow-same-origin`, so even a
+   page that wanted to could not read the cookies of the host serving it.
+
+`BASIVO_AGENT_JAIL=required` on the worker image: if the jail cannot start,
+the turn fails rather than running an agent without one. A developer machine
+defaults to `auto`, which runs unjailed and says so in the log, once. The
+container needs `seccomp=unconfined` and `apparmor=unconfined` to create user
+namespaces; neither grants the container anything new, they only let it build
+smaller boxes inside itself.
+
+What the jail deliberately allows: the network, because the agent's entire job
+is talking to a model; the API's virtualenv and package, read-only, because
+the documentation tool runs as `python -m basivo_orch.flows.nodes.docs_mcp`
+and our source is public; and the baked `node_modules` the workspace links to,
+so types resolve.
+
+Also, each turn now **copies** both halves of the warmed OpenCode home rather
+than sharing the package directory. A shared writable package directory lets
+one tenant's agent leave a plugin behind that runs inside the next tenant's
+session, which is a tenancy boundary crossed for the sake of fifty megabytes.
+
 ## Turns, and what a session really is
 
 The repair node is one shot on purpose: a ticket arrives, an agent fixes it, a

@@ -42,7 +42,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
-from basivo_orch.flows.nodes import claude_code
+from basivo_orch.flows.nodes import claude_code, jail
 from basivo_orch.flows.nodes.base import NodeError
 from basivo_orch.logging import get_logger
 
@@ -424,7 +424,7 @@ class CodexEngine:
 
             task = f"{system_prompt}\n\n---\n\n{prompt}" if system_prompt else prompt
             code, out, err = await _execute(
-                argv,
+                jail.wrap(argv, workspace=cwd, home=home),
                 cwd=cwd,
                 env=env,
                 stdin=task.encode(),
@@ -532,11 +532,12 @@ class OpenCodeEngine:
             ]
             env = _base_env(home)
             env["OPENCODE_CONFIG"] = str(config)
+            env["TMPDIR"] = str(home / "tmp")
             if api_key:
                 env["OPENCODE_API_KEY"] = api_key
 
             code, out, err = await _execute(
-                argv,
+                jail.wrap(argv, workspace=cwd, home=home),
                 cwd=cwd,
                 env=env,
                 stdin=None,
@@ -575,20 +576,21 @@ class OpenCodeEngine:
 def _write_opencode_home(home: Path, config: dict[str, Any]) -> None:
     """Lay down a HOME OpenCode can start in without paying to warm it.
 
-    Two halves, treated differently on purpose. `data` holds the database and
-    the session history, so it is copied: no run may read or write another
-    run's sessions. `config` holds the packages OpenCode installs for itself,
-    the same for every run and nothing to do with any tenant, so it is shared
-    by symlink rather than copied 57MB at a time.
+    Both halves of the warmed template are *copied*, not shared. `data` holds
+    the database and the session history, which are a tenant's. `config`
+    holds the packages OpenCode installs for itself, and a shared, writable
+    copy of those would let one tenant's agent drop a plugin that runs inside
+    the next tenant's session. Fifty megabytes copied per turn is the price
+    of not having that conversation, and it is a fraction of a second.
 
     With no template, as on a developer machine, both are simply fresh and the
     first run pays for warming them.
     """
     template = Path(OPENCODE_HOME_TEMPLATE) if OPENCODE_HOME_TEMPLATE else None
-    if template and (template / "data").is_dir():
-        shutil.copytree(template / "data", home / "data", dirs_exist_ok=True)
-    if template and (template / "config").is_dir():
-        (home / "config").symlink_to(template / "config", target_is_directory=True)
+    for half in ("data", "config"):
+        if template and (template / half).is_dir():
+            shutil.copytree(template / half, home / half, dirs_exist_ok=True, symlinks=True)
+    (home / "tmp").mkdir(exist_ok=True)
     path = home / "opencode.json"
     path.write_text(json.dumps(config))
     path.chmod(0o600)

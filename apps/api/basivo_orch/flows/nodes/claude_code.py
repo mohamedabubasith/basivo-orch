@@ -170,8 +170,10 @@ async def run_claude_code(
         if base_url:
             env["ANTHROPIC_BASE_URL"] = base_url
 
+        from basivo_orch.flows.nodes import jail
+
         process = await asyncio.create_subprocess_exec(
-            *argv,
+            *jail.wrap(argv, workspace=cwd, home=Path(home)),
             cwd=str(cwd),
             env=env,
             stdin=asyncio.subprocess.PIPE,

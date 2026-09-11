@@ -207,6 +207,15 @@ services:
     # crashes with an error that mentions nothing about shared memory — this
     # line is the whole fix.
     shm_size: 512m
+    # Coding agents run inside bubblewrap, which needs unprivileged user
+    # namespaces. Docker's default seccomp profile denies the syscalls that
+    # create them, and Ubuntu 24.04's AppArmor denies them to any unconfined
+    # binary. Neither line adds a capability: the container still cannot do
+    # anything it could not before; it can only carve itself into smaller
+    # boxes, which is exactly what the jail does.
+    security_opt:
+      - seccomp=unconfined
+      - apparmor=unconfined
     deploy:
       replicas: 2
       resources:

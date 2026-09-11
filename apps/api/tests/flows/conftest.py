@@ -115,7 +115,38 @@ def _no_coding_agents_on_path(monkeypatch):
     BASIVO_CODEX_BIN or BASIVO_OPENCODE_BIN to a fake, which every engine
     checks before PATH.
     """
+    import shutil
+
     for name in ("BASIVO_CLAUDE_CODE_BIN", "BASIVO_CODEX_BIN", "BASIVO_OPENCODE_BIN"):
         monkeypatch.delenv(name, raising=False)
-    monkeypatch.setattr("basivo_orch.flows.nodes.claude_code.shutil.which", lambda name: None)
-    monkeypatch.setattr("basivo_orch.flows.nodes.engines.shutil.which", lambda name: None)
+
+    real_which = shutil.which
+
+    def only_agents_are_missing(name, *args, **kwargs):
+        # `shutil` is one module, so this patch is global. It must hide the
+        # agents and nothing else: the jail looks for its own binaries the
+        # same way, and a test that could not find sandbox-exec would run the
+        # confinement test bare and call the result a pass.
+        if name in ("claude", "codex", "opencode"):
+            return None
+        return real_which(name, *args, **kwargs)
+
+    monkeypatch.setattr(shutil, "which", only_agents_are_missing)
+
+
+@pytest.fixture(autouse=True)
+def _agents_run_bare_in_tests(monkeypatch):
+    """The engine tests drive fake CLIs written into pytest's tmp_path.
+
+    Inside the OS jail those fakes cannot write there, which is the jail doing
+    its job and the wrong thing to be testing here: the jail has tests of its
+    own that confine a real process for real. Tests that want the jail set
+    `jail.MODE` themselves.
+    """
+    from basivo_orch.flows.nodes import jail
+
+    monkeypatch.setattr(jail, "MODE", "off")
+    jail.tool.cache_clear()
+    yield
+    if hasattr(jail.tool, "cache_clear"):
+        jail.tool.cache_clear()

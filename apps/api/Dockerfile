@@ -95,6 +95,9 @@ RUN apt-get update \
         ca-certificates \
         gnupg \
         curl \
+        # The jail every coding agent runs in: a mount and PID namespace of
+        # its own, with only the workspace writable. See flows/nodes/jail.py.
+        bubblewrap \
     # Node 22 for the video renderer and the coding agents. From nodesource
     # rather than Debian, which ships 18.
     && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
@@ -246,6 +249,7 @@ RUN set -e; \
     claude --version; \
     codex --version; \
     opencode --version; \
+    bwrap --version; \
     test -d /opt/basivo/opencode/config/opencode/node_modules && echo "opencode warmed"; \
     test -s /opt/basivo/speech/voices-v1.0.bin && echo "voice model ok"
 
@@ -255,6 +259,11 @@ FROM worker-tools AS worker
 # The only layer our source touches. Everything above stays cached across a
 # code change, which is the difference between a one minute deploy and fifteen.
 COPY --from=builder --chown=basivo:basivo /app /app
+
+# A coding agent runs only inside the jail on this image. If the container
+# cannot create user namespaces the turn fails with a message that names the
+# fix, rather than running an agent that can read /proc/1/environ.
+ENV BASIVO_AGENT_JAIL=required
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
