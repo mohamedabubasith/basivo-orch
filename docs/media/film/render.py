@@ -29,26 +29,22 @@ PR = {"number": 9, "title": "Autofix: Remove the old pricing script now that the
       "branch": "basivo/autofix-cf60f477", "added": 6, "removed": 23, "files": 4}
 PROPS = {"tagline": "Draw the pipeline. It runs itself.", "url": "orch.basivo.in",
          "consoleUrl": "console.basivo.in", "pr": PR, "shots": SHOTS, "voiceOver": False}
-SECONDS = 52.0
+SECONDS = 51.0
 
 SCRIPT = (
     "Basivo. Draw the pipeline, and it runs itself. "
-    "It starts however your work starts. A GitHub issue, a Jira ticket, your own webhook, "
-    "a timetable, a Telegram message, or you pressing run. There is nothing to wire up by hand. "
-    "Then you draw the flow on one canvas, from eighteen node types: agents, Python, HTTP, "
-    "renders, posts and apps. "
-    "The agent is a real agent. Tools, skills, sub-agents, MCP servers, hand over, and your own "
-    "model keys. Or no key at all: a free coding agent is built in. "
-    "And it makes more than text. React goes in, an MP4 comes out: renders, montages, a voice over the top. "
-    "It also builds applications. Describe the page you want, and watch it appear beside what you typed. "
-    "Change your mind, and it changes. Every build is a version you can deploy, or go back to. "
-    "Press deploy and you get an address anyone can open. Unpublish it and it is gone. "
-    "Take the code whenever you like: it is yours, and it runs anywhere. "
-    "Then it delivers. A pull request, a comment, or a post to Telegram, Discord, Slack, Mastodon or Bluesky. "
-    "Every node reports itself while the run is going: status, duration, tokens, and what they cost. "
-    "One real run took thirty six seconds and nine cents. "
-    "Elsewhere that is a webhook you wire by hand, a render box beside the automation tool, and an invoice "
-    "at the end of the month. Here it is one canvas, and the cost is on the run. "
+    "It starts however your work starts: an issue, a ticket, your own webhook, a timetable, "
+    "a message, or you pressing run. Nothing to wire up by hand. "
+    "Then you draw the flow on one canvas, from eighteen node types. "
+    "The agent is a real agent: tools, skills, sub-agents, MCP servers, hand over. "
+    "Bring your own key, or use the free one built in. "
+    "It makes more than text. React goes in, an MP4 comes out. "
+    "And it builds applications. Describe the page you want, and watch it appear beside what "
+    "you typed. Change your mind, and it changes. Every build is a version. "
+    "Deploy, and you have an address to send to anyone. The code is yours whenever you want it. "
+    "Then it delivers: a pull request, a comment, a post where your people are. "
+    "Every node reports itself while the run is going. One real run: thirty six seconds, "
+    "nine cents. "
     "Basivo. Orch dot basivo dot in."
 )
 
