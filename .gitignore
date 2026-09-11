@@ -51,6 +51,10 @@ pnpm-debug.log*
 !.claude/skills/
 AGENTS.md
 AGENT.md
+# Except the one we ship: the App Builder's template carries the rules every
+# coding agent reads inside a generated project. That is product source, not
+# somebody's local assistant file.
+!apps/api/basivo_orch/appbuilder/template/AGENTS.md
 .cursor/
 .cursorrules
 .aider*

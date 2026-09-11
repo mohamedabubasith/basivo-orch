@@ -180,6 +180,17 @@ RUN cd /opt/basivo/remotion \
     && chmod -R a+rX /opt/basivo/remotion
 ENV BASIVO_REMOTION_NODE_MODULES=/opt/basivo/remotion/node_modules
 
+# The App Builder's toolchain, installed once for the same reasons. Vite and
+# Tailwind are dev dependencies here because a build needs them, so this one
+# installs everything rather than omitting them.
+COPY basivo_orch/appbuilder/template/package.json \
+     /opt/basivo/app-template/package.json
+RUN cd /opt/basivo/app-template \
+    && npm install --no-audit --no-fund \
+    && npm cache clean --force \
+    && chmod -R a+rX /opt/basivo/app-template
+ENV BASIVO_APP_NODE_MODULES=/opt/basivo/app-template/node_modules
+
 # The browser Remotion draws frames with. Downloaded at build time into a path
 # every user can read, because the alternative is every fresh container
 # downloading it on its first render, and failing outright where that download
@@ -231,6 +242,7 @@ RUN set -e; \
     ffprobe -version | head -1; \
     node --version; \
     test -d /opt/basivo/remotion/node_modules/remotion && echo "remotion ok"; \
+    test -d /opt/basivo/app-template/node_modules/vite && echo "app builder ok"; \
     claude --version; \
     codex --version; \
     opencode --version; \
