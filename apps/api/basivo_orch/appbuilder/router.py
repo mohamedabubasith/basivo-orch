@@ -25,92 +25,31 @@ every link at once.
 
 from __future__ import annotations
 
-import hashlib
 import hmac
 import io
-import os
 import tarfile
 import uuid
+import zipfile
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Request, Response, status
-from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from basivo_orch.appbuilder import service
+from basivo_orch.appbuilder import service, serving
 from basivo_orch.appbuilder.models import AppProject, AppTurn, AppVersion
+from basivo_orch.appbuilder.serving import preview_url, project_token, public_url
 from basivo_orch.auth.authz import OrgContext, Permission, require
-from basivo_orch.auth.settings import get_settings as get_auth_settings
 from basivo_orch.db import get_async_session
 from basivo_orch.flows.models import Artifact
 
 router = APIRouter(prefix="/orgs/{organization_id}/apps", tags=["apps"])
 
-#: The public half. No prefix under the org, because a share link should be
-#: short and should not name the workspace that made it.
+#: Preview links, private to whoever holds the token.
 public = APIRouter(prefix="/p", tags=["apps"])
-
-#: How a built site is served. Anything not in this list is served as bytes
-#: with a type a browser will not execute.
-CONTENT_TYPES: dict[str, str] = {
-    ".html": "text/html; charset=utf-8",
-    ".js": "text/javascript; charset=utf-8",
-    ".css": "text/css; charset=utf-8",
-    ".json": "application/json",
-    ".svg": "image/svg+xml",
-    ".png": "image/png",
-    ".jpg": "image/jpeg",
-    ".jpeg": "image/jpeg",
-    ".webp": "image/webp",
-    ".gif": "image/gif",
-    ".ico": "image/x-icon",
-    ".woff": "font/woff",
-    ".woff2": "font/woff2",
-    ".txt": "text/plain; charset=utf-8",
-}
-
-#: An opaque origin for the page, whatever host serves it. Without
-#: `allow-same-origin` the document cannot touch cookies or storage of the
-#: host, which is what makes serving generated code survivable.
-#:
-#: `frame-ancestors` is here because the page is meant to be framed: the
-#: builder shows it beside the chat. It also replaces `X-Frame-Options`, which
-#: the security middleware leaves off once a route has stated this.
-SANDBOX = "sandbox allow-scripts allow-forms allow-popups allow-modals; frame-ancestors *"
-
-
-def project_token(project_id: uuid.UUID) -> str:
-    """The share link's secret half. Derived, never stored."""
-    key = get_auth_settings().secret_key.get_secret_value().encode()
-    return hmac.new(key, f"app-site:{project_id}".encode(), hashlib.sha256).hexdigest()[:32]
-
-
-def apps_origin() -> str:
-    """Where built apps are served from.
-
-    Its own host in any real deployment: generated JavaScript and the console
-    should not share an origin even with the sandbox in place. Unset, it falls
-    back to this API rather than to the console, because this API is what
-    actually answers `/p/...`; pointing at the console gives a link that loads
-    the console's own single page app instead of somebody's site.
-    """
-    configured = os.environ.get("BASIVO_APPS_ORIGIN", "").strip().rstrip("/")
-    return configured or str(get_auth_settings().public_base_url).rstrip("/")
-
-
-def site_url(project: AppProject, version: int | None = None) -> str:
-    """The address of a built app, always ending in a slash.
-
-    The slash is load bearing. A built page asks for `./assets/app.js`, and
-    from `/p/<id>/<token>/v3` that resolves to `/p/<id>/<token>/assets/app.js`,
-    one directory too high, so the page loads and nothing on it works. From
-    `/p/<id>/<token>/v3/` it resolves inside the version. The route redirects
-    the unslashed form rather than trusting every caller to remember.
-    """
-    path = f"/p/{project.id}/{project_token(project.id)}"
-    return f"{apps_origin()}{path}" + (f"/v{version}/" if version else "/")
+#: Published apps, at an address a person can read aloud.
+sites = APIRouter(prefix="/s", tags=["apps"])
 
 
 # ---------------------------------------------------------------------------
@@ -164,9 +103,9 @@ class ProjectRead(BaseModel):
     #: Null until the first message builds something.
     latest_version: int | None
     published_version: int | None
-    #: What the preview pane loads, and what a person shares. The same address
-    #: with and without a version number.
+    #: What the preview pane loads: the newest build, at its private address.
     preview_url: str
+    #: What a person shares. Answers only while a version is deployed.
     share_url: str
     busy: bool
 
@@ -183,8 +122,8 @@ def _project_read(project: AppProject, versions: list[AppVersion], busy: bool) -
         updated_at=project.updated_at,
         latest_version=latest.version if latest else None,
         published_version=published.version if published else None,
-        preview_url=site_url(project, latest.version if latest else None),
-        share_url=site_url(project),
+        preview_url=preview_url(project, latest.version if latest else None),
+        share_url=public_url(project),
         busy=busy,
     )
 
@@ -304,7 +243,7 @@ async def list_versions(
             version=version.version,
             engine=version.engine,
             created_at=version.created_at,
-            url=site_url(project, version.version),
+            url=preview_url(project, version.version),
             published=version.id == project.published_version_id,
         )
         for version in reversed(await _versions(session, project))
@@ -386,122 +325,139 @@ async def delete_project(
 
 
 # ---------------------------------------------------------------------------
+# Unpublish, and the code itself
+# ---------------------------------------------------------------------------
+
+
+@router.post("/{project_id}/unpublish", response_model=ProjectRead)
+async def unpublish(
+    project_id: uuid.UUID,
+    context: OrgContext = Depends(require(Permission.FLOW_PUBLISH)),
+    session: AsyncSession = Depends(get_async_session),
+) -> ProjectRead:
+    """Take the public address down. Versions stay; the link answers not live."""
+    project = await _load(session, context.organization_id, project_id)
+    await service.unpublish(session, project=project)
+    return _project_read(project, await _versions(session, project), await _busy(session, project))
+
+
+@router.get("/{project_id}/versions/{version_id}/source.zip", include_in_schema=False)
+async def download_source(
+    project_id: uuid.UUID,
+    version_id: uuid.UUID,
+    context: OrgContext = Depends(require(Permission.FLOW_READ)),
+    session: AsyncSession = Depends(get_async_session),
+) -> Response:
+    """The project as it was at this version, ready for `npm install`.
+
+    A zip rather than the stored tar, because the person downloading it is as
+    likely to be on Windows as not, and the whole point of handing the code
+    over is that they can open it without asking how.
+    """
+    project = await _load(session, context.organization_id, project_id)
+    version = await session.get(AppVersion, version_id)
+    if version is None or version.project_id != project.id or version.source_artifact_id is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "That version does not exist.")
+    artifact = await session.get(Artifact, version.source_artifact_id)
+    if artifact is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "That version does not exist.")
+
+    folder = f"{project.slug}-v{version.version}"
+    body = _zip_of(artifact.data, folder, project.name)
+    return Response(
+        content=body,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="{folder}.zip"',
+            "Cache-Control": "private, no-store",
+        },
+    )
+
+
+README = """# {name}
+
+Built with the basivo App Builder. This is the whole project: React 19,
+TypeScript, Tailwind v4 and Vite, with `motion` and `lucide-react` available.
+
+    npm install
+    npm run dev      # a development server with hot reload
+    npm run build    # the production build, in dist/
+
+Everything you asked for lives in `src/`. `index.html` is the page shell.
+"""
+
+
+def _zip_of(archive: bytes, folder: str, name: str) -> bytes:
+    """The stored tar as a zip with one top-level folder and a README."""
+    out = io.BytesIO()
+    with (
+        tarfile.open(fileobj=io.BytesIO(archive), mode="r:gz") as tar,
+        zipfile.ZipFile(out, "w", compression=zipfile.ZIP_DEFLATED) as bundle,
+    ):
+        for member in tar.getmembers():
+            if not member.isfile() or ".." in member.name:
+                continue
+            handle = tar.extractfile(member)
+            if handle is not None:
+                bundle.writestr(f"{folder}/{member.name.strip('/')}", handle.read())
+        bundle.writestr(f"{folder}/README.md", README.format(name=name))
+    return out.getvalue()
+
+
+# ---------------------------------------------------------------------------
 # The site itself
 # ---------------------------------------------------------------------------
 
 
 @public.get("/{project_id}/{token}", include_in_schema=False)
 @public.get("/{project_id}/{token}/{path:path}", include_in_schema=False)
-async def site(
+async def preview(
     request: Request,
     project_id: uuid.UUID,
     token: Annotated[str, Path(max_length=64)],
     path: str = "",
     session: AsyncSession = Depends(get_async_session),
 ) -> Response:
-    """One file of a built app, to anyone holding the link."""
+    """Any version of an app, to whoever holds the project's token."""
     if not hmac.compare_digest(token, project_token(project_id)):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found.")
     project = await session.get(AppProject, project_id)
     if project is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found.")
+    if redirect := serving.directory_redirect(request, path):
+        return redirect
 
-    # A directory has to end in a slash or the page's own relative asset
-    # requests climb out of it. Redirect rather than serve something that
-    # half works.
-    if _is_directory(path) and not request.url.path.endswith("/"):
-        return RedirectResponse(request.url.path + "/", status_code=308)
-
-    wanted, inside = _split_version(path)
-    version = await _serving_version(session, project, wanted)
-    if version is None or version.build_artifact_id is None:
-        raise HTTPException(
-            status.HTTP_404_NOT_FOUND,
-            "This app has not been published yet." if wanted is None else "Not found.",
+    wanted, inside = serving.split_version(path)
+    if wanted is None:
+        version = await serving.published_version(session, project)
+        if version is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "This app has not been published yet.")
+        return await serving.serve(
+            request, session, version=version, inside=inside, immutable=False
         )
 
-    artifact = await session.get(Artifact, version.build_artifact_id)
-    if artifact is None:
+    version = await serving.version_by_number(session, project, wanted)
+    if version is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found.")
-
-    name = inside or "index.html"
-    body = _file_from(artifact.data, name)
-    if body is None:
-        # A single page app: an unknown path is a route inside it, not a
-        # missing file, so the page itself answers.
-        body = _file_from(artifact.data, "index.html")
-        name = "index.html"
-    if body is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found.")
-
-    suffix = name[name.rfind(".") :].lower() if "." in name else ""
-    return Response(
-        content=body,
-        media_type=CONTENT_TYPES.get(suffix, "application/octet-stream"),
-        headers={
-            "Content-Security-Policy": SANDBOX,
-            "X-Content-Type-Options": "nosniff",
-            "Referrer-Policy": "no-referrer",
-            # A version is immutable; the published address is not.
-            "Cache-Control": (
-                "public, max-age=31536000, immutable"
-                if wanted is not None
-                else "no-cache, must-revalidate"
-            ),
-            "Cross-Origin-Resource-Policy": "cross-origin",
-            # The sandbox gives the document an opaque origin, so the page's
-            # own script and stylesheet arrive here as cross-origin requests
-            # from "null". Without this they are blocked and the page renders
-            # as an empty white box, which is exactly what a person would
-            # report as "the preview is broken".
-            "Access-Control-Allow-Origin": "*",
-        },
-    )
+    return await serving.serve(request, session, version=version, inside=inside, immutable=True)
 
 
-def _is_directory(path: str) -> bool:
-    """True for the site root and for a bare version, which name directories."""
-    head, _, rest = path.partition("/")
-    return not path or (not rest and head.startswith("v") and head[1:].isdigit())
-
-
-def _split_version(path: str) -> tuple[int | None, str]:
-    """`v3/assets/app.js` is version three's file; `assets/app.js` is the deployed one."""
-    head, _, rest = path.partition("/")
-    if head.startswith("v") and head[1:].isdigit():
-        return int(head[1:]), rest
-    return None, path
-
-
-async def _serving_version(
-    session: AsyncSession, project: AppProject, wanted: int | None
-) -> AppVersion | None:
-    if wanted is None:
-        if project.published_version_id is None:
-            return None
-        return await session.get(AppVersion, project.published_version_id)
-    rows = await session.execute(
-        select(AppVersion).where(AppVersion.project_id == project.id, AppVersion.version == wanted)
-    )
-    return rows.scalars().first()
-
-
-def _file_from(archive: bytes, name: str) -> bytes | None:
-    """One file out of a built site.
-
-    The whole site is one gzipped tar of a few hundred kilobytes, so this
-    reads it per request rather than keeping a cache to invalidate. When that
-    stops being true, the answer is object storage, not a cache here.
-    """
-    name = name.strip("/")
-    if not name or ".." in name:
-        return None
-    try:
-        with tarfile.open(fileobj=io.BytesIO(archive), mode="r:gz") as tar:
-            member = tar.getmember(name)
-            if not member.isfile():
-                return None
-            handle = tar.extractfile(member)
-            return handle.read() if handle else None
-    except (KeyError, tarfile.TarError):
-        return None
+@sites.get("/{public_slug}", include_in_schema=False)
+@sites.get("/{public_slug}/{path:path}", include_in_schema=False)
+async def published(
+    request: Request,
+    public_slug: Annotated[str, Path(max_length=80)],
+    path: str = "",
+    session: AsyncSession = Depends(get_async_session),
+) -> Response:
+    """The deployed app, to anyone at all."""
+    rows = await session.execute(select(AppProject).where(AppProject.public_slug == public_slug))
+    project = rows.scalars().first()
+    if project is None:
+        raise serving.not_live()
+    if redirect := serving.directory_redirect(request, path):
+        return redirect
+    version = await serving.published_version(session, project)
+    if version is None:
+        raise serving.not_live()
+    return await serving.serve(request, session, version=version, inside=path, immutable=False)

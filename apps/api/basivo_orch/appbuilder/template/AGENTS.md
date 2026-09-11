@@ -13,13 +13,29 @@ are the conversation so far.
 - **Write only inside `src/`, `public/` and `index.html`.** Everything else is
   refused and the turn fails. That includes `package.json`: the dependencies
   are fixed and installed already, so build what was asked from what is here.
-- **What is here**: React 19, TypeScript, Tailwind v4, Vite. No router, no
-  component library, no icon package, no state library. Tailwind classes only,
-  never a `.css` file of your own and never inline `style` unless the value is
-  genuinely dynamic.
+- **What is here**: React 19, TypeScript, Tailwind v4, Vite, `motion` for
+  animation (`import { motion, AnimatePresence } from "motion/react"`), and
+  `lucide-react` for icons. Nothing else: no router, no component library, no
+  state library, no chart package. Tailwind classes only, never a `.css` file
+  of your own and never inline `style` unless the value is genuinely dynamic.
+- **Animation is welcome, and it must be smooth.** Use `motion` for anything
+  that moves: entrances, hover and tap, layout changes, page transitions,
+  scroll-linked effects with `useScroll` and `useTransform`. Animate
+  `transform` and `opacity`, never `width`, `height` or `top`. Respect
+  `prefers-reduced-motion`: `useReducedMotion()` and give those users the end
+  state directly. Sixty frames on a phone is the bar, and a page that stutters
+  is worse than one that does not move.
+- **Charts and data displays** are built from `div`s and SVG with Tailwind,
+  not from a library that is not here. A bar chart is a row of `div`s with
+  heights; a sparkline is one `<polyline>`.
 - **It must build.** `vite build` runs the moment you finish, and a page that
   does not compile is a turn the person sees fail. Prefer the boring construct
   you are sure of.
+- **Many small files, never one giant one.** Put each section or widget in
+  its own component under `src/components/`, sample data in `src/data.ts`,
+  and keep `App.tsx` to composition. Around 150 lines a file. One enormous
+  write is slow to produce, fragile to edit next turn, and the single most
+  common way a build breaks; five small ones are none of those things.
 - **One screen unless asked otherwise.** Sections on a page, not routes. If
   they ask for pages, use state to switch between them rather than adding a
   router.

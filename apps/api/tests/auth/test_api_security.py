@@ -138,7 +138,7 @@ async def test_a_route_that_serves_a_document_keeps_its_own_policy(client) -> No
     page cannot reach the host's cookies. The API policy would stop the page
     loading its own script, and X-Frame-Options DENY would stop the builder
     showing it beside the chat."""
-    from basivo_orch.appbuilder.router import SANDBOX
+    from basivo_orch.appbuilder.serving import SANDBOX
 
     assert SANDBOX.startswith("sandbox ")
     assert "allow-same-origin" not in SANDBOX

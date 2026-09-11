@@ -10,7 +10,9 @@ assertions are about the flags and the parsing.
 
 from __future__ import annotations
 
+import asyncio
 import json
+import os
 import stat
 from pathlib import Path
 
@@ -291,4 +293,33 @@ async def test_a_warmed_home_is_copied_for_data_and_shared_for_packages(monkeypa
     seen = json.loads((tmp_path / "opencode-home.json").read_text())
     assert seen["db"] == "migrated"
     assert seen["config_is_link"] is True
-    assert not home.exists(), "the throwaway home is deleted with the run"
+    gone = not await asyncio.to_thread(os.path.exists, home)
+    assert gone, "the throwaway home is deleted with the run"
+
+
+async def test_an_agent_that_goes_quiet_is_killed_long_before_the_ceiling(monkeypatch, tmp_path):
+    """The failure that hides from every overall timeout: a provider holding
+    the socket open and sending nothing. Streaming agents print an event per
+    token, so silence is the signal, and it is acted on in seconds rather than
+    at a ten minute ceiling somebody is staring at."""
+    monkeypatch.setenv(
+        "BASIVO_OPENCODE_BIN",
+        str(
+            _fake(
+                tmp_path,
+                "opencode",
+                "import time\n"
+                "print(json.dumps({'type': 'step_start',"
+                " 'part': {'type': 'step-start'}}), flush=True)\n"
+                "time.sleep(30)\n",
+            )
+        ),
+    )
+    monkeypatch.setattr(engines, "STALL_SECONDS", 1.0)
+    work = tmp_path / "work"
+    work.mkdir()
+
+    with pytest.raises(NodeError, match="stopped responding: nothing for 1 seconds"):
+        await engines.ENGINES["opencode"].run(
+            cwd=work, prompt="x", system_prompt="", timeout_seconds=60
+        )

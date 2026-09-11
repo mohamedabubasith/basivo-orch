@@ -67,6 +67,10 @@ class AppProject(Base):
     )
     name: Mapped[str] = mapped_column(String(160))
     slug: Mapped[str] = mapped_column(String(160))
+    #: The published address, unique across every workspace: the name plus
+    #: four random characters, so `sunrise-bakery-k3d9` can be read aloud and
+    #: still belongs to exactly one app.
+    public_slug: Mapped[str] = mapped_column(String(80), unique=True, index=True)
 
     #: Which coding agent runs the turns. `auto` reads the workspace's
     #: credentials, exactly as the repair node does.

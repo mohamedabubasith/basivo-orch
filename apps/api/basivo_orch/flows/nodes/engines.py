@@ -37,6 +37,7 @@ import json
 import os
 import shutil
 from collections.abc import Sequence
+from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
@@ -63,6 +64,17 @@ OPENCODE_HOME_TEMPLATE = os.environ.get("BASIVO_OPENCODE_HOME_TEMPLATE", "")
 #: an argument: ARG_MAX is a real limit and a visible command line is a real
 #: leak. Engines that cannot read stdin get the task in a file instead.
 MAX_ARGV_PROMPT = 60_000
+
+#: How long a streaming agent may say nothing before it is presumed gone.
+#:
+#: The agents here print an event for every model token and every tool call,
+#: so a healthy run is never silent for long: the gaps are a model thinking,
+#: seconds at most. Seven silent minutes means the provider is holding a
+#: socket open and sending nothing, which no overall timeout notices until it
+#: is far too late, and which the person watching experiences as a spinner
+#: that never stops. Stalls are killed here, quickly, and reported as what
+#: they are.
+STALL_SECONDS = 120.0
 
 
 @dataclass
@@ -146,12 +158,15 @@ async def _execute(
     timeout_seconds: float,
     secret: str,
     engine: str,
+    stall_seconds: float | None = STALL_SECONDS,
 ) -> tuple[int, str, str]:
     """Run a CLI to completion, or kill it. Returns (code, stdout, stderr).
 
-    The timeout is the node's real defence against an agent that has stopped
-    making progress: these processes hold an open connection to a model
-    provider, and an idle socket is invisible to every other kind of limit.
+    Two clocks. The overall timeout is the node's ceiling for the whole task.
+    The stall clock is the sharper one: it restarts on every byte the agent
+    prints, and a streaming agent that prints nothing for `stall_seconds` has
+    stopped, whatever its socket says. Pass `None` for an agent that only
+    speaks at the end, where silence means nothing.
     """
     process = await asyncio.create_subprocess_exec(
         *argv,
@@ -161,19 +176,66 @@ async def _execute(
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
-    try:
-        out, err = await asyncio.wait_for(process.communicate(stdin), timeout=timeout_seconds)
-    except TimeoutError:
+    assert process.stdout is not None and process.stderr is not None
+
+    async def feed() -> None:
+        if stdin is not None and process.stdin is not None:
+            process.stdin.write(stdin)
+            await process.stdin.drain()
+            process.stdin.close()
+
+    out = bytearray()
+    err = bytearray()
+    deadline = asyncio.get_running_loop().time() + timeout_seconds
+
+    async def pump(stream: asyncio.StreamReader, into: bytearray) -> None:
+        # Chunks, not lines: a line that never ends must still count as life.
+        while chunk := await stream.read(65536):
+            into.extend(chunk)
+
+    async def drain() -> None:
+        await asyncio.gather(pump(process.stdout, out), pump(process.stderr, err))
+
+    async def kill(reason: str) -> None:
         process.kill()
+        with suppress(ProcessLookupError):
+            await process.wait()
+        raise NodeError(reason)
+
+    feeder = asyncio.create_task(feed())
+    reader = asyncio.create_task(drain())
+    try:
+        while not reader.done():
+            remaining = deadline - asyncio.get_running_loop().time()
+            seen = len(out) + len(err)
+            window = remaining if stall_seconds is None else min(remaining, stall_seconds)
+            done, _ = await asyncio.wait({reader}, timeout=max(0.0, window))
+            if done:
+                break
+            # The ceiling first: at the deadline the honest word is "too long",
+            # even if the last thing the agent did was fall silent.
+            if asyncio.get_running_loop().time() >= deadline:
+                await kill(
+                    f"{engine} did not finish within {timeout_seconds:.0f}s. Narrow the task, "
+                    "or raise the node's timeout."
+                )
+            if stall_seconds is not None and len(out) + len(err) == seen:
+                await kill(
+                    f"{engine} stopped responding: nothing for {stall_seconds:.0f} seconds "
+                    "while it was working. The model provider has gone quiet; send the "
+                    "message again."
+                )
+        await reader
+        await feeder
         await process.wait()
-        raise NodeError(
-            f"{engine} did not finish within {timeout_seconds:.0f}s. Narrow the task, or "
-            "raise the node's timeout."
-        ) from None
+    finally:
+        for task in (feeder, reader):
+            if not task.done():
+                task.cancel()
     return (
         process.returncode or 0,
-        claude_code.redact(out.decode(errors="replace"), secret),
-        claude_code.redact(err.decode(errors="replace"), secret),
+        claude_code.redact(bytes(out).decode(errors="replace"), secret),
+        claude_code.redact(bytes(err).decode(errors="replace"), secret),
     )
 
 
@@ -369,6 +431,7 @@ class CodexEngine:
                 timeout_seconds=timeout_seconds,
                 secret=api_key,
                 engine="Codex",
+                stall_seconds=STALL_SECONDS,
             )
             text = ""
             if last_message.exists():
@@ -480,6 +543,7 @@ class OpenCodeEngine:
                 timeout_seconds=timeout_seconds,
                 secret=api_key,
                 engine="OpenCode",
+                stall_seconds=STALL_SECONDS,
             )
 
         events = _jsonl(out)

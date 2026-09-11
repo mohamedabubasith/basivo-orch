@@ -302,33 +302,82 @@ It ships as a file in the repository (`apps/api/basivo_orch/apps/template/`)
 and is versioned with the template, so a change to the rules is a diff someone
 reviews.
 
-## Preview and share links
+## Two addresses: a private preview and a public site
 
 **A different origin from the console, always.** Generated JavaScript served
-from the console's origin would read the console's cookies. Previews and
-published sites are served from `BASIVO_APPS_ORIGIN` (a wildcard subdomain, or
-one host with a path prefix), with no credentials, a strict CSP, and
-`frame-ancestors` limited to the console for drafts and open for published
-versions.
+from the console's origin would read the console's cookies. Built apps are
+served from `BASIVO_APPS_ORIGIN`, and every page carries a `sandbox` policy
+with no `allow-same-origin`, so the document has an opaque origin and cannot
+touch the host's cookies or storage even before that setting is made. Set it
+anyway; the sandbox is the second lock, not the first.
+
+Every version has a **preview address**, private to whoever holds the token:
 
 ```
-<apps origin>/p/<project token>/            the deployed version
-<apps origin>/p/<project token>/v<n>/       one version, permanent
+<apps origin>/p/<project id>/<token>/v3/
 ```
 
-The project token is the derived capability token already used for chat and
-Telegram: an HMAC of the project id under `SECRET_KEY`, compared in constant
-time, a uniform 404 when wrong. Unguessable, revocable by rotating, and nothing
-to administer.
+The token is an HMAC of the project id under `SECRET_KEY`, compared in
+constant time, a uniform 404 when wrong. Nothing to store, and rotating the
+key revokes every preview link at once. The builder's right hand pane loads
+this address for the newest build.
 
-The preview pane is an `iframe` at the version the last turn produced. It
-reloads when a turn finishes, which is what "live" means here. There is no dev
-server, no HMR, no websocket, and no per user port: the delta between that and
-a two second rebuild is not worth a container per session in beta.
+A deployed app has a **public address**, which is what a person shares:
 
-Deploy is a button on a version. The share link is the project URL, it is shown
-with a copy button, and it keeps working when the next version is deployed,
-which is the point.
+```
+https://apps.example.com/sunrise-bakery-k3d9/        on a dedicated domain
+https://api.example.com/s/sunrise-bakery-k3d9/       sharing the API's host
+```
+
+The slug is the app's name plus four characters from an alphabet without
+look-alikes, unique across every workspace, made once when the project is
+created. Deploy points it at a version. **Unpublish** takes it down, and the
+address answers "This app is not live" instead of the last thing that was
+there. The versions all remain; only the pointer goes, and Deploy brings any of
+them back.
+
+### Putting it on a domain
+
+1. Point a DNS name at the API, `apps.example.com` say, beside the API's own
+   `api.example.com`. Same containers, second hostname on the same ingress.
+2. Set `BASIVO_APPS_ORIGIN=https://apps.example.com` on the API.
+3. Nothing else. When the request's host is the apps host and not the API's,
+   `SitesHostMiddleware` rewrites `/<slug>/...` onto the `/s/` route, so
+   published apps sit at the root of the domain and the person never sees a
+   prefix. Preview links keep their `/p/` prefix on every host.
+
+Wildcard subdomains (`sunrise-bakery-k3d9.apps.example.com`) are the next step
+up and need a wildcard certificate; the path form works with one ordinary
+certificate and is where beta stops.
+
+### Taking the code away
+
+Every version's source downloads as a zip from the version rail: one folder,
+`package.json`, `vite.config.ts`, `src/`, and a README that says `npm install`
+and `npm run dev`. It is the whole project as it stood at that version, and it
+runs anywhere Node does. Nothing about basivo is in it.
+
+### Cheap to serve
+
+A hundred people opening one app is three hundred asset requests, and reading
+a gzipped tar out of Postgres and unpacking it for each of them would make the
+database the bottleneck of a static site. So:
+
+- **Once per version per process.** A build is unpacked on first request and
+  kept in a bounded in-memory cache (128MB, least recently served evicted).
+  Versions are immutable, so there is nothing to invalidate; a new deploy is a
+  new artifact id.
+- **ETags on everything.** A returning browser gets a 304 and no body.
+- **Hashed assets are immutable** wherever they are addressed from, so the
+  browser does not ask again for a year. The published `index.html` is the
+  one thing a new deploy replaces, and it is the one thing served `no-cache`.
+- **Vite's production build** minifies, tree shakes and hashes. `motion` and
+  `lucide-react` are in the template because developers ask for them and
+  because both tree shake to what the page actually uses.
+
+The remaining cost is one row read per version per API process. When that is
+too much, the answer is object storage with a CDN in front, not a bigger
+cache here.
 
 ## Console
 

@@ -21,6 +21,7 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from basivo_orch.appbuilder import serving
 from basivo_orch.appbuilder.models import AppProject, AppTurn, AppVersion, TurnStatus
 from basivo_orch.flows.models import Flow, FlowVersion, Run, TriggerKind
 from basivo_orch.flows.service import create_run, enqueue
@@ -69,6 +70,7 @@ async def create_project(
         organization_id=organization_id,
         name=name.strip()[:160],
         slug=slug,
+        public_slug=await _free_public_slug(session, slug),
         engine=engine,
         flow_id=flow.id,
         created_by=user_id,
@@ -127,6 +129,19 @@ async def _free_slug(session: AsyncSession, organization_id: uuid.UUID, wanted: 
         if candidate not in taken:
             return candidate
     return f"{wanted}-{uuid.uuid4().hex[:6]}"
+
+
+async def _free_public_slug(session: AsyncSession, base: str) -> str:
+    """A public address nobody holds. Four random characters make a collision
+    a one in a million event; the loop makes it a non event."""
+    for _ in range(20):
+        candidate = serving.new_public_slug(base)
+        taken = await session.execute(
+            select(AppProject.id).where(AppProject.public_slug == candidate)
+        )
+        if taken.scalar_one_or_none() is None:
+            return candidate
+    return serving.new_public_slug(f"{base}-{uuid.uuid4().hex[:6]}")
 
 
 async def start_turn(
@@ -286,6 +301,17 @@ async def publish(session: AsyncSession, *, project: AppProject, version: AppVer
     deploy into a 500 the browser reports as a CORS failure.
     """
     project.published_version_id = version.id
+    await session.commit()
+    await session.refresh(project)
+
+
+async def unpublish(session: AsyncSession, *, project: AppProject) -> None:
+    """Take the public address down. The versions stay; only the pointer goes.
+
+    A person who shared a link and then changed their mind needs this to work
+    at once, so it is the same single write as Deploy, in reverse.
+    """
+    project.published_version_id = None
     await session.commit()
     await session.refresh(project)
 

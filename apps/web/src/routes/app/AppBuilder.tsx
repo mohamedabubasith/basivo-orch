@@ -30,7 +30,7 @@ import {
 } from "react";
 import { Link, useParams } from "react-router-dom";
 
-import { ApiError, api, isSessionEnded } from "../../lib/api";
+import { API_BASE, ApiError, api, isSessionEnded } from "../../lib/api";
 import { cx } from "../../lib/cx";
 import { useWorkspace } from "../../lib/workspace";
 import { Alert, Button, Pill, Spinner } from "../../components/ui";
@@ -194,9 +194,14 @@ export default function AppBuilder() {
             <Pill>not deployed</Pill>
           )}
           {project.published_version && (
-            <Button variant="ghost" onClick={copyShareLink}>
-              {copied ? "Link copied" : "Copy link"}
-            </Button>
+            <>
+              <Button variant="ghost" onClick={copyShareLink}>
+                {copied ? "Link copied" : "Copy link"}
+              </Button>
+              <Button variant="ghost" onClick={() => act("unpublish")}>
+                Unpublish
+              </Button>
+            </>
           )}
           {latest && (
             <Button
@@ -213,7 +218,11 @@ export default function AppBuilder() {
 
       <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[minmax(20rem,26rem)_1fr]">
         <section className="flex min-h-0 flex-col rounded-2xl border border-ink-700/70 bg-ink-900/50">
-          <Conversation turns={turns} running={running} />
+          <Conversation
+            turns={turns}
+            running={running}
+            onStarter={(text) => setMessage(text)}
+          />
           <form
             onSubmit={send}
             className="border-t border-ink-700/70 p-3"
@@ -277,6 +286,9 @@ export default function AppBuilder() {
             onDeploy={(version) => act(`versions/${version.id}/deploy`)}
             onRestore={(version) => act(`versions/${version.id}/restore`)}
             busy={running}
+            codeUrl={(version) =>
+              `${API_BASE}${base}/versions/${version.id}/source.zip`
+            }
           />
         </section>
       </div>
@@ -284,7 +296,46 @@ export default function AppBuilder() {
   );
 }
 
-function Conversation({ turns, running }: { turns: Turn[]; running: boolean }) {
+/**
+ * What to type when you have never typed one of these before.
+ *
+ * A blank box is the hardest screen in the product for somebody who is not a
+ * developer. These are whole first messages, not categories: click one and it
+ * is in the box, ready to send or edit, and the page it produces is a real
+ * starting point rather than a placeholder.
+ */
+const STARTERS: { label: string; text: string }[] = [
+  {
+    label: "Landing page",
+    text: "A landing page for a small business. Hero with a headline and a call to action button, three feature cards with icons, a testimonials section, pricing with three tiers, and a footer with contact details. Modern, generous spacing, subtle animations on scroll.",
+  },
+  {
+    label: "Portfolio",
+    text: "A personal portfolio for a designer. Name and one line intro at the top, a grid of six project cards that open a detail panel with a description, an about section, and a contact form. Clean and minimal with smooth hover effects.",
+  },
+  {
+    label: "Restaurant menu",
+    text: "A menu page for a restaurant. Sections for starters, mains, desserts and drinks with prices, a filter for vegetarian dishes, opening hours, address, and a reserve a table form. Warm and appetising.",
+  },
+  {
+    label: "Dashboard",
+    text: "An analytics dashboard. A sidebar, a header with a date range picker, four stat tiles with sparklines, a bar chart of weekly revenue built from divs, a table of recent orders with sorting, and a dark mode toggle. Use realistic sample data.",
+  },
+  {
+    label: "Event page",
+    text: "An event page for a one day conference. Countdown to the date, the schedule as a timeline, speaker cards with a short bio, ticket options, venue with directions, and a register form. Bold and energetic.",
+  },
+];
+
+function Conversation({
+  turns,
+  running,
+  onStarter,
+}: {
+  turns: Turn[];
+  running: boolean;
+  onStarter: (text: string) => void;
+}) {
   const end = useRef<HTMLDivElement>(null);
   useEffect(() => {
     end.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -293,10 +344,25 @@ function Conversation({ turns, running }: { turns: Turn[]; running: boolean }) {
   return (
     <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
       {turns.length === 0 && (
-        <p className="text-sm text-ink-400">
-          Say what you want built. Plain words: what the page is for, what it
-          should say, and who it is for.
-        </p>
+        <div className="space-y-3">
+          <p className="text-sm text-ink-400">
+            Say what you want built. Plain words: what the page is for, what it
+            should say, and who it is for. Or start from one of these and change
+            what you like.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {STARTERS.map((starter) => (
+              <button
+                key={starter.label}
+                type="button"
+                onClick={() => onStarter(starter.text)}
+                className="rounded-full border border-ink-600/70 bg-ink-800/50 px-3 py-1.5 text-xs text-ink-200 transition hover:border-brand-400 hover:text-ink-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-400"
+              >
+                {starter.label}
+              </button>
+            ))}
+          </div>
+        </div>
       )}
       {turns.map((turn) => (
         <motion.div
@@ -379,11 +445,14 @@ function VersionRail({
   onDeploy,
   onRestore,
   busy,
+  codeUrl,
 }: {
   versions: Version[];
   onDeploy: (version: Version) => void;
   onRestore: (version: Version) => void;
   busy: boolean;
+  /** Where a version's code downloads from, given its id. */
+  codeUrl: (version: Version) => string;
 }) {
   const shown = useMemo(() => versions.slice(0, 12), [versions]);
   if (shown.length === 0) return null;
@@ -431,6 +500,12 @@ function VersionRail({
           >
             Go back to this
           </button>
+          <a
+            href={codeUrl(version)}
+            className="rounded-lg px-2 py-1 text-xs text-ink-300 transition hover:bg-ink-700/60 hover:text-ink-100"
+          >
+            Download code
+          </a>
         </div>
       ))}
     </div>

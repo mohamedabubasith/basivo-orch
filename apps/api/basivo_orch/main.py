@@ -12,6 +12,10 @@ from fastapi.responses import JSONResponse
 
 from basivo_orch import __version__
 from basivo_orch.admin.router import router as admin_router
+from basivo_orch.appbuilder.router import public as apps_public_router
+from basivo_orch.appbuilder.router import router as apps_router
+from basivo_orch.appbuilder.router import sites as apps_sites_router
+from basivo_orch.appbuilder.serving import SitesHostMiddleware
 from basivo_orch.auth.router import auth_router, install_auth
 from basivo_orch.auth.settings import get_settings as get_auth_settings
 from basivo_orch.billing.router import router as billing_router
@@ -26,8 +30,6 @@ from basivo_orch.flows.router import external_router, hooks_router, management_r
 from basivo_orch.gate import gate_is_active, warn_if_gate_is_inert
 from basivo_orch.logging import configure_logging, get_logger
 from basivo_orch.skills.router import router as skills_router
-from basivo_orch.appbuilder.router import public as apps_public_router
-from basivo_orch.appbuilder.router import router as apps_router
 from basivo_orch.toolbox.router import router as toolbox_router
 
 log = get_logger(__name__)
@@ -122,6 +124,12 @@ def create_app() -> FastAPI:
         max_age=600,
     )
 
+    # On a dedicated apps domain, `https://apps.example.com/<slug>/` is a
+    # built app at the root of the host. This rewrites such requests onto the
+    # `/s/` route so one router serves both shapes; it does nothing at all
+    # when BASIVO_APPS_ORIGIN shares the API's host.
+    app.add_middleware(SitesHostMiddleware)
+
     # Mounted at the root, deliberately not under API_V1_PREFIX.
     #
     # The refresh cookie is scoped to path=/auth so the long-lived credential is
@@ -149,6 +157,7 @@ def create_app() -> FastAPI:
     # Built apps are served outside the versioned API: the link is public and
     # goes to people who will never call anything else here.
     app.include_router(apps_public_router)
+    app.include_router(apps_sites_router)
     app.include_router(billing_webhook_router)
 
     @app.exception_handler(QuotaExceeded)

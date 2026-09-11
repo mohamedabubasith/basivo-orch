@@ -1,9 +1,9 @@
-"""Projects over HTTP, and the public site a link leads to.
+"""Projects over HTTP, and the two addresses a built app answers at.
 
-The interesting half is the public one. It serves code a model wrote to
-whoever holds a link, so what is tested here is the link being unguessable,
-the page being sandboxed, and a version address serving that version rather
-than whatever was deployed last.
+A preview is private and tokened; a published app is public and named. What is
+tested here is that the token is unguessable, the page is sandboxed, a version
+address serves that version whatever is deployed, unpublishing takes the public
+address down at once, and serving a hundred people costs one database read.
 """
 
 from __future__ import annotations
@@ -11,20 +11,21 @@ from __future__ import annotations
 import io
 import tarfile
 import uuid
+import zipfile
 
 import pytest
 from fastapi import HTTPException
 
 from basivo_orch.appbuilder import router as api
-from basivo_orch.appbuilder import service
+from basivo_orch.appbuilder import service, serving
 from basivo_orch.appbuilder.models import AppVersion
 from basivo_orch.flows.models import Artifact
 
 pytestmark = pytest.mark.anyio
 
 
-def _request(path: str):
-    """The little that the serving route reads off a request."""
+def _request(path: str, headers: dict[str, str] | None = None):
+    """The little that the serving routes read off a request."""
     from starlette.requests import Request
 
     return Request(
@@ -34,7 +35,7 @@ def _request(path: str):
             "path": path,
             "raw_path": path.encode(),
             "query_string": b"",
-            "headers": [],
+            "headers": [(k.lower().encode(), v.encode()) for k, v in (headers or {}).items()],
             "scheme": "http",
             "server": ("localhost", 8000),
         }
@@ -52,17 +53,28 @@ def _site(files: dict[str, bytes]) -> bytes:
 
 
 async def _built(session, organization, project, number: int, body: bytes) -> AppVersion:
-    artifact = Artifact(
+    build = Artifact(
         organization_id=organization.id,
         filename="site.tar.gz",
         content_type="application/gzip",
         size_bytes=len(body),
         data=_site({"index.html": body, "assets/app.js": b"console.log(1)"}),
     )
-    session.add(artifact)
+    source = Artifact(
+        organization_id=organization.id,
+        filename="source.tar.gz",
+        content_type="application/gzip",
+        size_bytes=1,
+        data=_site({"package.json": b'{"name": "app"}', "src/App.tsx": b"export default 1"}),
+    )
+    session.add_all([build, source])
     await session.flush()
     version = AppVersion(
-        project_id=project.id, version=number, build_artifact_id=artifact.id, engine="opencode"
+        project_id=project.id,
+        version=number,
+        build_artifact_id=build.id,
+        source_artifact_id=source.id,
+        engine="opencode",
     )
     session.add(version)
     await session.commit()
@@ -70,194 +82,305 @@ async def _built(session, organization, project, number: int, body: bytes) -> Ap
     return version
 
 
-async def test_a_share_link_serves_only_what_was_deployed(session, organization):
+@pytest.fixture(autouse=True)
+def _cold_cache():
+    serving.SITES.clear()
+    yield
+    serving.SITES.clear()
+
+
+# ---------------------------------------------------------------------------
+# The preview address
+# ---------------------------------------------------------------------------
+
+
+async def test_a_version_address_serves_that_version_whatever_is_deployed(session, organization):
     project = await service.create_project(session, organization_id=organization.id, name="Menu")
     one = await _built(session, organization, project, 1, b"<h1>one</h1>")
-    two = await _built(session, organization, project, 2, b"<h1>two</h1>")
-    token = api.project_token(project.id)
+    await _built(session, organization, project, 2, b"<h1>two</h1>")
+    token = serving.project_token(project.id)
 
-    # Nothing is deployed yet, so the share link says so rather than leaking
-    # the newest build.
+    # Nothing deployed: the preview root says so rather than leaking the
+    # newest build, but every version is reachable by number.
     with pytest.raises(HTTPException) as refused:
-        await api.site(_request("/p/x/y/"), project.id, token, "", session=session)
+        await api.preview(_request("/p/x/y/"), project.id, token, "", session=session)
     assert refused.value.status_code == 404
     assert "not been published" in refused.value.detail
 
+    two = await api.preview(_request("/p/x/y/v2/"), project.id, token, "v2/", session=session)
+    assert two.body == b"<h1>two</h1>"
+
     await service.publish(session, project=project, version=one)
-    served = await api.site(_request("/p/x/y/"), project.id, token, "", session=session)
-    assert served.body == b"<h1>one</h1>"
-    assert served.headers["content-type"].startswith("text/html")
-
-    # A version address serves that version whatever is deployed, which is
-    # what makes a preview of work in progress possible.
-    preview = await api.site(_request("/p/x/y/"), project.id, token, "v2/", session=session)
-    assert preview.body == b"<h1>two</h1>"
-
-    await service.publish(session, project=project, version=two)
-    assert (await api.site(_request("/p/x/y/"), project.id, token, "", session=session)).body == b"<h1>two</h1>"
+    root = await api.preview(_request("/p/x/y/"), project.id, token, "", session=session)
+    assert root.body == b"<h1>one</h1>"
 
 
 async def test_the_page_runs_in_a_sandbox_with_no_access_to_its_host(session, organization):
     """Generated code must not be able to read the cookies of whatever host
-    serves it. No allow-same-origin means an opaque origin, which is the
-    thing that makes serving it survivable at all."""
+    serves it. No allow-same-origin means an opaque origin."""
     project = await service.create_project(session, organization_id=organization.id, name="Shop")
-    version = await _built(session, organization, project, 1, b"<h1>hi</h1>")
-    await service.publish(session, project=project, version=version)
+    await _built(session, organization, project, 1, b"<h1>hi</h1>")
 
-    served = await api.site(_request("/p/x/y/"), project.id, api.project_token(project.id), "", session=session)
+    served = await api.preview(
+        _request("/p/x/y/v1/"),
+        project.id,
+        serving.project_token(project.id),
+        "v1/",
+        session=session,
+    )
     policy = served.headers["content-security-policy"]
     assert policy.startswith("sandbox ")
     assert "allow-same-origin" not in policy
+    assert "frame-ancestors" in policy
     assert served.headers["x-content-type-options"] == "nosniff"
+    # The sandbox gives the page an opaque origin, so its own script arrives
+    # as a cross-origin request from "null" and needs this to load at all.
+    assert served.headers["access-control-allow-origin"] == "*"
 
 
 async def test_a_wrong_token_is_a_404_and_not_a_hint(session, organization):
     project = await service.create_project(session, organization_id=organization.id, name="Blog")
-    version = await _built(session, organization, project, 1, b"<h1>hi</h1>")
-    await service.publish(session, project=project, version=version)
+    await _built(session, organization, project, 1, b"<h1>hi</h1>")
 
-    with pytest.raises(HTTPException) as refused:
-        await api.site(_request("/p/x/y/"), project.id, "0" * 32, "", session=session)
-    assert refused.value.status_code == 404
-    assert refused.value.detail == "Not found."
-
-    # And a project nobody has heard of answers exactly the same way.
-    with pytest.raises(HTTPException) as missing:
-        await api.site(_request("/p/x/y/"), uuid.uuid4(), "0" * 32, "", session=session)
-    assert missing.value.status_code == 404
+    for project_id in (project.id, uuid.uuid4()):
+        with pytest.raises(HTTPException) as refused:
+            await api.preview(_request("/p/x/y/v1/"), project_id, "0" * 32, "v1/", session=session)
+        assert refused.value.status_code == 404
+        assert refused.value.detail == "Not found."
 
 
-async def test_an_unknown_path_falls_back_to_the_page_itself(session, organization):
+async def test_an_unknown_path_falls_back_to_the_page_and_assets_are_typed(session, organization):
     """A single page app owns its routes. /about is the page, not a 404."""
     project = await service.create_project(session, organization_id=organization.id, name="Docs")
-    version = await _built(session, organization, project, 1, b"<h1>hi</h1>")
-    await service.publish(session, project=project, version=version)
-    token = api.project_token(project.id)
+    await _built(session, organization, project, 1, b"<h1>hi</h1>")
+    token = serving.project_token(project.id)
 
-    assert (await api.site(_request("/p/x/y/"), project.id, token, "about", session=session)).body == b"<h1>hi</h1>"
-    asset = await api.site(_request("/p/x/y/"), project.id, token, "assets/app.js", session=session)
+    page = await api.preview(
+        _request("/p/x/y/v1/about"), project.id, token, "v1/about", session=session
+    )
+    assert page.body == b"<h1>hi</h1>"
+    asset = await api.preview(
+        _request("/p/x/y/v1/assets/app.js"), project.id, token, "v1/assets/app.js", session=session
+    )
     assert asset.body == b"console.log(1)"
     assert asset.headers["content-type"].startswith("text/javascript")
+    assert "immutable" in asset.headers["cache-control"]
 
-
-async def test_a_path_climbing_out_of_the_archive_is_refused(session, organization):
-    project = await service.create_project(session, organization_id=organization.id, name="Safe")
-    version = await _built(session, organization, project, 1, b"<h1>hi</h1>")
-    await service.publish(session, project=project, version=version)
-
-    served = await api.site(
-        _request("/p/x/y/"),
-        project.id, api.project_token(project.id), "../../etc/passwd", session=session
-    )
-    # It cannot escape, so it falls through to the page like any other unknown
-    # path rather than reading a file.
-    assert served.body == b"<h1>hi</h1>"
-
-
-async def test_one_message_at_a_time(session, organization):
-    project = await service.create_project(session, organization_id=organization.id, name="Queue")
-    await service.start_turn(session, project=project, message="a page")
-
-    with pytest.raises(ValueError, match="still working"):
-        await service.start_turn(session, project=project, message="and a footer")
-
-
-async def test_a_project_owns_a_hidden_flow_with_one_node(session, organization):
-    """The turn queue is the run queue. That is the whole trick, so it is
-    pinned: a project without its flow has nothing to run it."""
-    from basivo_orch.flows.models import Flow, FlowVersion
-
-    project = await service.create_project(session, organization_id=organization.id, name="Cafe")
-    flow = await session.get(Flow, project.flow_id)
-    assert flow is not None and flow.system is True
-
-    version = await session.get(FlowVersion, flow.published_version_id)
-    assert version is not None
-    types = [node["type"] for node in version.graph["nodes"]]
-    assert types == ["trigger.manual", "app.build"]
-    build = next(n for n in version.graph["nodes"] if n["type"] == "app.build")
-    assert build["config"]["project_id"] == str(project.id)
-
-
-async def test_two_projects_with_one_name_get_their_own_addresses(session, organization):
-    first = await service.create_project(session, organization_id=organization.id, name="Portfolio")
-    second = await service.create_project(
-        session, organization_id=organization.id, name="Portfolio"
-    )
-    assert first.slug != second.slug
-    assert api.project_token(first.id) != api.project_token(second.id)
-
-
-async def test_a_project_flow_stays_out_of_the_flows_list(session, organization):
-    """The canvas exists for the engine, not for a person to open."""
-    from basivo_orch.flows.service import list_flows
-
-    await service.create_project(session, organization_id=organization.id, name="Hidden")
-    assert await list_flows(session, organization_id=organization.id) == []
-
-
-def test_a_share_link_points_at_whatever_serves_it(monkeypatch):
-    """Unset, the link must point at this API, which is what answers /p.
-
-    Pointing at the console gives a link that loads the console's own single
-    page app, which is the bug this pins.
-    """
-    monkeypatch.delenv("BASIVO_APPS_ORIGIN", raising=False)
-    assert api.apps_origin() == "http://localhost:8000"
-
-    monkeypatch.setenv("BASIVO_APPS_ORIGIN", "https://apps.basivo.in/")
-    assert api.apps_origin() == "https://apps.basivo.in"
-
-
-async def test_a_sandboxed_page_may_load_its_own_assets(session, organization):
-    """The sandbox gives the page an opaque origin, so its own script arrives
-    as a cross-origin request from "null". Without this header the browser
-    blocks it and the preview is a white box with no error a person can see."""
-    project = await service.create_project(session, organization_id=organization.id, name="Assets")
-    version = await _built(session, organization, project, 1, b"<h1>hi</h1>")
-    await service.publish(session, project=project, version=version)
-
-    served = await api.site(
-        _request("/p/x/y/"),
+    climb = await api.preview(
+        _request("/p/x/y/v1/../../etc/passwd"),
         project.id,
-        api.project_token(project.id),
-        "assets/app.js",
+        token,
+        "v1/../../etc/passwd",
         session=session,
     )
-    assert served.headers["access-control-allow-origin"] == "*"
+    assert climb.body == b"<h1>hi</h1>", "a path out of the archive is just an unknown route"
 
 
 async def test_a_directory_without_its_slash_redirects(session, organization):
-    """`/v1` and `/v1/` differ: relative assets from the first climb out of the
-    version and land on nothing."""
+    """`/v1` and `/v1/` differ: relative assets from the first climb out."""
     project = await service.create_project(session, organization_id=organization.id, name="Slash")
-    version = await _built(session, organization, project, 1, b"<h1>hi</h1>")
-    await service.publish(session, project=project, version=version)
-    token = api.project_token(project.id)
+    await _built(session, organization, project, 1, b"<h1>hi</h1>")
+    token = serving.project_token(project.id)
 
-    redirect = await api.site(
+    redirect = await api.preview(
         _request(f"/p/{project.id}/{token}/v1"), project.id, token, "v1", session=session
     )
     assert redirect.status_code == 308
     assert redirect.headers["location"].endswith("/v1/")
 
-    # And the addresses handed out already carry the slash.
-    assert api.site_url(project, 1).endswith("/v1/")
-    assert api.site_url(project).endswith(f"/{token}/")
+    assert serving.preview_url(project, 1).endswith("/v1/")
+    assert serving.public_url(project).endswith(f"/{project.public_slug}/")
+
+
+# ---------------------------------------------------------------------------
+# The public address
+# ---------------------------------------------------------------------------
+
+
+async def test_a_published_app_has_a_name_you_can_read_aloud(session, organization):
+    project = await service.create_project(
+        session, organization_id=organization.id, name="Sunrise Bakery"
+    )
+    assert project.public_slug.startswith("sunrise-bakery-")
+    suffix = project.public_slug.rsplit("-", 1)[1]
+    assert len(suffix) == 4 and set(suffix) <= set(serving.SUFFIX_ALPHABET)
+
+    other = await service.create_project(
+        session, organization_id=organization.id, name="Sunrise Bakery"
+    )
+    assert other.public_slug != project.public_slug
+
+
+async def test_deploy_makes_it_live_and_unpublish_takes_it_down(session, organization):
+    project = await service.create_project(session, organization_id=organization.id, name="Cafe")
+    version = await _built(session, organization, project, 1, b"<h1>live</h1>")
+    slug = project.public_slug
+
+    with pytest.raises(HTTPException) as before:
+        await api.published(_request(f"/s/{slug}/"), slug, "", session=session)
+    assert before.value.status_code == 404 and before.value.detail == "This app is not live."
+
+    await service.publish(session, project=project, version=version)
+    served = await api.published(_request(f"/s/{slug}/"), slug, "", session=session)
+    assert served.body == b"<h1>live</h1>"
+    # The page itself is what the next deploy replaces, so a browser must ask.
+    assert "no-cache" in served.headers["cache-control"]
+    # Its hashed assets never change under their names.
+    asset = await api.published(
+        _request(f"/s/{slug}/assets/app.js"), slug, "assets/app.js", session=session
+    )
+    assert "immutable" in asset.headers["cache-control"]
+
+    await service.unpublish(session, project=project)
+    with pytest.raises(HTTPException) as after:
+        await api.published(_request(f"/s/{slug}/"), slug, "", session=session)
+    assert after.value.detail == "This app is not live."
+    # The versions are all still there; only the pointer went.
+    assert (await serving.version_by_number(session, project, 1)) is not None
+
+
+async def test_a_dedicated_domain_serves_apps_at_its_root(monkeypatch):
+    """`https://apps.example.com/sunrise-k3d9/` is the address on a business
+    card. The host middleware maps it onto the `/s/` route; on the API's own
+    host it does nothing."""
+    monkeypatch.setenv("BASIVO_APPS_ORIGIN", "https://apps.example.com")
+    seen: list[str] = []
+
+    async def inner(scope, receive, send):
+        seen.append(scope["path"])
+
+    middleware = serving.SitesHostMiddleware(inner)
+    await middleware(
+        {
+            "type": "http",
+            "path": "/sunrise-k3d9/assets/app.js",
+            "headers": [(b"host", b"apps.example.com")],
+        },
+        None,
+        None,
+    )
+    await middleware(
+        {"type": "http", "path": "/p/x/y/v1/", "headers": [(b"host", b"apps.example.com")]},
+        None,
+        None,
+    )
+    await middleware(
+        {"type": "http", "path": "/api/v1/orgs", "headers": [(b"host", b"localhost:8000")]},
+        None,
+        None,
+    )
+    assert seen == ["/s/sunrise-k3d9/assets/app.js", "/p/x/y/v1/", "/api/v1/orgs"]
+
+    class Project:
+        public_slug = "sunrise-k3d9"
+
+    assert serving.public_url(Project()) == "https://apps.example.com/sunrise-k3d9/"  # type: ignore[arg-type]
+
+    monkeypatch.delenv("BASIVO_APPS_ORIGIN")
+    assert serving.public_url(Project()) == "http://localhost:8000/s/sunrise-k3d9/"  # type: ignore[arg-type]
+
+
+# ---------------------------------------------------------------------------
+# Cheap to serve
+# ---------------------------------------------------------------------------
+
+
+async def test_a_hundred_visitors_cost_one_read_and_returning_browsers_get_304(
+    session, organization, monkeypatch
+):
+    project = await service.create_project(session, organization_id=organization.id, name="Busy")
+    version = await _built(session, organization, project, 1, b"<h1>hi</h1>")
+    await service.publish(session, project=project, version=version)
+    slug = project.public_slug
+
+    reads = 0
+    original = serving.unpack_site
+
+    def counting(archive: bytes):
+        nonlocal reads
+        reads += 1
+        return original(archive)
+
+    monkeypatch.setattr(serving, "unpack_site", counting)
+
+    first = await api.published(_request(f"/s/{slug}/"), slug, "", session=session)
+    for _ in range(99):
+        await api.published(
+            _request(f"/s/{slug}/assets/app.js"), slug, "assets/app.js", session=session
+        )
+    assert reads == 1, "the build is unpacked once per process, not once per request"
+
+    again = await api.published(
+        _request(f"/s/{slug}/", {"If-None-Match": first.headers["etag"]}), slug, "", session=session
+    )
+    assert again.status_code == 304
+
+
+def test_the_cache_is_bounded_and_forgets_the_least_recently_served():
+    cache = serving.SiteCache(limit=100)
+    a, b, c = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    cache.put(a, {"index.html": b"x" * 40})
+    cache.put(b, {"index.html": b"y" * 40})
+    assert cache.get(a) is not None  # a is now the most recently served
+    cache.put(c, {"index.html": b"z" * 40})  # over the limit: b goes, a stays
+    assert cache.get(b) is None and cache.get(a) is not None and cache.get(c) is not None
+    cache.put(uuid.uuid4(), {"big": b"w" * 200})  # larger than the whole cache: skipped
+    assert cache.size <= 100
+
+
+# ---------------------------------------------------------------------------
+# The code, and the project's plumbing
+# ---------------------------------------------------------------------------
+
+
+async def test_the_code_downloads_as_a_zip_anyone_can_open(session, organization):
+    project = await service.create_project(
+        session, organization_id=organization.id, name="Take Home"
+    )
+    version = await _built(session, organization, project, 1, b"<h1>hi</h1>")
+    source = await session.get(Artifact, version.source_artifact_id)
+
+    body = api._zip_of(source.data, f"{project.slug}-v1", project.name)
+    with zipfile.ZipFile(io.BytesIO(body)) as bundle:
+        names = bundle.namelist()
+        assert f"{project.slug}-v1/package.json" in names
+        assert f"{project.slug}-v1/src/App.tsx" in names
+        readme = bundle.read(f"{project.slug}-v1/README.md").decode()
+    assert "npm install" in readme and "Take Home" in readme
+
+
+async def test_one_message_at_a_time(session, organization):
+    project = await service.create_project(session, organization_id=organization.id, name="Queue")
+    await service.start_turn(session, project=project, message="a page")
+    with pytest.raises(ValueError, match="still working"):
+        await service.start_turn(session, project=project, message="and a footer")
+
+
+async def test_a_project_owns_a_hidden_flow_with_one_node(session, organization):
+    """The turn queue is the run queue. That is the whole trick, so it is pinned."""
+    from basivo_orch.flows.models import Flow, FlowVersion
+    from basivo_orch.flows.service import list_flows
+
+    project = await service.create_project(session, organization_id=organization.id, name="Cafe")
+    flow = await session.get(Flow, project.flow_id)
+    assert flow is not None and flow.system is True
+    assert await list_flows(session, organization_id=organization.id) == []
+
+    version = await session.get(FlowVersion, flow.published_version_id)
+    assert [node["type"] for node in version.graph["nodes"]] == ["trigger.manual", "app.build"]
+    build = next(n for n in version.graph["nodes"] if n["type"] == "app.build")
+    assert build["config"]["project_id"] == str(project.id)
 
 
 async def test_deploying_answers_with_the_project_it_just_changed(session, organization):
-    """The row's `updated_at` is written by the database, so reading it back
-    after the update must not be a lazy load: in an async request that is a
-    MissingGreenlet, and the browser reports the 500 as a CORS failure, which
-    sends you looking in entirely the wrong place."""
+    """`updated_at` is written by the database, so reading it after the update
+    must not be a lazy load: in an async request that is a MissingGreenlet."""
     project = await service.create_project(session, organization_id=organization.id, name="Deploy")
     version = await _built(session, organization, project, 1, b"<h1>hi</h1>")
 
     await service.publish(session, project=project, version=version)
-    assert project.updated_at is not None
     assert api._project_read(project, [version], False).published_version == 1
-
+    await service.unpublish(session, project=project)
+    assert api._project_read(project, [version], False).published_version is None
     await service.restore(session, project=project, version=version)
     assert project.updated_at is not None
