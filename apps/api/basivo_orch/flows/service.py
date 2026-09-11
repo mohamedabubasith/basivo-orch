@@ -241,7 +241,10 @@ async def list_flows(
 ) -> list[Flow]:
     result = await session.execute(
         select(Flow)
-        .where(Flow.organization_id == organization_id)
+        # A system flow belongs to another part of the product, which owns the
+        # screen for editing it. An App Builder project's flow on this list is
+        # a canvas whose only use is breaking somebody's app.
+        .where(Flow.organization_id == organization_id, Flow.system.is_(False))
         .order_by(Flow.updated_at.desc())
         .limit(limit)
         .offset(offset)

@@ -60,10 +60,10 @@ class FakeAgent:
         return EngineResult(text=self.reply)
 
 
-HEADING = '''export default function App() {
+HEADING = """export default function App() {
   return <h1 className="text-3xl font-semibold">%s</h1>;
 }
-'''
+"""
 
 
 async def test_the_first_message_builds_a_page_and_the_second_corrects_it():

@@ -26,6 +26,8 @@ from basivo_orch.flows.router import external_router, hooks_router, management_r
 from basivo_orch.gate import gate_is_active, warn_if_gate_is_inert
 from basivo_orch.logging import configure_logging, get_logger
 from basivo_orch.skills.router import router as skills_router
+from basivo_orch.appbuilder.router import public as apps_public_router
+from basivo_orch.appbuilder.router import router as apps_router
 from basivo_orch.toolbox.router import router as toolbox_router
 
 log = get_logger(__name__)
@@ -138,11 +140,15 @@ def create_app() -> FastAPI:
     app.include_router(credentials_router, prefix=settings.API_V1_PREFIX)
     app.include_router(skills_router, prefix=settings.API_V1_PREFIX)
     app.include_router(toolbox_router, prefix=settings.API_V1_PREFIX)
+    app.include_router(apps_router, prefix=settings.API_V1_PREFIX)
     app.include_router(billing_router, prefix=settings.API_V1_PREFIX)
     app.include_router(admin_router, prefix=settings.API_V1_PREFIX)
     app.include_router(external_router)
     app.include_router(hooks_router)
     app.include_router(chat_router)
+    # Built apps are served outside the versioned API: the link is public and
+    # goes to people who will never call anything else here.
+    app.include_router(apps_public_router)
     app.include_router(billing_webhook_router)
 
     @app.exception_handler(QuotaExceeded)
