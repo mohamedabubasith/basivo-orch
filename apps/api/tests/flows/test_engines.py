@@ -119,6 +119,9 @@ def test_an_engine_that_is_not_installed_says_so():
 _OPENCODE_OUTPUT = (
     "print(json.dumps({'type': 'step_start', 'part': {'type': 'step-start',"
     " 'sessionID': 'ses_1'}}))\n"
+    # Talking to itself between tools: never what the person is shown.
+    "print(json.dumps({'type': 'text', 'part': {'type': 'text',"
+    " 'text': 'Let me check the types first.'}}))\n"
     "print(json.dumps({'type': 'tool_use', 'part': {'type': 'tool', 'tool': 'write',"
     " 'state': {'status': 'completed'}}}))\n"
     "print(json.dumps({'type': 'text', 'part': {'type': 'text',"

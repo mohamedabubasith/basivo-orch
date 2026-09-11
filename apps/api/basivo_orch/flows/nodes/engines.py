@@ -665,13 +665,20 @@ def _jsonl(output: str) -> list[dict[str, Any]]:
 
 
 def _opencode_text(events: list[dict[str, Any]]) -> str:
-    """OpenCode's reply: the text parts, in order, joined."""
+    """OpenCode's reply: the last thing it said.
+
+    A run emits a text part every time the model speaks between tool calls,
+    and most of those are it talking to itself ("let me check the types").
+    The person asked a question and the answer is the closing message, so
+    that is the one that reaches them.
+    """
     said = [
         str(event.get("part", {}).get("text") or "").strip()
         for event in events
         if event.get("part", {}).get("type") == "text"
     ]
-    return "\n\n".join(part for part in said if part).strip()
+    spoken = [part for part in said if part]
+    return spoken[-1] if spoken else ""
 
 
 def _codex_last_text(events: list[dict[str, Any]]) -> str:

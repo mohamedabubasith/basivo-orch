@@ -314,6 +314,11 @@ async def test_a_hundred_visitors_cost_one_read_and_returning_browsers_get_304(
         _request(f"/s/{slug}/", {"If-None-Match": first.headers["etag"]}), slug, "", session=session
     )
     assert again.status_code == 304
+    # A browser applies a 304's headers to the document it kept. One without
+    # the sandbox policy would be given the API's by the middleware, and its
+    # frame-ancestors 'none' blocks the preview the second time it is shown.
+    assert again.headers["content-security-policy"] == first.headers["content-security-policy"]
+    assert again.headers["access-control-allow-origin"] == "*"
 
 
 def test_the_cache_is_bounded_and_forgets_the_least_recently_served():

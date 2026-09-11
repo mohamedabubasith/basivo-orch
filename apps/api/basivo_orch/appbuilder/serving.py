@@ -276,32 +276,40 @@ async def serve(
     # The artifact never changes, so the pair identifies the bytes exactly.
     tag = hashlib.blake2s(name.encode(), digest_size=4).hexdigest()
     etag = f'"{version.build_artifact_id.hex[:16]}-{tag}"'
-    if request.headers.get("if-none-match") == etag:
-        return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers={"ETag": etag})
 
     suffix = name[name.rfind(".") :].lower() if "." in name else ""
     # Hashed assets never change under their name, so they are immutable
     # wherever they are addressed from. The published page itself is what a
     # new deploy replaces, so it is the one thing a browser must ask about.
     forever = immutable or name.startswith("assets/")
+    headers = {
+        "ETag": etag,
+        "Content-Security-Policy": SANDBOX,
+        "X-Content-Type-Options": "nosniff",
+        "Referrer-Policy": "no-referrer",
+        "Cache-Control": (
+            "public, max-age=31536000, immutable" if forever else "no-cache, must-revalidate"
+        ),
+        "Cross-Origin-Resource-Policy": "cross-origin",
+        # The sandbox gives the document an opaque origin, so the page's own
+        # script and stylesheet arrive here as cross-origin requests from
+        # "null". Without this they are blocked and the page renders as an
+        # empty white box.
+        "Access-Control-Allow-Origin": "*",
+    }
+
+    if request.headers.get("if-none-match") == etag:
+        # The same headers as the full answer, on purpose. A browser applies
+        # the headers of a 304 to the document it kept, and a 304 carrying
+        # only an ETag would be stamped with the API's own policy by the
+        # middleware, whose `frame-ancestors 'none'` then blocks the very
+        # frame the page was loaded in the second time it is shown.
+        return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers=headers)
+
     return Response(
         content=body,
         media_type=CONTENT_TYPES.get(suffix, "application/octet-stream"),
-        headers={
-            "ETag": etag,
-            "Content-Security-Policy": SANDBOX,
-            "X-Content-Type-Options": "nosniff",
-            "Referrer-Policy": "no-referrer",
-            "Cache-Control": (
-                "public, max-age=31536000, immutable" if forever else "no-cache, must-revalidate"
-            ),
-            "Cross-Origin-Resource-Policy": "cross-origin",
-            # The sandbox gives the document an opaque origin, so the page's
-            # own script and stylesheet arrive here as cross-origin requests
-            # from "null". Without this they are blocked and the page renders
-            # as an empty white box.
-            "Access-Control-Allow-Origin": "*",
-        },
+        headers=headers,
     )
 
 
