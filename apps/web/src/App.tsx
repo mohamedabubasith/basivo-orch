@@ -27,6 +27,8 @@ import { Billing } from "./routes/app/Billing";
 import { Builder } from "./routes/app/Builder";
 import { Dashboard } from "./routes/app/Dashboard";
 import { EmailGate } from "./routes/app/EmailGate";
+import AppBuilder from "./routes/app/AppBuilder";
+import Apps from "./routes/app/Apps";
 import { Flows } from "./routes/app/Flows";
 import { RunDetail } from "./routes/app/RunDetail";
 import { Runs } from "./routes/app/Runs";
@@ -121,6 +123,8 @@ function AppRoutes() {
           <Route path="/app" element={<AppShell />}>
             <Route index element={<Dashboard />} />
             <Route path="flows" element={<Flows />} />
+            <Route path="apps" element={<Apps />} />
+            <Route path="apps/:appId" element={<AppBuilder />} />
             <Route path="runs" element={<Runs />} />
             <Route path="runs/:runId" element={<RunDetail />} />
             <Route path="api-keys" element={<ApiKeys />} />
