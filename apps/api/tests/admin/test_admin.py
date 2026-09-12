@@ -300,3 +300,100 @@ def test_an_error_signature_hides_the_parts_that_differ():
     first = stats.signature("Run 4f6c2d3e-0a1b-4c5d-8e9f-0a1b2c3d4e5f failed after 1200 ms")
     second = stats.signature("Run 11111111-2222-3333-4444-555555555555 failed after 900 ms")
     assert first == second
+
+
+# --- adding a plan ---------------------------------------------------------
+
+
+async def test_the_new_limits_are_editable_like_every_other_one(
+    session: AsyncSession, staff: User, organization: Organization
+):
+    """Apps and storage arrived with the App Builder and were the only limits
+    a platform admin could not change without a deploy."""
+    await edit_plan("free", PlanUpdate(apps=5, storage_mb=250), admin=staff, session=session)
+
+    plan = await service.current_plan(session, organization.id)
+    assert (plan.apps, plan.storage_mb) == (5, 250)
+
+    free = next(p for p in await list_plans(staff, session) if p.code == "free")
+    assert set(free.overridden) == {"apps", "storage_mb"}
+
+
+async def test_a_plan_can_be_added_and_its_limits_are_real(
+    session: AsyncSession, staff: User, organization: Organization
+):
+    """A tier that never shipped: created from the screen, sold on the billing
+    page, and enforced like any other."""
+    from basivo_orch.admin.router import PlanCreate, create_plan
+    from basivo_orch.billing.models import Subscription, SubscriptionStatus
+
+    created = await create_plan(
+        PlanCreate(
+            code="studio",
+            name="Studio",
+            tagline="For a studio running client work.",
+            price_inr="₹19,999",
+            price_usd="$229",
+            runs_per_month=50_000,
+            flows=-1,
+            apps=500,
+            seats=25,
+            history_days=180,
+            storage_mb=20_000,
+            features=["50,000 runs a month", "25 members"],
+            product_id="pdt_studio",
+        ),
+        admin=staff,
+        session=session,
+    )
+    assert created.code == "studio" and created.apps == 500
+
+    assert [p.code for p in await list_plans(staff, session)][-1] == "studio"
+
+    session.add(
+        Subscription(
+            organization_id=organization.id,
+            plan="studio",
+            status=SubscriptionStatus.ACTIVE,
+            provider_subscription_id="sub_studio",
+        )
+    )
+    await session.commit()
+
+    plan = await service.current_plan(session, organization.id)
+    assert (plan.code, plan.seats, plan.storage_mb) == ("studio", 25, 20_000)
+
+    # And it goes away again, leaving the workspace on Free rather than broken.
+    assert await reset_plan("studio", staff, session) is None
+    assert (await service.current_plan(session, organization.id)).code == "free"
+
+
+async def test_deleting_a_built_in_plan_resets_it_instead(session: AsyncSession, staff: User):
+    """One route, one act: the stored row goes. Under a shipped plan there is
+    a built-in definition, so the plan survives with its own numbers."""
+    await edit_plan("pro", PlanUpdate(price_inr="₹1"), admin=staff, session=session)
+    back = await reset_plan("pro", staff, session)
+    assert back is not None and back.price_inr == PLANS["pro"].price_inr
+
+
+async def test_two_plans_cannot_share_a_code(session: AsyncSession, staff: User):
+    from fastapi import HTTPException
+
+    from basivo_orch.admin.router import PlanCreate, create_plan
+
+    with pytest.raises(HTTPException) as raised:
+        await create_plan(
+            PlanCreate(
+                code="pro",
+                name="Pro again",
+                runs_per_month=1,
+                flows=1,
+                apps=1,
+                seats=1,
+                history_days=7,
+                storage_mb=1,
+            ),
+            admin=staff,
+            session=session,
+        )
+    assert raised.value.status_code == 409

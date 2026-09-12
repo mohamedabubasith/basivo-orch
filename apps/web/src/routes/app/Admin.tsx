@@ -102,12 +102,17 @@ interface Plan {
   price_usd: string;
   runs_per_month: number | null;
   flows: number | null;
+  apps: number | null;
   seats: number | null;
   history_days: number | null;
+  storage_mb: number | null;
   features: string[];
   overridden: string[];
   product_id: string | null;
 }
+
+/** The three the product ships with. Anything else was added here and can go. */
+const BUILT_IN = ["free", "pro", "team"];
 
 /* --------------------------------------------------------------- pieces --- */
 
@@ -690,8 +695,10 @@ function WorkspacesTab() {
 const NUMERIC_FIELDS = [
   { key: "runs_per_month", label: "Runs per month" },
   { key: "flows", label: "Flows" },
+  { key: "apps", label: "Apps" },
   { key: "seats", label: "Seats" },
   { key: "history_days", label: "History days" },
+  { key: "storage_mb", label: "Storage, MB" },
 ] as const;
 
 type NumericKey = (typeof NUMERIC_FIELDS)[number]["key"];
@@ -699,6 +706,8 @@ type NumericKey = (typeof NUMERIC_FIELDS)[number]["key"];
 type PlanDialog =
   | { kind: "edit"; plan: Plan }
   | { kind: "reset"; plan: Plan }
+  | { kind: "delete"; plan: Plan }
+  | { kind: "new" }
   | null;
 
 function PricingTab() {
@@ -725,11 +734,14 @@ function PricingTab() {
 
   return (
     <div className="space-y-6">
-      <Alert tone="info">
-        The price here is what the console displays. A customer is charged
-        whatever the payment provider's product costs, so changing a price
-        needs a new product id as well.
-      </Alert>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <Alert tone="info">
+          The price here is what the console displays. A customer is charged
+          whatever the payment provider's product costs, so changing a price
+          needs a new product id as well.
+        </Alert>
+        <Button onClick={() => setDialog({ kind: "new" })}>New plan</Button>
+      </div>
 
       <div className="grid gap-4 lg:grid-cols-3">
         {plans.map((plan) => (
@@ -738,6 +750,11 @@ function PricingTab() {
             plan={plan}
             onEdit={() => setDialog({ kind: "edit", plan })}
             onReset={() => setDialog({ kind: "reset", plan })}
+            onDelete={
+              BUILT_IN.includes(plan.code)
+                ? undefined
+                : () => setDialog({ kind: "delete", plan })
+            }
           />
         ))}
       </div>
@@ -747,6 +764,25 @@ function PricingTab() {
           plan={dialog.plan}
           onClose={() => setDialog(null)}
           onSaved={() => {
+            setDialog(null);
+            void load();
+          }}
+        />
+      )}
+      {dialog?.kind === "new" && (
+        <NewPlanDialog
+          onClose={() => setDialog(null)}
+          onCreated={() => {
+            setDialog(null);
+            void load();
+          }}
+        />
+      )}
+      {dialog?.kind === "delete" && (
+        <DeletePlanDialog
+          plan={dialog.plan}
+          onClose={() => setDialog(null)}
+          onDeleted={() => {
             setDialog(null);
             void load();
           }}
@@ -770,10 +806,13 @@ function PlanCard({
   plan,
   onEdit,
   onReset,
+  onDelete,
 }: {
   plan: Plan;
   onEdit: () => void;
   onReset: () => void;
+  /** Absent for the plans that ship with the product: those reset, never go. */
+  onDelete?: () => void;
 }) {
   const rows: { key: string; label: string; value: string }[] = [
     { key: "price_inr", label: "Price in rupees", value: priceText(plan.price_inr) },
@@ -784,11 +823,17 @@ function PlanCard({
       value: limitText(plan.runs_per_month),
     },
     { key: "flows", label: "Flows", value: limitText(plan.flows) },
+    { key: "apps", label: "Apps", value: limitText(plan.apps) },
     { key: "seats", label: "Seats", value: limitText(plan.seats) },
     {
       key: "history_days",
       label: "History days",
       value: limitText(plan.history_days),
+    },
+    {
+      key: "storage_mb",
+      label: "Storage, MB",
+      value: limitText(plan.storage_mb),
     },
   ];
 
@@ -811,9 +856,15 @@ function PlanCard({
           <Button variant="secondary" onClick={onEdit}>
             Edit
           </Button>
-          <Button variant="ghost" onClick={onReset}>
-            Reset to defaults
-          </Button>
+          {onDelete ? (
+            <Button variant="ghost" onClick={onDelete}>
+              Delete
+            </Button>
+          ) : (
+            <Button variant="ghost" onClick={onReset}>
+              Reset to defaults
+            </Button>
+          )}
         </div>
       </div>
 
@@ -874,8 +925,10 @@ function EditPlanDialog({
   const [numbers, setNumbers] = useState<Record<NumericKey, string>>({
     runs_per_month: "",
     flows: "",
+    apps: "",
     seats: "",
     history_days: "",
+    storage_mb: "",
   });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -883,8 +936,10 @@ function EditPlanDialog({
   const current: Record<NumericKey, number | null> = {
     runs_per_month: plan.runs_per_month,
     flows: plan.flows,
+    apps: plan.apps,
     seats: plan.seats,
     history_days: plan.history_days,
+    storage_mb: plan.storage_mb,
   };
 
   async function submit(event: FormEvent) {
@@ -1072,6 +1127,263 @@ const FIELD_LABELS: Record<string, string> = {
   features: "Features",
   product_id: "Product id",
 };
+
+/**
+ * A tier the product never shipped with.
+ *
+ * Every limit is asked for rather than defaulted: a plan created with half
+ * its numbers missing is a plan that sells something nobody decided, and the
+ * person adding it is the one who knows what it should allow.
+ */
+function NewPlanDialog({
+  onClose,
+  onCreated,
+}: {
+  onClose: () => void;
+  onCreated: () => void;
+}) {
+  const formId = useId();
+  const [code, setCode] = useState("");
+  const [name, setName] = useState("");
+  const [tagline, setTagline] = useState("");
+  const [priceInr, setPriceInr] = useState("");
+  const [priceUsd, setPriceUsd] = useState("");
+  const [productId, setProductId] = useState("");
+  const [features, setFeatures] = useState("");
+  const [numbers, setNumbers] = useState<Record<NumericKey, string>>({
+    runs_per_month: "",
+    flows: "",
+    apps: "",
+    seats: "",
+    history_days: "",
+    storage_mb: "",
+  });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    const slug = code.trim().toLowerCase();
+    if (!/^[a-z][a-z0-9-]{1,31}$/.test(slug)) {
+      setError(
+        "A code is lower case letters, digits and dashes, starting with a letter.",
+      );
+      return;
+    }
+    if (!name.trim()) {
+      setError("Give the plan a name.");
+      return;
+    }
+
+    const body: Record<string, unknown> = {
+      code: slug,
+      name: name.trim(),
+      tagline: tagline.trim(),
+      price_inr: priceInr.trim(),
+      price_usd: priceUsd.trim(),
+      product_id: productId.trim(),
+      features: features
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean),
+    };
+    for (const field of NUMERIC_FIELDS) {
+      const parsed = Number(numbers[field.key].trim());
+      if (!numbers[field.key].trim() || !Number.isInteger(parsed)) {
+        setError(`${field.label} must be a whole number, or -1 for unlimited.`);
+        return;
+      }
+      body[field.key] = parsed;
+    }
+
+    setBusy(true);
+    setError(null);
+    try {
+      await api.post<Plan>("/api/v1/admin/plans", body);
+      onCreated();
+    } catch (err) {
+      setError(failureText(err, "Could not create this plan."));
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal
+      size="lg"
+      title="New plan"
+      description="It appears on the billing page as soon as it is saved."
+      onClose={() => {
+        if (!busy) onClose();
+      }}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose} disabled={busy}>
+            Cancel
+          </Button>
+          <Button type="submit" form={formId} loading={busy}>
+            Create plan
+          </Button>
+        </>
+      }
+    >
+      <form id={formId} onSubmit={submit} className="space-y-5" noValidate>
+        {error && <Alert>{error}</Alert>}
+        <Alert tone="info">
+          A customer can only buy this once its product exists at the payment
+          provider and its id is below. Without one the plan is shown but the
+          upgrade button has nowhere to send anybody.
+        </Alert>
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field
+            label="Code"
+            value={code}
+            autoFocus
+            hint="Lower case, no spaces. It never changes and never shows."
+            onChange={(event) => setCode(event.target.value)}
+          />
+          <Field
+            label="Name"
+            value={name}
+            hint="What a customer reads, such as Studio."
+            onChange={(event) => setName(event.target.value)}
+          />
+        </div>
+
+        <Field
+          label="Tagline"
+          value={tagline}
+          hint="One line, shown under the plan name."
+          onChange={(event) => setTagline(event.target.value)}
+        />
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field
+            label="Price in rupees"
+            value={priceInr}
+            hint="Written the way a customer should read it, such as ₹19,999."
+            onChange={(event) => setPriceInr(event.target.value)}
+          />
+          <Field
+            label="Price in dollars"
+            value={priceUsd}
+            hint="Such as $229."
+            onChange={(event) => setPriceUsd(event.target.value)}
+          />
+        </div>
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          {NUMERIC_FIELDS.map((field) => (
+            <Field
+              key={field.key}
+              label={field.label}
+              inputMode="numeric"
+              placeholder="-1 for unlimited"
+              value={numbers[field.key]}
+              onChange={(event) =>
+                setNumbers((was) => ({ ...was, [field.key]: event.target.value }))
+              }
+            />
+          ))}
+        </div>
+
+        <Field
+          label="Product id"
+          value={productId}
+          hint="From the payment provider, such as pdt_studio."
+          onChange={(event) => setProductId(event.target.value)}
+        />
+
+        <div className="space-y-1.5">
+          <label
+            htmlFor={`${formId}-new-features`}
+            className="block text-sm font-medium text-ink-200"
+          >
+            Features
+          </label>
+          {/* A real textarea: `Field` is an input, and an input silently turns
+              the lines somebody typed into one long line. */}
+          <textarea
+            id={`${formId}-new-features`}
+            value={features}
+            spellCheck={false}
+            rows={5}
+            onChange={(event) => setFeatures(event.target.value)}
+            className={TEXTAREA}
+          />
+          <p className="text-sm text-ink-400">
+            One per line, in the order they should be read.
+          </p>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+/** Removing a plan that was added here. The shipped three reset instead. */
+function DeletePlanDialog({
+  plan,
+  onClose,
+  onDeleted,
+}: {
+  plan: Plan;
+  onClose: () => void;
+  onDeleted: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function remove() {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.del(`/api/v1/admin/plans/${plan.code}`);
+      onDeleted();
+    } catch (err) {
+      setError(failureText(err, "Could not delete this plan."));
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal
+      size="sm"
+      title={`Delete ${plan.name}`}
+      description="The plan stops being offered. A workspace on it falls back to Free and keeps everything it has."
+      onClose={() => {
+        if (!busy) onClose();
+      }}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose} disabled={busy}>
+            Cancel
+          </Button>
+          <Button
+            onClick={() => void remove()}
+            loading={busy}
+            className="hover:brightness-110"
+            style={{
+              background: "var(--status-bad)",
+              color: "var(--color-ink-950)",
+            }}
+          >
+            Delete plan
+          </Button>
+        </>
+      }
+    >
+      {error ? (
+        <Alert>{error}</Alert>
+      ) : (
+        <p className="text-sm text-ink-300">
+          Anyone subscribed to {plan.name} keeps their flows, apps and files.
+          Their limits become the Free ones at the end of the period they paid
+          for.
+        </p>
+      )}
+    </Modal>
+  );
+}
 
 function ResetPlanDialog({
   plan,

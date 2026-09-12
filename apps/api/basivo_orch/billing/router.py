@@ -23,8 +23,7 @@ from basivo_orch.auth.settings import get_settings as get_auth_settings
 from basivo_orch.billing import service
 from basivo_orch.billing.events import apply_event
 from basivo_orch.billing.models import BillingEvent
-from basivo_orch.billing.plans import PAID_PLANS, PLAN_ORDER, PLANS
-from basivo_orch.billing.pricing import catalogue, product_id
+from basivo_orch.billing.pricing import catalogue, order, product_id
 from basivo_orch.billing.provider import (
     ProviderError,
     SignatureError,
@@ -69,6 +68,7 @@ async def read_billing(
     """The current plan, what has been used against it, and what else is sold."""
     state = await service.entitlement(session, context.organization_id)
     plan = state.plan
+    sold = await catalogue(session)
     return BillingOverview(
         mode=state.mode,
         plan=PlanRead.of(plan),
@@ -90,11 +90,9 @@ async def read_billing(
         grace_until=state.grace_until,
         cancel_at_period_end=state.cancel_at_period_end,
         can_manage=state.has_provider_customer,
-        plans=[
-            PlanRead.of(plan)
-            for code, plan in (await catalogue(session)).items()
-            if code in PLAN_ORDER
-        ],
+        # Every plan on sale, the ones we ship and any a platform admin added,
+        # in the order the admin screen shows them.
+        plans=[PlanRead.of(sold[code]) for code in order(sold)],
     )
 
 
@@ -111,8 +109,12 @@ async def start_checkout(
     _live_or_refuse()
 
     plan = payload.plan.strip().lower()
-    if plan not in PAID_PLANS:
-        sellable = ", ".join(PLANS[code].name for code in PAID_PLANS)
+    # Anything in the catalogue that is not Free, so a plan a platform admin
+    # added can be bought without another deploy. The product check below is
+    # what actually decides whether it is ready to sell.
+    sold = await catalogue(session)
+    if plan not in sold or plan == "free":
+        sellable = ", ".join(sold[code].name for code in order(sold) if code != "free")
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             f"There is no paid plan called {payload.plan!r}. Choose one of: {sellable}.",
@@ -131,7 +133,7 @@ async def start_checkout(
     if current.plan.code == plan and current.status == "active":
         raise HTTPException(
             status.HTTP_409_CONFLICT,
-            f"This workspace is already on the {PLANS[plan].name} plan.",
+            f"This workspace is already on the {sold[plan].name} plan.",
         )
 
     console = str(get_auth_settings().frontend_base_url).rstrip("/")

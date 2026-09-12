@@ -117,7 +117,9 @@ class PlanOverride(Base):
 
     __tablename__ = "plan_override"
 
-    #: The plan code from `billing.plans`, such as "pro".
+    #: The plan code, such as "pro". A code that is not one of the built-in
+    #: plans makes a new plan rather than editing one: the row is then the
+    #: whole definition, which is how a tier can be added without a deploy.
     code: Mapped[str] = mapped_column(String(32), primary_key=True)
 
     name: Mapped[str | None] = mapped_column(String(64), default=None)
@@ -127,8 +129,10 @@ class PlanOverride(Base):
 
     runs_per_month: Mapped[int | None] = mapped_column(default=None)
     flows: Mapped[int | None] = mapped_column(default=None)
+    apps: Mapped[int | None] = mapped_column(default=None)
     seats: Mapped[int | None] = mapped_column(default=None)
     history_days: Mapped[int | None] = mapped_column(default=None)
+    storage_mb: Mapped[int | None] = mapped_column(default=None)
 
     features: Mapped[list[str] | None] = mapped_column(JSONColumn, default=None)
     #: The provider product to send a customer to. Overrides the environment.
