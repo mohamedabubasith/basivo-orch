@@ -37,6 +37,9 @@ export interface AppProject {
   preview_url: string;
   share_url: string;
   busy: boolean;
+  /** Empty means the included agent builds it. Read on one app, not the list. */
+  credential_id?: string;
+  model?: string;
 }
 
 export default function Apps() {

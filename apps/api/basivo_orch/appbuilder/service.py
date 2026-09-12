@@ -14,6 +14,7 @@ hundred lines rather than a subsystem.
 
 from __future__ import annotations
 
+import copy
 import re
 import uuid
 from typing import Any
@@ -112,6 +113,63 @@ async def create_project(
     await session.commit()
     await session.refresh(project)
     return project
+
+
+async def build_config(session: AsyncSession, project: AppProject) -> dict[str, Any]:
+    """What the build node is set to: engine, credential, provider, model."""
+    flow = await session.get(Flow, project.flow_id)
+    version = await session.get(FlowVersion, flow.published_version_id) if flow else None
+    if version is None:
+        return {}
+    for node in version.graph.get("nodes", []):
+        if node.get("id") == BUILD_ID:
+            return dict(node.get("config") or {})
+    return {}
+
+
+async def set_model(
+    session: AsyncSession,
+    *,
+    project: AppProject,
+    engine: str,
+    credential_id: str,
+    provider: str,
+    model: str,
+    user_id: uuid.UUID | None = None,
+) -> None:
+    """Point the project at a different agent, or at somebody's own key.
+
+    A new flow version rather than an edit: the graph a run executed is the
+    record of how that build was made, and rewriting it in place would make
+    every past turn claim it used whatever is configured today.
+    """
+    flow = await session.get(Flow, project.flow_id)
+    current = await session.get(FlowVersion, flow.published_version_id) if flow else None
+    if flow is None or current is None:
+        raise LookupError("this app has no flow")
+
+    graph = copy.deepcopy(current.graph)
+    for node in graph.get("nodes", []):
+        if node.get("id") == BUILD_ID:
+            node["config"] = {
+                **(node.get("config") or {}),
+                "engine": engine,
+                "credential_id": credential_id,
+                "provider": provider,
+                "model": model,
+            }
+    version = FlowVersion(
+        flow_id=flow.id,
+        version=current.version + 1,
+        graph=graph,
+        created_by=user_id,
+    )
+    session.add(version)
+    await session.flush()
+    flow.published_version_id = version.id
+    project.engine = engine
+    await session.commit()
+    await session.refresh(project)
 
 
 async def _free_slug(session: AsyncSession, organization_id: uuid.UUID, wanted: str) -> str:

@@ -386,9 +386,7 @@ async def test_the_download_carries_the_pictures_that_are_not_in_the_tree(sessio
         assert f"{project.slug}-v1/public/uploads/front.png" in bundle.namelist()
 
 
-async def test_the_code_tab_reads_a_version_and_lists_what_it_cannot_show(
-    session, organization
-):
+async def test_the_code_tab_reads_a_version_and_lists_what_it_cannot_show(session, organization):
     """Text arrives with the listing, because a tree that needs a request per
     click feels broken. A photograph is listed with its size and no text."""
     project = await service.create_project(session, organization_id=organization.id, name="Code")
@@ -468,3 +466,53 @@ async def test_a_turn_whose_run_died_is_closed_so_the_next_message_can_go(sessio
 
     # And the next message goes through.
     await service.start_turn(session, project=project, message="try again, smaller")
+
+
+async def test_an_app_can_be_pointed_at_your_own_credential(session, organization):
+    """The failure message tells people to use their own key when the included
+    agent will not answer, so there has to be a way to do it after the app
+    exists. Past turns keep the graph they ran: the change is a new version."""
+    project = await service.create_project(session, organization_id=organization.id, name="Menu")
+    credential = str(uuid.uuid4())
+
+    read = await api.set_model(
+        project.id,
+        api.ModelWrite(
+            engine="claude_code",
+            credential_id=credential,
+            provider="anthropic",
+            model="claude-sonnet-5",
+        ),
+        context=_context(organization),
+        session=session,
+    )
+
+    assert read.credential_id == credential
+    assert read.engine == "claude_code"
+    config = await service.build_config(session, project)
+    assert config["credential_id"] == credential
+    assert config["model"] == "claude-sonnet-5"
+    # And the node still knows which project it builds.
+    assert config["project_id"] == str(project.id)
+
+
+async def test_the_model_cannot_be_changed_under_a_running_message(
+    session, organization, monkeypatch
+):
+    """Half a turn on one agent and half on another is not a build anybody can
+    reason about, so the answer while it is working is wait."""
+    project = await service.create_project(session, organization_id=organization.id, name="Menu")
+    monkeypatch.setattr(service, "busy", lambda *_args, **_kwargs: _true())
+
+    with pytest.raises(HTTPException) as caught:
+        await api.set_model(
+            project.id,
+            api.ModelWrite(engine="opencode"),
+            context=_context(organization),
+            session=session,
+        )
+    assert caught.value.status_code == 409
+
+
+async def _true() -> bool:
+    return True

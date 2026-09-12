@@ -38,6 +38,7 @@ import { Formatted } from "../../components/chat/markdown";
 import { CodeBrowser, type SourceFile } from "./code";
 import { RelativeTime } from "./bits";
 import type { AppProject } from "./Apps";
+import type { Credential } from "./Credentials";
 
 interface Turn {
   id: string;
@@ -126,6 +127,7 @@ function AppBuilderInner() {
   const [tab, setTab] = useState<"preview" | "code">("preview");
   const [files, setFiles] = useState<SourceFile[] | null>(null);
   const [history, setHistory] = useState(false);
+  const [agent, setAgent] = useState(false);
   const picker = useRef<HTMLInputElement>(null);
 
   const base = orgId ? `/api/v1/orgs/${orgId}/apps/${appId}` : "";
@@ -283,6 +285,28 @@ function AppBuilderInner() {
     }
   }
 
+  async function pickAgent(credentialId: string, provider: string) {
+    if (!base) return;
+    try {
+      // The engine stays automatic: a credential picks the agent built for
+      // it, and no credential means the included one. One decision, not two.
+      setProject(
+        await api.patch<AppProject>(`${base}/model`, {
+          engine: "auto",
+          credential_id: credentialId,
+          provider: provider || "anthropic",
+          model: "",
+        }),
+      );
+      setAgent(false);
+      setError("");
+    } catch (err) {
+      setError(
+        err instanceof ApiError ? err.message : "That did not go through.",
+      );
+    }
+  }
+
   async function upload(files: FileList | null) {
     if (!base || !files || files.length === 0) return;
     setUploading(true);
@@ -358,6 +382,9 @@ function AppBuilderInner() {
             {latest ? `v${latest.version}` : "No versions"}
             <span className="ml-1.5 text-ink-500">history</span>
           </Button>
+          <Button variant="ghost" onClick={() => setAgent((open) => !open)}>
+            {project.credential_id ? "Your key" : "Agent"}
+          </Button>
           {project.published_version && (
             <>
               <Button variant="ghost" onClick={copyShareLink}>
@@ -377,6 +404,15 @@ function AppBuilderInner() {
             >
               {latest.published ? "Deployed" : `Deploy v${latest.version}`}
             </Button>
+          )}
+          {agent && (
+            <AgentMenu
+              orgId={orgId ?? ""}
+              current={project.credential_id ?? ""}
+              busy={running}
+              onClose={() => setAgent(false)}
+              onPick={(credential, provider) => void pickAgent(credential, provider)}
+            />
           )}
           {history && (
             <VersionMenu
@@ -850,6 +886,107 @@ function Icon({ path }: { path: string }) {
  * back to a version, or taking the code away. The preview is the point of
  * this page, so the list moved behind the version number.
  */
+/**
+ * Which agent builds this app.
+ *
+ * One list, because there is one decision: build on what we include, or build
+ * on a key you saved. Which CLI that implies is ours to work out, and saying
+ * it here would only ask somebody to care about three product names to get a
+ * page built.
+ */
+function AgentMenu({
+  orgId,
+  current,
+  busy,
+  onClose,
+  onPick,
+}: {
+  orgId: string;
+  current: string;
+  busy: boolean;
+  onClose: () => void;
+  onPick: (credentialId: string, provider: string) => void;
+}) {
+  const [credentials, setCredentials] = useState<Credential[] | null>(null);
+
+  useEffect(() => {
+    if (!orgId) return;
+    void (async () => {
+      try {
+        setCredentials(
+          await api.get<Credential[]>(`/api/v1/orgs/${orgId}/credentials`),
+        );
+      } catch {
+        setCredentials([]);
+      }
+    })();
+  }, [orgId]);
+
+  const usable = (credentials ?? []).filter((credential) =>
+    ["anthropic", "openai"].includes(credential.provider),
+  );
+
+  return (
+    <>
+      <button
+        type="button"
+        aria-label="Close the agent list"
+        onClick={onClose}
+        className="fixed inset-0 z-30 cursor-default"
+      />
+      <div className="absolute top-full right-0 z-40 mt-2 w-[22rem] overflow-hidden rounded-2xl border border-ink-700/70 bg-ink-900 shadow-2xl">
+        <div className="border-b border-ink-700/70 px-3.5 py-2.5">
+          <p className="text-sm font-medium text-ink-100">Build this app with</p>
+        </div>
+        <ul className="max-h-[22rem] overflow-y-auto p-1.5">
+          <li>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => onPick("", "")}
+              className={cx(
+                "w-full rounded-xl px-2.5 py-2 text-left transition disabled:opacity-40",
+                current === "" ? "bg-ink-800" : "hover:bg-ink-800/60",
+              )}
+            >
+              <p className="text-sm text-ink-100">What we include</p>
+              <p className="text-xs text-ink-500">
+                No key needed. Busy at times, and then a build can come back
+                with nothing.
+              </p>
+            </button>
+          </li>
+          {usable.map((credential) => (
+            <li key={credential.id}>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => onPick(credential.id, credential.provider)}
+                className={cx(
+                  "w-full rounded-xl px-2.5 py-2 text-left transition disabled:opacity-40",
+                  current === credential.id ? "bg-ink-800" : "hover:bg-ink-800/60",
+                )}
+              >
+                <p className="text-sm text-ink-100">{credential.name}</p>
+                <p className="text-xs text-ink-500">
+                  Your own key. You pay the provider for what it builds.
+                </p>
+              </button>
+            </li>
+          ))}
+        </ul>
+        {credentials !== null && usable.length === 0 && (
+          <p className="border-t border-ink-700/70 px-3.5 py-2.5 text-xs text-ink-500">
+            Save an Anthropic or OpenAI key under Credentials to build on your
+            own account.
+          </p>
+        )}
+      </div>
+    </>
+  );
+}
+
+
 function VersionMenu({
   versions,
   published,

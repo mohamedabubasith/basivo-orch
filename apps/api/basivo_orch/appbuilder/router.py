@@ -79,6 +79,17 @@ class ProjectWrite(BaseModel):
     model: str = Field(default="", max_length=160)
 
 
+class ModelWrite(BaseModel):
+    """Which agent builds this app, and on whose credential."""
+
+    model_config = {"extra": "forbid"}
+
+    engine: str = Field(default="auto", max_length=32)
+    credential_id: str = Field(default="", max_length=64)
+    provider: str = Field(default="anthropic", max_length=48)
+    model: str = Field(default="", max_length=160)
+
+
 class Message(BaseModel):
     model_config = {"extra": "forbid"}
 
@@ -120,9 +131,17 @@ class ProjectRead(BaseModel):
     #: What a person shares. Answers only while a version is deployed.
     share_url: str
     busy: bool
+    #: Empty means the included agent builds it.
+    credential_id: str = ""
+    model: str = ""
 
 
-def _project_read(project: AppProject, versions: list[AppVersion], busy: bool) -> ProjectRead:
+def _project_read(
+    project: AppProject,
+    versions: list[AppVersion],
+    busy: bool,
+    config: dict[str, Any] | None = None,
+) -> ProjectRead:
     latest = versions[-1] if versions else None
     published = next((v for v in versions if v.id == project.published_version_id), None)
     return ProjectRead(
@@ -137,6 +156,8 @@ def _project_read(project: AppProject, versions: list[AppVersion], busy: bool) -
         preview_url=preview_url(project, latest.version if latest else None),
         share_url=public_url(project),
         busy=busy,
+        credential_id=str((config or {}).get("credential_id") or ""),
+        model=str((config or {}).get("model") or ""),
     )
 
 
@@ -198,6 +219,38 @@ async def create_project(
     return _project_read(project, [], False)
 
 
+@router.patch("/{project_id}/model", response_model=ProjectRead)
+async def set_model(
+    project_id: uuid.UUID,
+    body: ModelWrite,
+    context: OrgContext = Depends(require(Permission.FLOW_UPDATE)),
+    session: AsyncSession = Depends(get_async_session),
+) -> ProjectRead:
+    project = await _load(session, context.organization_id, project_id)
+    if await _busy(session, project):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, "Wait for the current message to finish, then change this."
+        )
+    try:
+        await service.set_model(
+            session,
+            project=project,
+            engine=body.engine,
+            credential_id=body.credential_id,
+            provider=body.provider,
+            model=body.model,
+            user_id=context.user.id,
+        )
+    except LookupError:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "That app does not exist.") from None
+    return _project_read(
+        project,
+        await _versions(session, project),
+        False,
+        await service.build_config(session, project),
+    )
+
+
 @router.get("/{project_id}", response_model=ProjectRead)
 async def read_project(
     project_id: uuid.UUID,
@@ -205,7 +258,12 @@ async def read_project(
     session: AsyncSession = Depends(get_async_session),
 ) -> ProjectRead:
     project = await _load(session, context.organization_id, project_id)
-    return _project_read(project, await _versions(session, project), await _busy(session, project))
+    return _project_read(
+        project,
+        await _versions(session, project),
+        await _busy(session, project),
+        await service.build_config(session, project),
+    )
 
 
 @router.get("/{project_id}/turns", response_model=list[TurnRead])
