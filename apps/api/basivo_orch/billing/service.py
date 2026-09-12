@@ -25,7 +25,7 @@ from basivo_orch.billing.models import Subscription, SubscriptionStatus
 from basivo_orch.billing.plans import PLANS, UNLIMITED, Plan, plan_or_free
 from basivo_orch.billing.pricing import catalogue
 from basivo_orch.config import get_settings
-from basivo_orch.flows.models import Flow, Run
+from basivo_orch.flows.models import Artifact, Flow, Run
 
 
 class QuotaExceeded(Exception):
@@ -151,6 +151,42 @@ async def flow_count(session: AsyncSession, organization_id: uuid.UUID) -> int:
     return int(result.scalar_one())
 
 
+async def app_count(session: AsyncSession, organization_id: uuid.UUID) -> int:
+    from basivo_orch.appbuilder.models import AppProject
+
+    result = await session.execute(
+        select(func.count())
+        .select_from(AppProject)
+        .where(AppProject.organization_id == organization_id)
+    )
+    return int(result.scalar_one())
+
+
+async def storage_bytes(session: AsyncSession, organization_id: uuid.UUID) -> int:
+    """Every byte this workspace has stored.
+
+    Both tables that hold file bytes: artifacts, which is every rendered file
+    and every app build, and the images people upload to an app. Counted
+    rather than tracked in a counter row for the same reason runs are: a
+    counter that drifts is worse than a query that is a little slower, and
+    this one runs on an upload, not on a hot path.
+    """
+    from basivo_orch.appbuilder.models import AppAsset, AppProject
+
+    files = await session.execute(
+        select(func.coalesce(func.sum(Artifact.size_bytes), 0)).where(
+            Artifact.organization_id == organization_id
+        )
+    )
+    uploads = await session.execute(
+        select(func.coalesce(func.sum(AppAsset.size_bytes), 0))
+        .select_from(AppAsset)
+        .join(AppProject, AppProject.id == AppAsset.project_id)
+        .where(AppProject.organization_id == organization_id)
+    )
+    return int(files.scalar_one()) + int(uploads.scalar_one())
+
+
 async def seat_count(session: AsyncSession, organization_id: uuid.UUID) -> int:
     result = await session.execute(
         select(func.count())
@@ -207,6 +243,27 @@ async def check_flow_quota(session: AsyncSession, organization_id: uuid.UUID) ->
     )
 
 
+async def check_app_quota(session: AsyncSession, organization_id: uuid.UUID) -> None:
+    """Raise `QuotaExceeded` when a workspace has all the apps its plan allows.
+
+    Apps are capped separately from flows because they cost differently: each
+    message runs a coding agent and a compiler, and each build is kept.
+    """
+    plan = await current_plan(session, organization_id)
+    if plan.apps is None:
+        return
+    used = await app_count(session, organization_id)
+    if used < plan.apps:
+        return
+    apps = "app" if plan.apps == 1 else "apps"
+    raise QuotaExceeded(
+        f"The {plan.name} plan keeps {plan.apps} {apps} and this workspace has {used}. "
+        "Upgrade for more, or delete one you have finished with.",
+        plan=plan.code,
+        limit_name="apps",
+    )
+
+
 async def check_seat_quota(session: AsyncSession, organization_id: uuid.UUID) -> None:
     plan = await current_plan(session, organization_id)
     if plan.seats is None:
@@ -220,6 +277,31 @@ async def check_seat_quota(session: AsyncSession, organization_id: uuid.UUID) ->
         "Upgrade to add more people.",
         plan=plan.code,
         limit_name="seats",
+    )
+
+
+async def check_storage_quota(
+    session: AsyncSession, organization_id: uuid.UUID, *, adding: int = 0
+) -> None:
+    """Raise `QuotaExceeded` when storing `adding` more bytes would go over.
+
+    Called wherever bytes are written: the node that saves an artifact and the
+    route that accepts an upload. Disk is shared between every workspace on the
+    deployment, so this is the one limit that is enforced before the write
+    rather than counted after it.
+    """
+    plan = await current_plan(session, organization_id)
+    if plan.storage_mb is None:
+        return
+    limit = plan.storage_mb * 1024 * 1024
+    used = await storage_bytes(session, organization_id)
+    if used + adding <= limit:
+        return
+    raise QuotaExceeded(
+        f"This workspace has used {used / (1024 * 1024):.0f} MB of the {plan.storage_mb} MB "
+        f"on the {plan.name} plan. Delete an app or an old file, or upgrade for more room.",
+        plan=plan.code,
+        limit_name="storage",
     )
 
 
@@ -250,7 +332,9 @@ class Entitlement:
     status: str
     runs_used: int
     flows_used: int
+    apps_used: int
     seats_used: int
+    storage_used_bytes: int
     current_period_end: datetime | None
     grace_until: datetime | None
     cancel_at_period_end: bool
@@ -272,7 +356,9 @@ async def entitlement(
         status=subscription.status if subscription else SubscriptionStatus.ACTIVE,
         runs_used=await runs_this_month(session, organization_id, now=now),
         flows_used=await flow_count(session, organization_id),
+        apps_used=await app_count(session, organization_id),
         seats_used=await seat_count(session, organization_id),
+        storage_used_bytes=await storage_bytes(session, organization_id),
         current_period_end=_aware(subscription.current_period_end) if subscription else None,
         grace_until=_aware(subscription.grace_until) if subscription else None,
         cancel_at_period_end=bool(subscription.cancel_at_period_end) if subscription else False,

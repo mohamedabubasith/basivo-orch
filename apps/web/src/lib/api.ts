@@ -225,6 +225,8 @@ export interface RequestOptions {
   body?: unknown;
   /** Sent as application/x-www-form-urlencoded (the login endpoint wants this). */
   form?: Record<string, string>;
+  /** Sent as multipart under the field name `file`. */
+  file?: File;
   /** Skip the refresh-and-retry dance. */
   noRetry?: boolean;
   /** Return the body as text instead of parsing it as JSON. */
@@ -304,7 +306,14 @@ export async function request<T>(
   const headers = new Headers();
   let body: BodyInit | undefined;
 
-  if (options.form) {
+  if (options.file) {
+    const parcel = new FormData();
+    parcel.append("file", options.file);
+    // No Content-Type of our own: only the browser knows the boundary it is
+    // about to write, and setting the header here produces a body the server
+    // cannot parse.
+    body = parcel;
+  } else if (options.form) {
     headers.set("Content-Type", "application/x-www-form-urlencoded");
     body = new URLSearchParams(options.form).toString();
   } else if (options.body !== undefined) {
@@ -413,4 +422,7 @@ export const api = {
     request<string>(path, { ...o, method: "GET", asText: true }),
   del: <T>(path: string, o?: RequestOptions) =>
     request<T>(path, { ...o, method: "DELETE" }),
+  /** One file, as multipart, with the same session handling as everything else. */
+  upload: <T>(path: string, file: File, o?: RequestOptions) =>
+    request<T>(path, { ...o, method: "POST", file }),
 };

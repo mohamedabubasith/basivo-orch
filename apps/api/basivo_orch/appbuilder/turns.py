@@ -20,7 +20,7 @@ was, so the preview beside the chat keeps showing something real.
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -56,7 +56,9 @@ class TurnResult:
     attempts: int = 1
 
 
-def compose_prompt(message: str, history: list[tuple[str, str]]) -> str:
+def compose_prompt(
+    message: str, history: list[tuple[str, str]], uploads: Sequence[str] = ()
+) -> str:
     """The task, with just enough of the conversation to make it unambiguous."""
     lines: list[str] = []
     recent = history[-HISTORY_TURNS:]
@@ -68,6 +70,18 @@ def compose_prompt(message: str, history: list[tuple[str, str]]) -> str:
                 lines.append(f"  You replied: {answered.strip()[:200]}")
         lines.append("")
         lines.append("The project already contains that work. Read the files before changing them.")
+        lines.append("")
+    if uploads:
+        # Named rather than left to be discovered: an agent that does not know
+        # a photograph is there writes a placeholder, and the person who
+        # uploaded it watches their own picture not appear.
+        lines.append("Images they uploaded, already in the project:")
+        for path in uploads:
+            lines.append(f"- {path}")
+        lines.append(
+            'Use them with that exact path in src, for example <img src="/uploads/logo.png" />. '
+            "Do not move them, rename them or delete them."
+        )
         lines.append("")
     lines.append("They now say:")
     lines.append(message.strip())
@@ -92,6 +106,7 @@ async def run_turn(
     engine: CodingEngine,
     workspace: ws.Workspace,
     title: str = "",
+    assets: dict[str, bytes] | None = None,
     api_key: str = "",
     base_url: str | None = None,
     model: str = "",
@@ -111,7 +126,8 @@ async def run_turn(
         if step:
             await step(kind, data)
 
-    root = await workspace.open(source, title)
+    root = await workspace.open(source, title, assets)
+    uploads = [f"/{path.removeprefix('public/')}" for path in sorted(assets or {})]
     try:
         before = ws.snapshot(root)
         await record("app.opened", {"files": len(before), "first_turn": source is None})
@@ -119,7 +135,7 @@ async def run_turn(
         await say("Reading the project" if source else "Starting the project")
         result = await engine.run(
             cwd=root,
-            prompt=compose_prompt(message, history),
+            prompt=compose_prompt(message, history, uploads),
             system_prompt="",  # the rules are AGENTS.md, which every engine reads
             api_key=api_key,
             base_url=base_url,
@@ -127,6 +143,9 @@ async def run_turn(
             timeout_seconds=timeout_seconds,
             mcp_servers=mcp_servers,
             allowed_mcp_tools=allowed_mcp_tools,
+            # What it is doing, while it does it. A minute of silence beside a
+            # spinner is how a person decides that something is broken.
+            on_activity=say,
         )
         reply = result.text.strip()
         after = ws.snapshot(root)
@@ -179,6 +198,7 @@ async def run_turn(
                 timeout_seconds=timeout_seconds,
                 mcp_servers=mcp_servers,
                 allowed_mcp_tools=allowed_mcp_tools,
+                on_activity=say,
             )
             reply = result.text.strip() or reply
             after = ws.snapshot(root)

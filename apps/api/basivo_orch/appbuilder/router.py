@@ -32,15 +32,27 @@ import uuid
 import zipfile
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Request, Response, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    HTTPException,
+    Path,
+    Request,
+    Response,
+    UploadFile,
+    status,
+)
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from basivo_orch.appbuilder import assets as asset_rules
 from basivo_orch.appbuilder import service, serving
-from basivo_orch.appbuilder.models import AppProject, AppTurn, AppVersion
+from basivo_orch.appbuilder.models import AppAsset, AppProject, AppTurn, AppVersion
 from basivo_orch.appbuilder.serving import preview_url, project_token, public_url
 from basivo_orch.auth.authz import OrgContext, Permission, require
+from basivo_orch.billing import service as billing
 from basivo_orch.db import get_async_session
 from basivo_orch.flows.models import Artifact
 
@@ -317,6 +329,136 @@ async def delete_project(
 
 
 # ---------------------------------------------------------------------------
+# Images somebody uploaded
+# ---------------------------------------------------------------------------
+
+
+class AssetRead(BaseModel):
+    id: uuid.UUID
+    filename: str
+    content_type: str
+    size_bytes: int
+    #: How the page refers to it, which is what the person pastes into a
+    #: message: `/uploads/logo.png`.
+    path: str
+    #: Where the console shows it. Workspace API, not the app's own address:
+    #: an image is visible here before anything has been built.
+    url: str
+    created_at: Any
+
+
+class AssetList(BaseModel):
+    items: list[AssetRead]
+    #: This project's images, against what one project may hold.
+    used_bytes: int
+    limit_bytes: int
+    #: The whole workspace, against its plan. Shown so that "no room left" is
+    #: something a person sees coming rather than discovers on an upload.
+    workspace_used_bytes: int
+    workspace_limit_bytes: int | None
+
+
+def _asset_read(project_id: uuid.UUID, organization_id: uuid.UUID, asset: AppAsset) -> AssetRead:
+    return AssetRead(
+        id=asset.id,
+        filename=asset.filename,
+        content_type=asset.content_type,
+        size_bytes=asset.size_bytes,
+        path=f"/uploads/{asset.filename}",
+        url=f"/api/v1/orgs/{organization_id}/apps/{project_id}/assets/{asset.id}/file",
+        created_at=asset.created_at,
+    )
+
+
+@router.get("/{project_id}/assets", response_model=AssetList)
+async def list_assets(
+    project_id: uuid.UUID,
+    context: OrgContext = Depends(require(Permission.FLOW_READ)),
+    session: AsyncSession = Depends(get_async_session),
+) -> AssetList:
+    project = await _load(session, context.organization_id, project_id)
+    items = await service.list_assets(session, project)
+    plan = await billing.current_plan(session, context.organization_id)
+    return AssetList(
+        items=[_asset_read(project.id, context.organization_id, item) for item in items],
+        used_bytes=sum(item.size_bytes for item in items),
+        limit_bytes=asset_rules.MAX_PROJECT_ASSET_BYTES,
+        workspace_used_bytes=await billing.storage_bytes(session, context.organization_id),
+        workspace_limit_bytes=plan.storage_mb * 1024 * 1024 if plan.storage_mb else None,
+    )
+
+
+@router.post("/{project_id}/assets", response_model=AssetRead, status_code=201)
+async def upload_asset(
+    project_id: uuid.UUID,
+    file: UploadFile = File(...),
+    context: OrgContext = Depends(require(Permission.FLOW_RUN)),
+    session: AsyncSession = Depends(get_async_session),
+) -> AssetRead:
+    """Take one image for this app to use.
+
+    Read with a ceiling rather than in full: a request body is whatever the
+    client chose to send, and reading all of it into memory before deciding
+    whether it is allowed is how one upload takes down the process.
+    """
+    project = await _load(session, context.organization_id, project_id)
+    data = await file.read(asset_rules.MAX_ASSET_BYTES + 1)
+    await file.close()
+    try:
+        asset = await service.add_asset(
+            session,
+            project=project,
+            filename=file.filename or "image",
+            data=data,
+            user_id=context.user.id,
+        )
+    except asset_rules.AssetRefused as exc:
+        # 413 rather than 400: the thing that is wrong is the file, and a
+        # client that sees a size refusal can offer to shrink it.
+        raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, str(exc)) from None
+    return _asset_read(project.id, context.organization_id, asset)
+
+
+@router.get("/{project_id}/assets/{asset_id}/file", include_in_schema=False)
+async def read_asset(
+    project_id: uuid.UUID,
+    asset_id: uuid.UUID,
+    context: OrgContext = Depends(require(Permission.FLOW_READ)),
+    session: AsyncSession = Depends(get_async_session),
+) -> Response:
+    """The image itself, for the console to show beside the chat."""
+    project = await _load(session, context.organization_id, project_id)
+    asset = await session.get(AppAsset, asset_id)
+    if asset is None or asset.project_id != project.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "That image does not exist.")
+    return Response(
+        content=asset.data,
+        media_type=asset.content_type,
+        headers={
+            "Cache-Control": "private, max-age=86400, immutable",
+            # An uploaded SVG is a document with script in it as easily as a
+            # picture. Nothing here may run: this address is the console's own.
+            "Content-Security-Policy": "sandbox; default-src 'none'",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+@router.delete("/{project_id}/assets/{asset_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_asset(
+    project_id: uuid.UUID,
+    asset_id: uuid.UUID,
+    context: OrgContext = Depends(require(Permission.FLOW_RUN)),
+    session: AsyncSession = Depends(get_async_session),
+) -> Response:
+    """Remove an image and free its bytes. Pages already built keep theirs."""
+    project = await _load(session, context.organization_id, project_id)
+    if not await service.delete_asset(session, project=project, asset_id=asset_id):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "That image does not exist.")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# ---------------------------------------------------------------------------
 # Unpublish, and the code itself
 # ---------------------------------------------------------------------------
 
@@ -355,7 +497,10 @@ async def download_source(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "That version does not exist.")
 
     folder = f"{project.slug}-v{version.version}"
-    body = _zip_of(artifact.data, folder, project.name)
+    # The uploads are stored once against the project rather than inside each
+    # version, so they are added here: a download that builds without the
+    # person's own photographs is not their project.
+    body = _zip_of(artifact.data, folder, project.name, await service.asset_files(session, project))
     return Response(
         content=body,
         media_type="application/zip",
@@ -379,7 +524,7 @@ Everything you asked for lives in `src/`. `index.html` is the page shell.
 """
 
 
-def _zip_of(archive: bytes, folder: str, name: str) -> bytes:
+def _zip_of(archive: bytes, folder: str, name: str, extra: dict[str, bytes] | None = None) -> bytes:
     """The stored tar as a zip with one top-level folder and a README."""
     out = io.BytesIO()
     with (
@@ -392,6 +537,8 @@ def _zip_of(archive: bytes, folder: str, name: str) -> bytes:
             handle = tar.extractfile(member)
             if handle is not None:
                 bundle.writestr(f"{folder}/{member.name.strip('/')}", handle.read())
+        for path, blob in (extra or {}).items():
+            bundle.writestr(f"{folder}/{path}", blob)
         bundle.writestr(f"{folder}/README.md", README.format(name=name))
     return out.getvalue()
 

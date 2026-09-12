@@ -354,6 +354,27 @@ async def test_the_code_downloads_as_a_zip_anyone_can_open(session, organization
     assert "npm install" in readme and "Take Home" in readme
 
 
+async def test_the_download_carries_the_pictures_that_are_not_in_the_tree(session, organization):
+    """Uploads live once in the database, so the zip is where they are put
+    back: a project that builds without the person's own photographs is not
+    their project."""
+    project = await service.create_project(session, organization_id=organization.id, name="Shop")
+    version = await _built(session, organization, project, 1, b"<h1>hi</h1>")
+    source = await session.get(Artifact, version.source_artifact_id)
+    await service.add_asset(
+        session, project=project, filename="front.png", data=b"\x89PNG\r\n\x1a\nphoto"
+    )
+
+    body = api._zip_of(
+        source.data,
+        f"{project.slug}-v1",
+        project.name,
+        await service.asset_files(session, project),
+    )
+    with zipfile.ZipFile(io.BytesIO(body)) as bundle:
+        assert f"{project.slug}-v1/public/uploads/front.png" in bundle.namelist()
+
+
 async def test_one_message_at_a_time(session, organization):
     project = await service.create_project(session, organization_id=organization.id, name="Queue")
     await service.start_turn(session, project=project, message="a page")

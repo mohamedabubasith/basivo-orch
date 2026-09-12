@@ -392,6 +392,47 @@ Wildcard subdomains (`sunrise-bakery-k3d9.apps.example.com`) are the next step
 up and need a wildcard certificate; the path form works with one ordinary
 certificate and is where beta stops.
 
+### Pictures somebody uploads
+
+A model cannot draw the front of your shop, so the builder takes images: PNG,
+JPEG, GIF, WebP and SVG, up to 2MB each, twenty and 12MB to a project. What
+happens to one is the whole design:
+
+- **The bytes decide the type.** The first bytes are read and anything that is
+  not an image is refused. A file named `logo.png` that is really an HTML
+  document would otherwise be a script hosted at the app's own address.
+- **The name is ours.** Reduced to letters, digits and dashes, given the
+  extension the bytes proved, and made unique, so an upload cannot escape
+  `public/uploads/` and cannot quietly replace an image already in use.
+- **Stored once, in `app_asset`, never inside a version.** The turn writes them
+  into `public/uploads/` when it opens the project and the packer leaves that
+  directory out, so ten corrections to a page keep one copy of the photograph
+  rather than eleven. They are added back into the zip on the way out.
+- **The agent is told they exist.** The prompt names each one with the path the
+  page uses, because an agent left to discover a photograph writes a grey box
+  instead.
+
+The console shows them under the composer: clicking one puts `/uploads/name.png`
+in the message, which is the whole of "use this picture in the header".
+
+### What a workspace may keep
+
+Three limits, each in the one place it can be enforced:
+
+- **Apps per plan** (`check_app_quota`, in `create_project`): two on Free.
+  Counted apart from flows, because a message runs a coding agent and a
+  compiler and every build is kept.
+- **Storage per plan** (`check_storage_quota`): 100MB on Free, counted over
+  every artifact and every upload the workspace holds, and checked in
+  `_save_artifact`, which is the single place bytes are written. A turn that
+  would go over fails with a sentence naming the number, and the project keeps
+  the version it had.
+- **Per project**: 8MB of source, 24MB of build, 12MB of images. These stop one
+  app spending a whole workspace's allowance.
+
+Disk is the one resource a deployment cannot overcommit, which is why the
+storage check is before the write rather than a report afterwards.
+
 ### Taking the code away
 
 Every version's source downloads as a zip from the version rail: one folder,
@@ -426,9 +467,16 @@ cache here.
 New section, `Apps`, above Flows.
 
 - `/app/apps` project list: name, engine, deployed version, last activity.
-- `/app/apps/:id` the builder: chat on the left (the `ChatWindow` we already
-  ship, with its activity lines, markdown and attachments), preview on the
-  right, a version rail under the preview with Deploy, Share and Open.
+- `/app/apps/:id` the builder: chat on the left, preview on the right, a
+  version rail under the preview with Deploy, Share and Open.
+- **The wait says what the agent is doing.** OpenCode prints an event when a
+  tool finishes, so `Reading App.tsx`, `Editing Menu.tsx` and
+  `Reading the documentation` are what actually happened, emitted as the run's
+  own `node.progress` events and read back by the console while it polls. The
+  elapsed clock stays beside it. Nothing here is a timer guessing at stages.
+- **Refreshing the page loses nothing.** The turn is a run and the state is in
+  Postgres: the reload asks for the project, sees a turn still going, and
+  attaches to the same event log. Only unsent text in the box is lost.
 - Everything uses `components/fields.tsx`, no native controls, no
   `window.confirm`, and no dashes in copy. The existing rules apply unchanged.
 
@@ -495,4 +543,5 @@ find out whether people want the first one.
 2. The apps origin: wildcard subdomain, or one host with a path prefix. A
    wildcard is better isolation and needs a certificate.
 3. Whether free tier turns are counted per day or per project, and what the
-   number is.
+   number is. The plan now caps apps and storage; turns themselves are still
+   only capped by the runs limit.

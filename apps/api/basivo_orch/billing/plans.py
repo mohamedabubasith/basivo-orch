@@ -25,10 +25,19 @@ class Plan:
     runs_per_month: int | None
     #: Flows a workspace may keep. None is unlimited.
     flows: int | None
+    #: Apps under the App Builder. Counted apart from flows: an app is worth
+    #: more to run than a flow (a coding agent and a compiler per message) and
+    #: is worth more to keep (every version is a stored build).
+    apps: int | None
     #: Members, including the owner.
     seats: int | None
     #: How far back the run history is listed. Nothing is deleted.
     history_days: int
+    #: Everything a workspace has stored: rendered files, app builds and the
+    #: images uploaded to them. None is unlimited. Disk is the one resource a
+    #: deployment cannot overcommit, so this limit is not about revenue: a
+    #: workspace that fills the disk takes every other workspace down with it.
+    storage_mb: int | None
     features: tuple[str, ...]
 
     @property
@@ -52,13 +61,16 @@ PLANS: dict[str, Plan] = {
         price_usd="$0",
         runs_per_month=100,
         flows=3,
+        apps=2,
         seats=1,
         history_days=7,
+        storage_mb=100,
         features=(
             "100 runs a month",
-            "3 flows",
+            "3 flows and 2 apps",
             "GitHub and Jira triggers",
             "Bring your own model keys",
+            "100 MB of files and apps",
             "7 days of run history",
         ),
     ),
@@ -70,12 +82,15 @@ PLANS: dict[str, Plan] = {
         price_usd="$29",
         runs_per_month=3_000,
         flows=None,
+        apps=20,
         seats=3,
         history_days=30,
+        storage_mb=1_000,
         features=(
             "3,000 runs a month",
-            "Unlimited flows",
+            "Unlimited flows, 20 apps",
             "3 members",
+            "1 GB of files and apps",
             "30 days of run history",
             "Email support",
         ),
@@ -88,12 +103,15 @@ PLANS: dict[str, Plan] = {
         price_usd="$99",
         runs_per_month=15_000,
         flows=None,
+        apps=100,
         seats=10,
         history_days=90,
+        storage_mb=5_000,
         features=(
             "15,000 runs a month",
-            "Unlimited flows",
+            "Unlimited flows, 100 apps",
             "10 members",
+            "5 GB of files and apps",
             "90 days of run history",
             "Priority support",
         ),
@@ -118,8 +136,10 @@ UNLIMITED = Plan(
     price_usd="$0",
     runs_per_month=None,
     flows=None,
+    apps=None,
     seats=None,
     history_days=3_650,
+    storage_mb=None,
     features=("Every feature, no limits, nothing charged",),
 )
 

@@ -17,8 +17,10 @@ class PlanRead(BaseModel):
     price_usd: str
     runs_per_month: int | None
     flows: int | None
+    apps: int | None
     seats: int | None
     history_days: int
+    storage_mb: int | None
     features: list[str]
 
     @classmethod
@@ -31,8 +33,10 @@ class PlanRead(BaseModel):
             price_usd=plan.price_usd,
             runs_per_month=plan.runs_per_month,
             flows=plan.flows,
+            apps=plan.apps,
             seats=plan.seats,
             history_days=plan.history_days,
+            storage_mb=plan.storage_mb,
             features=list(plan.features),
         )
 
@@ -42,8 +46,14 @@ class UsageRead(BaseModel):
     runs_limit: int | None
     flows_used: int
     flows_limit: int | None
+    apps_used: int
+    apps_limit: int | None
     seats_used: int
     seats_limit: int | None
+    #: Files and app builds, in megabytes, because a workspace reads its own
+    #: storage in the units its plan is written in.
+    storage_used_mb: int
+    storage_limit_mb: int | None
     history_days: int
 
 

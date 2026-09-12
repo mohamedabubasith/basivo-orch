@@ -59,8 +59,17 @@ NODE_MODULES_ENV = "BASIVO_APP_NODE_MODULES"
 WRITABLE: tuple[str, ...] = ("src/", "public/", "index.html")
 
 #: Never stored with the source: two are generated, one is a symlink to a
-#: directory of hundreds of megabytes.
-NOT_SOURCE: tuple[str, ...] = ("node_modules/", "dist/", "AGENTS.md", ".git/")
+#: directory of hundreds of megabytes, and the uploads are stored once in
+#: `app_asset` and written in fresh each turn. Keeping an uploaded photograph
+#: in the tree would copy it into every version, so ten corrections would keep
+#: eleven copies of the same file.
+NOT_SOURCE: tuple[str, ...] = (
+    "node_modules/",
+    "dist/",
+    "AGENTS.md",
+    ".git/",
+    "public/uploads/",
+)
 
 #: What the shipped `index.html` says before anybody has built anything. Left
 #: in place it becomes the browser tab, the bookmark and the name on a shared
@@ -94,7 +103,9 @@ class BuildResult:
 class Workspace(Protocol):
     """One project's files, for the length of one turn."""
 
-    async def open(self, source: bytes | None, title: str = "") -> Path:
+    async def open(
+        self, source: bytes | None, title: str = "", assets: dict[str, bytes] | None = None
+    ) -> Path:
         """Lay out the tree and return its root."""
         ...
 
@@ -187,10 +198,14 @@ class TempWorkspace:
     #: Kept so the caller can delete the directory it was given a path into.
     _roots: dict[Path, tempfile.TemporaryDirectory] = field(default_factory=dict)
 
-    async def open(self, source: bytes | None, title: str = "") -> Path:
-        return await asyncio.to_thread(self._open, source, title)
+    async def open(
+        self, source: bytes | None, title: str = "", assets: dict[str, bytes] | None = None
+    ) -> Path:
+        return await asyncio.to_thread(self._open, source, title, assets)
 
-    def _open(self, source: bytes | None, title: str = "") -> Path:
+    def _open(
+        self, source: bytes | None, title: str = "", assets: dict[str, bytes] | None = None
+    ) -> Path:
         holder = tempfile.TemporaryDirectory(prefix="basivo-app-")
         root = Path(holder.name) / "app"
         if source:
@@ -218,6 +233,11 @@ class TempWorkspace:
         # the same reason. These are not the agent's files.
         for name in ("package.json", "vite.config.ts", "tsconfig.json"):
             shutil.copyfile(TEMPLATE_ROOT / name, root / name)
+
+        # The uploads, written in rather than restored: they are stored once
+        # against the project, so this is the only place they exist in a tree.
+        for relative, blob in (assets or {}).items():
+            _write_asset(root, relative, blob)
 
         if title:
             _name_the_page(root / "index.html", title)
@@ -276,6 +296,20 @@ class TempWorkspace:
         holder = self._roots.pop(root, None)
         if holder is not None:
             await asyncio.to_thread(holder.cleanup)
+
+
+def _write_asset(root: Path, relative: str, blob: bytes) -> None:
+    """One uploaded file into the working copy, or nothing at all.
+
+    The path is checked against the root it must stay under rather than
+    trusted, because a name that escaped the tree would be a write anywhere
+    the worker can reach, and these names come from a person.
+    """
+    target = (root / relative).resolve()
+    if not target.is_relative_to(root.resolve()):
+        raise NodeError(f"An uploaded file has an impossible name: {relative}.")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(blob)
 
 
 def _name_the_page(index: Path, title: str) -> None:

@@ -49,6 +49,26 @@ interface Turn {
   created_at: string;
 }
 
+interface Asset {
+  id: string;
+  filename: string;
+  content_type: string;
+  size_bytes: number;
+  /** What the page refers to it by: `/uploads/logo.png`. */
+  path: string;
+  /** Where the console loads it from, which works before anything is built. */
+  url: string;
+  created_at: string;
+}
+
+interface Library {
+  items: Asset[];
+  used_bytes: number;
+  limit_bytes: number;
+  workspace_used_bytes: number;
+  workspace_limit_bytes: number | null;
+}
+
 interface Version {
   id: string;
   version: number;
@@ -61,12 +81,12 @@ interface Version {
 /** While a turn is running, ask this often. Turns take minutes, not seconds. */
 const POLL_MS = 2500;
 
-/** What to say while waiting, so the wait has a shape. */
-const STAGES = [
-  "Reading the project",
-  "Writing the change",
-  "Building the page",
-] as const;
+/** Bytes as a person reads them: "1.4 MB", "820 KB". */
+function size(bytes: number): string {
+  return bytes >= 1024 * 1024
+    ? `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+    : `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
 
 export default function AppBuilder() {
   const { appId } = useParams();
@@ -80,6 +100,11 @@ export default function AppBuilder() {
   const [sending, setSending] = useState(false);
   const [previewKey, setPreviewKey] = useState(0);
   const [copied, setCopied] = useState(false);
+  const [library, setLibrary] = useState<Library | null>(null);
+  const [uploading, setUploading] = useState(false);
+  // What the agent is doing right now, straight from the run's own events.
+  const [activity, setActivity] = useState("");
+  const picker = useRef<HTMLInputElement>(null);
 
   const base = orgId ? `/api/v1/orgs/${orgId}/apps/${appId}` : "";
   const running = turns.some(
@@ -90,14 +115,16 @@ export default function AppBuilder() {
   const load = useCallback(async () => {
     if (!base) return;
     try {
-      const [one, two, three] = await Promise.all([
+      const [one, two, three, four] = await Promise.all([
         api.get<AppProject>(base),
         api.get<Turn[]>(`${base}/turns`),
         api.get<Version[]>(`${base}/versions`),
+        api.get<Library>(`${base}/assets`),
       ]);
       setProject(one);
       setTurns(two);
       setVersions(three);
+      setLibrary(four);
       setError("");
       return three.length;
     } catch (err) {
@@ -110,23 +137,52 @@ export default function AppBuilder() {
     void load();
   }, [load]);
 
-  // While a turn runs, poll; when the number of versions changes, the preview
-  // is out of date and gets a new key, which is what reloads the iframe.
+  const runId =
+    turns.find((turn) => turn.status === "queued" || turn.status === "running")
+      ?.run_id ?? null;
+
+  // While a turn runs, poll two things: the project, because a finished turn
+  // is a new version and a stale preview, and the run's own event log, which
+  // is where the agent says what it is doing. The second is why the wait shows
+  // "Editing Menu.tsx" rather than a spinner and a guess.
   useEffect(() => {
-    if (!running) return;
+    if (!running) {
+      setActivity("");
+      return;
+    }
     let live = true;
-    const timer = window.setInterval(async () => {
+    let after = 0;
+    const tick = async () => {
       if (!live) return;
       const count = await load();
       if (typeof count === "number" && count !== builtCount) {
         setPreviewKey((key) => key + 1);
       }
-    }, POLL_MS);
+      if (!runId || !orgId) return;
+      try {
+        const log = await api.get<{
+          events: { seq: number; type: string; data: Record<string, unknown> }[];
+          next_after: number;
+        }>(`/api/v1/orgs/${orgId}/runs/${runId}/events?after=${after}`);
+        after = log.next_after;
+        const said = log.events
+          .filter(
+            (event) =>
+              event.type === "node.progress" &&
+              typeof event.data?.progress === "string",
+          )
+          .pop();
+        if (said) setActivity(String(said.data.progress));
+      } catch {
+        // The clock beside the spinner is still honest without this.
+      }
+    };
+    const timer = window.setInterval(tick, POLL_MS);
     return () => {
       live = false;
       window.clearInterval(timer);
     };
-  }, [running, load, builtCount]);
+  }, [running, load, builtCount, runId, orgId]);
 
   async function send(event: FormEvent) {
     event.preventDefault();
@@ -157,6 +213,41 @@ export default function AppBuilder() {
     } catch (err) {
       setError(
         err instanceof ApiError ? err.message : "That did not go through.",
+      );
+    }
+  }
+
+  async function upload(files: FileList | null) {
+    if (!base || !files || files.length === 0) return;
+    setUploading(true);
+    try {
+      for (const file of Array.from(files)) {
+        const asset = await api.upload<Asset>(`${base}/assets`, file);
+        // Put the path in the box: the person uploading a logo means to say
+        // something about it, and this is the part they should not have to
+        // type correctly.
+        setMessage((text) => `${text}${text.trim() ? " " : ""}${asset.path} `);
+      }
+      await load();
+      setError("");
+    } catch (err) {
+      setError(
+        err instanceof ApiError ? err.message : "That image could not be added.",
+      );
+    } finally {
+      setUploading(false);
+      if (picker.current) picker.current.value = "";
+    }
+  }
+
+  async function removeAsset(asset: Asset) {
+    if (!base) return;
+    try {
+      await api.del(`${base}/assets/${asset.id}`);
+      await load();
+    } catch (err) {
+      setError(
+        err instanceof ApiError ? err.message : "That image could not be removed.",
       );
     }
   }
@@ -221,6 +312,7 @@ export default function AppBuilder() {
           <Conversation
             turns={turns}
             running={running}
+            activity={activity}
             onStarter={(text) => setMessage(text)}
           />
           <form
@@ -228,6 +320,18 @@ export default function AppBuilder() {
             className="border-t border-ink-700/70 p-3"
             aria-label="Describe a change"
           >
+            {library && library.items.length > 0 && (
+              <Uploads
+                library={library}
+                onPick={(asset) =>
+                  setMessage(
+                    (text) => `${text}${text.trim() ? " " : ""}${asset.path} `,
+                  )
+                }
+                onRemove={removeAsset}
+                busy={running}
+              />
+            )}
             <textarea
               value={message}
               onChange={(event) => setMessage(event.target.value)}
@@ -247,11 +351,27 @@ export default function AppBuilder() {
               className="block w-full resize-none rounded-xl border border-ink-600/70 bg-ink-900/60 px-3.5 py-3 text-sm text-ink-100 placeholder:text-ink-500 focus:border-brand-400 focus:outline-none disabled:opacity-60"
             />
             <div className="mt-2 flex items-center justify-between gap-2">
-              <p className="text-xs text-ink-500">
-                {running
-                  ? "Working on your last message"
-                  : "Enter to add a line"}
-              </p>
+              <div className="flex items-center gap-2">
+                <input
+                  ref={picker}
+                  type="file"
+                  accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml"
+                  multiple
+                  hidden
+                  onChange={(event) => void upload(event.target.files)}
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  disabled={running || uploading}
+                  onClick={() => picker.current?.click()}
+                >
+                  {uploading ? "Adding" : "Add image"}
+                </Button>
+                <p className="text-xs text-ink-500">
+                  {running ? "Working on your last message" : "Enter to add a line"}
+                </p>
+              </div>
               <Button
                 type="submit"
                 disabled={running || sending || !message.trim()}
@@ -330,10 +450,13 @@ const STARTERS: { label: string; text: string }[] = [
 function Conversation({
   turns,
   running,
+  activity,
   onStarter,
 }: {
   turns: Turn[];
   running: boolean;
+  /** What the agent is doing this second, or nothing yet. */
+  activity: string;
   onStarter: (text: string) => void;
 }) {
   const end = useRef<HTMLDivElement>(null);
@@ -391,7 +514,7 @@ function Conversation({
             </p>
           )}
           {(turn.status === "queued" || turn.status === "running") && (
-            <Working since={turn.created_at} />
+            <Working since={turn.created_at} activity={activity} />
           )}
         </motion.div>
       ))}
@@ -401,13 +524,75 @@ function Conversation({
 }
 
 /**
- * The wait, with a clock on it.
+ * The images this app has, and how much room is left.
+ *
+ * They are shown because an image nobody can see is an image nobody uses:
+ * clicking one puts its path in the message box, which is the whole of "use
+ * this picture in the header". The two numbers are here rather than on the
+ * billing page because this is where somebody finds out they have run out.
+ */
+function Uploads({
+  library,
+  onPick,
+  onRemove,
+  busy,
+}: {
+  library: Library;
+  onPick: (asset: Asset) => void;
+  onRemove: (asset: Asset) => void;
+  busy: boolean;
+}) {
+  const left = Math.max(0, library.limit_bytes - library.used_bytes);
+  return (
+    <div className="mb-2 space-y-1.5">
+      <div className="flex flex-wrap gap-2">
+        {library.items.map((asset) => (
+          <div
+            key={asset.id}
+            className="group relative overflow-hidden rounded-lg border border-ink-600/70 bg-ink-800/50"
+          >
+            <button
+              type="button"
+              onClick={() => onPick(asset)}
+              title={`${asset.filename}, ${size(asset.size_bytes)}. Click to use it in your message.`}
+              className="block focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-400"
+            >
+              <img
+                src={`${API_BASE}${asset.url}`}
+                alt={asset.filename}
+                className="h-14 w-14 object-cover"
+              />
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => onRemove(asset)}
+              aria-label={`Remove ${asset.filename}`}
+              className="absolute right-0.5 top-0.5 rounded-md bg-ink-900/80 px-1.5 text-xs text-ink-300 opacity-0 transition group-hover:opacity-100 focus-visible:opacity-100 hover:text-ink-50 disabled:opacity-0"
+            >
+              x
+            </button>
+          </div>
+        ))}
+      </div>
+      <p className="text-xs text-ink-500">
+        {size(library.used_bytes)} of images in this app, {size(left)} left.
+        Click one to use it.
+      </p>
+    </div>
+  );
+}
+
+/**
+ * The wait, with a clock on it and what the agent is doing.
  *
  * A coding agent takes a minute or two, which is long enough that silence
- * reads as failure. The elapsed time is the honest part: it says the thing is
- * still going without promising when it will stop.
+ * reads as failure. Both halves here are facts rather than reassurance: the
+ * line comes from the run's own events, so it says "Editing Menu.tsx" because
+ * the agent edited Menu.tsx, and the elapsed time says the thing is still
+ * going without promising when it will stop.
  */
-function Working({ since }: { since: string }) {
+function Working({ since, activity }: { since: string; activity: string }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
@@ -418,12 +603,11 @@ function Working({ since }: { since: string }) {
     0,
     Math.round((now - new Date(since).getTime()) / 1000),
   );
-  const stage = STAGES[Math.min(STAGES.length - 1, Math.floor(seconds / 25))];
 
   return (
     <div className="mr-auto flex max-w-[85%] items-center gap-2.5 rounded-2xl rounded-bl-sm bg-ink-800/70 px-3.5 py-2.5 text-sm text-ink-300">
       <Spinner className="h-4 w-4" />
-      <span>{stage}</span>
+      <span className="min-w-0 truncate">{activity || "Starting"}</span>
       <span className="text-xs text-ink-500">
         {seconds < 60
           ? `${seconds}s`

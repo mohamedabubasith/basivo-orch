@@ -31,6 +31,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    LargeBinary,
     String,
     Text,
     UniqueConstraint,
@@ -174,6 +175,36 @@ class AppTurn(Base):
     status: Mapped[TurnStatus] = mapped_column(
         Enum(TurnStatus, native_enum=False, length=16), default=TurnStatus.QUEUED
     )
+
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("user.id", ondelete="SET NULL"), default=None
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class AppAsset(Base):
+    """An image somebody uploaded for their app to use.
+
+    Stored once, here, and never inside a version. A logo that lived in the
+    source tree would be copied into every version's stored tree and into every
+    build, so ten corrections to a page would keep eleven copies of the same
+    file. The turn writes these into `public/uploads/` when it opens the
+    project, which is why the agent can use them and why deleting one frees its
+    bytes for good.
+    """
+
+    __tablename__ = "app_asset"
+    __table_args__ = (UniqueConstraint("project_id", "filename", name="uq_app_asset_name"),)
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("app_project.id", ondelete="CASCADE"), index=True
+    )
+    #: The name as it appears under `public/uploads/`, already made safe.
+    filename: Mapped[str] = mapped_column(String(120))
+    content_type: Mapped[str] = mapped_column(String(80), default="application/octet-stream")
+    size_bytes: Mapped[int] = mapped_column(Integer(), default=0)
+    data: Mapped[bytes] = mapped_column(LargeBinary())
 
     created_by: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("user.id", ondelete="SET NULL"), default=None

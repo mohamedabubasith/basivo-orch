@@ -154,6 +154,7 @@ class AppBuildNode(Node):
                     (item["prompt"], item.get("reply", "")) for item in opened.get("history", [])
                 ],
                 source=source,
+                assets=opened.get("assets") or {},
                 engine=engine,
                 workspace=ws.TempWorkspace(),
                 title=str(opened.get("name") or ""),

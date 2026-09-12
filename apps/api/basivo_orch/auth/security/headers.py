@@ -76,9 +76,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         # Same reasoning: no-store is right for anything carrying tokens or
         # account state, and wrong for an immutable file a route just chose to
         # let the browser keep.
-        response.headers.setdefault(
-            "Cache-Control", "no-store, no-cache, must-revalidate, private"
-        )
+        response.headers.setdefault("Cache-Control", "no-store, no-cache, must-revalidate, private")
         response.headers.setdefault("Pragma", "no-cache")
 
         if self._settings.environment.is_production_like:

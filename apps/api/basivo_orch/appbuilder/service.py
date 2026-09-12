@@ -21,8 +21,10 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from basivo_orch.appbuilder import assets as asset_rules
 from basivo_orch.appbuilder import serving
-from basivo_orch.appbuilder.models import AppProject, AppTurn, AppVersion, TurnStatus
+from basivo_orch.appbuilder.models import AppAsset, AppProject, AppTurn, AppVersion, TurnStatus
+from basivo_orch.billing.service import check_app_quota, check_storage_quota
 from basivo_orch.flows.models import Flow, FlowVersion, Run, RunStatus, TriggerKind
 from basivo_orch.flows.service import create_run, enqueue
 
@@ -53,6 +55,9 @@ async def create_project(
     user_id: uuid.UUID | None = None,
 ) -> AppProject:
     """A project, and the hidden flow whose runs are its turns."""
+    # Before anything is written: an app is a flow, a public address and a
+    # history of builds, and refusing halfway through would leave all three.
+    await check_app_quota(session, organization_id)
     slug = await _free_slug(session, organization_id, slugify(name))
 
     flow = Flow(
@@ -230,6 +235,74 @@ async def busy(session: AsyncSession, project: AppProject) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Images somebody uploaded
+# ---------------------------------------------------------------------------
+
+
+async def list_assets(session: AsyncSession, project: AppProject) -> list[AppAsset]:
+    rows = await session.execute(
+        select(AppAsset).where(AppAsset.project_id == project.id).order_by(AppAsset.created_at)
+    )
+    return list(rows.scalars().all())
+
+
+async def add_asset(
+    session: AsyncSession,
+    *,
+    project: AppProject,
+    filename: str,
+    data: bytes,
+    user_id: uuid.UUID | None = None,
+) -> AppAsset:
+    """Store one image against a project. Raises for anything it will not take.
+
+    Both limits are checked before the write and neither is checked twice: the
+    project's own ceilings live in `assets`, and the workspace's is the plan's,
+    which is the same check every other stored byte goes through.
+    """
+    content_type, extension = asset_rules.sniff(data)
+    existing = await list_assets(session, project)
+    asset_rules.check_room(
+        data, count=len(existing), used=sum(item.size_bytes for item in existing)
+    )
+    await check_storage_quota(session, project.organization_id, adding=len(data))
+
+    name = asset_rules.unique_name(
+        asset_rules.safe_name(filename, extension), {item.filename for item in existing}
+    )
+    asset = AppAsset(
+        project_id=project.id,
+        filename=name,
+        content_type=content_type,
+        size_bytes=len(data),
+        data=data,
+        created_by=user_id,
+    )
+    session.add(asset)
+    await session.commit()
+    await session.refresh(asset)
+    return asset
+
+
+async def delete_asset(session: AsyncSession, *, project: AppProject, asset_id: uuid.UUID) -> bool:
+    """Remove an image and its bytes. The next turn builds without it."""
+    asset = await session.get(AppAsset, asset_id)
+    if asset is None or asset.project_id != project.id:
+        return False
+    await session.delete(asset)
+    await session.commit()
+    return True
+
+
+async def asset_files(session: AsyncSession, project: AppProject) -> dict[str, bytes]:
+    """What the turn writes into the working copy, keyed by path in the tree."""
+    return {
+        f"{asset_rules.UPLOAD_DIR}{asset.filename}": asset.data
+        for asset in await list_assets(session, project)
+    }
+
+
+# ---------------------------------------------------------------------------
 # What the node asks for, through the engine
 # ---------------------------------------------------------------------------
 
@@ -280,6 +353,10 @@ async def apply(
             if project.source_artifact_id
             else "",
             "history": [{"prompt": item.prompt, "reply": item.reply} for item in reversed(history)],
+            # Handed over as bytes rather than as ids: these are never stored
+            # in a version, so there is no artifact for the node to load, and
+            # a project's images are a few megabytes at most by construction.
+            "assets": await asset_files(session, project),
         }
 
     if action != "finish":

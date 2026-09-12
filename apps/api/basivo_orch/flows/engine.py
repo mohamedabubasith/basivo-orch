@@ -191,6 +191,17 @@ class Engine:
             data=data,
         )
         async with self._db:
+            # Disk is shared between every workspace on the deployment, so the
+            # plan's storage limit is checked here, at the one place bytes are
+            # written, rather than at each node that produces a file. It
+            # reaches the person as the node's error, which is where they can
+            # act on it.
+            from basivo_orch.billing.service import QuotaExceeded, check_storage_quota
+
+            try:
+                await check_storage_quota(self.session, self.run.organization_id, adding=len(data))
+            except QuotaExceeded as exc:
+                raise NodeError(str(exc)) from None
             self.session.add(artifact)
             await self.session.commit()
             await self.session.refresh(artifact)

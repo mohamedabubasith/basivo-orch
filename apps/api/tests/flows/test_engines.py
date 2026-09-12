@@ -38,7 +38,8 @@ def _fake(tmp_path: Path, name: str, body: str) -> Path:
         "db = os.path.join(home, 'data', 'opencode', 'opencode.db')\n"
         "json.dump({'db': open(db).read() if os.path.exists(db) else None,"
         " 'config_is_link': os.path.islink(os.path.join(home, 'config')),"
-        " 'config_has_modules': os.path.isdir(os.path.join(home, 'config', 'opencode', 'node_modules'))},"
+        " 'config_has_modules': os.path.isdir("
+        "os.path.join(home, 'config', 'opencode', 'node_modules'))},"
         f" open({str(tmp_path / f'{name}-home.json')!r}, 'w'))\n"
         "json.dump({'argv': sys.argv[1:], 'env': dict(os.environ), 'cwd': os.getcwd(),"
         " 'config': json.load(open(cfg)) if cfg and os.path.exists(cfg) else None},"
@@ -392,3 +393,51 @@ async def test_the_first_turn_warms_what_the_image_could_not(monkeypatch, tmp_pa
     home.mkdir()
     await asyncio.to_thread(engines._write_opencode_home, home, {"agent": {}})
     assert (home / "config" / "opencode" / "node_modules" / "marker").exists()
+
+
+#: A run that reads a file, edits another, looks something up, and finishes.
+#: The shapes are copied from a real `opencode run --format json` stream.
+_OPENCODE_NARRATED = (
+    "print(json.dumps({'type': 'tool_use', 'part': {'type': 'tool', 'tool': 'read',"
+    " 'state': {'status': 'completed', 'input': {'filePath': '/w/src/App.tsx'}}}}))\n"
+    "print(json.dumps({'type': 'tool_use', 'part': {'type': 'tool', 'tool': 'glob',"
+    " 'state': {'status': 'completed', 'input': {'pattern': 'src/*'}}}}))\n"
+    "print(json.dumps({'type': 'tool_use', 'part': {'type': 'tool', 'tool': 'edit',"
+    " 'state': {'status': 'completed', 'input': {'filePath': '/w/src/Menu.tsx'}}}}))\n"
+    "print(json.dumps({'type': 'step_finish', 'part': {'type': 'step-finish',"
+    " 'tokens': {'input': 12750, 'output': 44}, 'cost': 0}}))\n"
+    "print(json.dumps({'type': 'text', 'part': {'type': 'text',"
+    " 'text': 'Added the menu section.'}}))\n"
+)
+
+
+async def test_the_free_agent_says_what_it_is_doing_while_it_does_it(monkeypatch, tmp_path):
+    """The console shows this beside the spinner, so it comes from the agent's
+    own events rather than from a timer guessing at stages."""
+    monkeypatch.setenv("BASIVO_OPENCODE_BIN", str(_fake(tmp_path, "opencode", _OPENCODE_NARRATED)))
+    work = tmp_path / "work"
+    work.mkdir()
+
+    said: list[str] = []
+
+    async def note(line: str) -> None:
+        said.append(line)
+
+    result = await engines.ENGINES["opencode"].run(
+        cwd=work,
+        prompt="Add a menu.",
+        system_prompt="",
+        timeout_seconds=30,
+        on_activity=note,
+    )
+
+    assert said[:3] == ["Reading App.tsx", "Looking through the project", "Editing Menu.tsx"]
+    assert "Added the menu section." in said
+    # And what it spent, which the free model reports as tokens and no money.
+    assert (result.input_tokens, result.output_tokens, result.cost_usd) == (12750, 44, 0.0)
+
+
+def test_an_event_nobody_recognises_produces_no_line_rather_than_a_guess():
+    assert engines._activity({"type": "step_start", "part": {"type": "step-start"}}) == ""
+    assert engines._activity({"part": {"type": "tool", "tool": "something-new"}}) == ""
+    assert engines._activity({"part": {"type": "reasoning"}}) == "Thinking"

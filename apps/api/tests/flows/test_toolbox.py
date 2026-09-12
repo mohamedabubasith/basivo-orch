@@ -37,7 +37,12 @@ def test_a_saved_tool_is_the_same_shape_the_node_already_understands():
     assert row["name"] == "get_order"
 
     rebuilt = ToolDefinition.model_validate(
-        {"name": row["name"], "description": row["description"], "kind": row["kind"], **row["definition"]}
+        {
+            "name": row["name"],
+            "description": row["description"],
+            "kind": row["kind"],
+            **row["definition"],
+        }
     )
     assert rebuilt.url.endswith("{{ tool.number }}")
     assert rebuilt.method == "GET"

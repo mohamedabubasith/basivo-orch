@@ -33,8 +33,10 @@ interface Plan {
   price_usd: string;
   runs_per_month: number | null;
   flows: number | null;
+  apps: number | null;
   seats: number | null;
   history_days: number;
+  storage_mb: number | null;
   features: string[];
 }
 
@@ -47,8 +49,12 @@ interface Overview {
     runs_limit: number | null;
     flows_used: number;
     flows_limit: number | null;
+    apps_used: number;
+    apps_limit: number | null;
     seats_used: number;
     seats_limit: number | null;
+    storage_used_mb: number;
+    storage_limit_mb: number | null;
     history_days: number;
   };
   current_period_end: string | null;
@@ -373,10 +379,17 @@ export function Billing() {
             hint="The count resets on the first of each month."
           />
           <Meter label="Flows" used={usage.flows_used} limit={usage.flows_limit} />
+          <Meter label="Apps" used={usage.apps_used} limit={usage.apps_limit} />
           <Meter
             label="Members"
             used={usage.seats_used}
             limit={usage.seats_limit}
+          />
+          <Meter
+            label="Storage, MB"
+            used={usage.storage_used_mb}
+            limit={usage.storage_limit_mb}
+            hint="Rendered files, app builds and the images uploaded to them."
           />
         </div>
 

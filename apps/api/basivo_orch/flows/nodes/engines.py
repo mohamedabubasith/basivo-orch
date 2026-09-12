@@ -36,7 +36,7 @@ import asyncio
 import json
 import os
 import shutil
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -147,6 +147,7 @@ class CodingEngine(Protocol):
         timeout_seconds: float = 780.0,
         mcp_servers: McpServers | None = None,
         allowed_mcp_tools: Sequence[str] = (),
+        on_activity: Callable[[str], Awaitable[None]] | None = None,
     ) -> EngineResult:
         """One headless session over `cwd`, editing files in place.
 
@@ -172,6 +173,7 @@ async def _execute(
     secret: str,
     engine: str,
     stall_seconds: float | None = STALL_SECONDS,
+    on_line: Callable[[str], Awaitable[None]] | None = None,
 ) -> tuple[int, str, str]:
     """Run a CLI to completion, or kill it. Returns (code, stdout, stderr).
 
@@ -201,13 +203,29 @@ async def _execute(
     err = bytearray()
     deadline = asyncio.get_running_loop().time() + timeout_seconds
 
-    async def pump(stream: asyncio.StreamReader, into: bytearray) -> None:
+    async def pump(
+        stream: asyncio.StreamReader,
+        into: bytearray,
+        notify: Callable[[str], Awaitable[None]] | None = None,
+    ) -> None:
         # Chunks, not lines: a line that never ends must still count as life.
+        # The line splitting on top of that is for the caller who wants to know
+        # what the agent is doing while it is still doing it.
+        tail = b""
         while chunk := await stream.read(65536):
             into.extend(chunk)
+            if notify is None:
+                continue
+            *lines, tail = (tail + chunk).split(b"\n")
+            for line in lines:
+                with suppress(Exception):
+                    # Reporting progress must never be able to fail a run.
+                    await notify(line.decode(errors="replace"))
+            if len(tail) > 1_000_000:
+                tail = b""  # a line nobody is going to finish
 
     async def drain() -> None:
-        await asyncio.gather(pump(process.stdout, out), pump(process.stderr, err))
+        await asyncio.gather(pump(process.stdout, out, on_line), pump(process.stderr, err))
 
     async def kill(reason: str) -> None:
         process.kill()
@@ -323,6 +341,7 @@ class ClaudeCodeEngine:
         timeout_seconds: float = 780.0,
         mcp_servers: McpServers | None = None,
         allowed_mcp_tools: Sequence[str] = (),
+        on_activity: Callable[[str], Awaitable[None]] | None = None,
     ) -> EngineResult:
         allowed = list(allowed_mcp_tools) or [f"mcp__{name}" for name in (mcp_servers or {})]
         result = await claude_code.run_claude_code(
@@ -384,6 +403,7 @@ class CodexEngine:
         timeout_seconds: float = 780.0,
         mcp_servers: McpServers | None = None,
         allowed_mcp_tools: Sequence[str] = (),
+        on_activity: Callable[[str], Awaitable[None]] | None = None,
     ) -> EngineResult:
         import tempfile
 
@@ -505,6 +525,7 @@ class OpenCodeEngine:
         timeout_seconds: float = 780.0,
         mcp_servers: McpServers | None = None,
         allowed_mcp_tools: Sequence[str] = (),
+        on_activity: Callable[[str], Awaitable[None]] | None = None,
     ) -> EngineResult:
         import tempfile
 
@@ -558,6 +579,7 @@ class OpenCodeEngine:
                 secret=api_key,
                 engine="OpenCode",
                 stall_seconds=STALL_SECONDS,
+                on_line=_narrator(on_activity) if on_activity else None,
             )
             await asyncio.to_thread(_keep_what_was_warmed, home)
 
@@ -567,8 +589,12 @@ class OpenCodeEngine:
             raise NodeError(
                 f"OpenCode exited with status {code}: {(err or out).strip()[-600:] or 'no output'}"
             )
+        spent = _opencode_usage(events)
         return EngineResult(
             text=text,
+            cost_usd=spent[2],
+            input_tokens=spent[0],
+            output_tokens=spent[1],
             turns=sum(1 for event in events if event.get("type") == "tool_use"),
             session_id=next(
                 (
@@ -736,6 +762,106 @@ def _opencode_text(events: list[dict[str, Any]]) -> str:
     ]
     spoken = [part for part in said if part]
     return spoken[-1] if spoken else ""
+
+
+def _opencode_usage(events: list[dict[str, Any]]) -> tuple[int, int, float]:
+    """Input tokens, output tokens and cost, summed over the run's steps.
+
+    Every model call ends in a `step_finish` carrying both, so this is the
+    engine reporting what it actually spent rather than an estimate. On the
+    free model the cost is zero and the tokens are not, which is exactly what
+    metering the free tier will need.
+    """
+    given = taken = 0
+    cost = 0.0
+    for event in events:
+        part = event.get("part") or {}
+        if part.get("type") != "step-finish":
+            continue
+        tokens = part.get("tokens") or {}
+        given += int(tokens.get("input") or 0)
+        taken += int(tokens.get("output") or 0)
+        cost += float(part.get("cost") or 0.0)
+    return given, taken, round(cost, 6)
+
+
+#: What each of OpenCode's tools is called in a sentence a person reads. The
+#: agent's own names are for a terminal; this is beside a chat message.
+_TOOL_WORDS = {
+    "read": "Reading",
+    "edit": "Editing",
+    "write": "Writing",
+    "patch": "Editing",
+    "multiedit": "Editing",
+}
+_LOOKING = ("glob", "grep", "list", "ls")
+_SEARCHING = ("webfetch", "websearch", "search_the_web", "read_page")
+
+
+def _activity(event: dict[str, Any]) -> str:
+    """One event as the line the person watching should see, or nothing.
+
+    OpenCode prints an event when a tool finishes and when the model speaks,
+    so this is the honest account of what is happening: the file being edited,
+    the documentation being read, the sentence the agent just wrote. Anything
+    this does not recognise produces no line rather than a guess.
+    """
+    part = event.get("part") or {}
+    kind = part.get("type")
+
+    if kind == "text":
+        said = str(part.get("text") or "").strip().replace("\n", " ")
+        return said[:120] if said else ""
+
+    if kind == "reasoning":
+        return "Thinking"
+
+    if kind != "tool":
+        return ""
+
+    tool = str(part.get("tool") or "").lower()
+    target = (part.get("state") or {}).get("input") or {}
+    name = str(target.get("filePath") or target.get("path") or "").rsplit("/", 1)[-1]
+
+    if word := _TOOL_WORDS.get(tool):
+        return f"{word} {name}" if name else f"{word} a file"
+    if any(hint in tool for hint in _SEARCHING):
+        return "Reading the documentation"
+    if any(tool.endswith(hint) or tool == hint for hint in _LOOKING):
+        return "Looking through the project"
+    if "todo" in tool:
+        return "Planning the work"
+    return ""
+
+
+def _narrator(
+    report: Callable[[str], Awaitable[None]],
+) -> Callable[[str], Awaitable[None]]:
+    """A line handler that turns the agent's event stream into progress.
+
+    One line per thing the agent did, which is one run event per tool call:
+    the same order of magnitude the agent node already writes, and the reason
+    the person watching sees the files go by instead of a spinner. Repeats of
+    the line already showing are dropped, because "Reading" three files in a
+    row is one thing happening.
+    """
+    last = ""
+
+    async def handle(line: str) -> None:
+        nonlocal last
+        line = line.strip()
+        if not line.startswith("{"):
+            return
+        try:
+            event = json.loads(line)
+        except ValueError:
+            return
+        if not isinstance(event, dict) or not (text := _activity(event)) or text == last:
+            return
+        last = text
+        await report(text)
+
+    return handle
 
 
 def _codex_last_text(events: list[dict[str, Any]]) -> str:

@@ -21,7 +21,7 @@ from basivo_orch.billing.plans import PLANS
 from basivo_orch.billing.service import QuotaExceeded
 from basivo_orch.config import Settings, get_settings
 from basivo_orch.flows.graph import Graph
-from basivo_orch.flows.models import Flow, FlowVersion, Run, RunStatus, TriggerKind
+from basivo_orch.flows.models import Artifact, Flow, FlowVersion, Run, RunStatus, TriggerKind
 
 NOW = datetime(2026, 6, 15, 12, 0, tzinfo=UTC)
 
@@ -330,6 +330,83 @@ async def test_a_paid_plan_has_unlimited_flows(session: AsyncSession, organizati
             description=None,
             graph=GRAPH,
         )
+
+
+# --- apps and storage ------------------------------------------------------
+
+
+async def test_the_app_after_the_last_free_one_is_refused(
+    session: AsyncSession, organization: Organization
+):
+    """Apps are capped apart from flows: each message runs a coding agent."""
+    from basivo_orch.appbuilder import service as apps
+
+    for index in range(PLANS["free"].apps):
+        await apps.create_project(session, organization_id=organization.id, name=f"App {index}")
+    with pytest.raises(QuotaExceeded) as raised:
+        await apps.create_project(session, organization_id=organization.id, name="One too many")
+    assert raised.value.limit_name == "apps"
+
+    # And nothing half made: the refused app left no flow behind.
+    flows = await session.execute(select(Flow).where(Flow.organization_id == organization.id))
+    assert len(list(flows.scalars().all())) == PLANS["free"].apps
+
+
+async def test_storage_counts_files_and_uploads_together(
+    session: AsyncSession, organization: Organization
+):
+    """The limit is disk, so everything on it counts: rendered files, app
+    builds, and the images somebody uploaded to an app."""
+    from basivo_orch.appbuilder import service as apps
+    from basivo_orch.flows.models import Artifact
+
+    session.add(
+        Artifact(
+            organization_id=organization.id,
+            filename="poster.png",
+            size_bytes=300_000,
+            data=b"x" * 10,
+        )
+    )
+    await session.commit()
+
+    project = await apps.create_project(session, organization_id=organization.id, name="Shop")
+    await apps.add_asset(
+        session,
+        project=project,
+        filename="logo.png",
+        data=b"\x89PNG\r\n\x1a\n" + b"y" * 200_000,
+    )
+    assert await service.storage_bytes(session, organization.id) == 300_000 + 200_008
+
+
+async def test_the_file_that_would_go_over_the_plan_is_refused(
+    session: AsyncSession, organization: Organization, monkeypatch: pytest.MonkeyPatch
+):
+    """Checked before the write, because disk is shared with every other
+    workspace on the deployment."""
+    from dataclasses import replace
+
+    from basivo_orch.billing import pricing
+
+    monkeypatch.setitem(PLANS, "free", replace(PLANS["free"], storage_mb=1))
+    pricing.invalidate()
+
+    session.add(
+        Artifact(
+            organization_id=organization.id,
+            filename="render.mp4",
+            size_bytes=900_000,
+            data=b"x" * 10,
+        )
+    )
+    await session.commit()
+
+    await service.check_storage_quota(session, organization.id, adding=100_000)
+    with pytest.raises(QuotaExceeded) as raised:
+        await service.check_storage_quota(session, organization.id, adding=200_000)
+    assert raised.value.limit_name == "storage"
+    assert "MB" in raised.value.message
 
 
 async def test_the_second_seat_on_the_free_plan_is_refused(
