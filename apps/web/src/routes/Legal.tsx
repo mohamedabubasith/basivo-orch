@@ -246,10 +246,12 @@ export function Terms() {
     >
       <Section title="1. Who we are and what this is">
         <p>
-          {BUSINESS.legalName} operates {BUSINESS.brand}, a workflow automation
-          service: you draw a pipeline, and the service runs it. By creating an
-          account you accept these terms. If you do not accept them, do not use
-          the service.
+          {BUSINESS.legalName === BUSINESS.brand
+            ? BUSINESS.brand
+            : `${BUSINESS.legalName}, which operates ${BUSINESS.brand},`}{" "}
+          is a workflow automation service: you draw a pipeline, and the service
+          runs it. By creating an account you accept these terms. If you do not
+          accept them, do not use the service.
         </p>
       </Section>
 

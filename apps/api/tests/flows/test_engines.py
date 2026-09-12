@@ -36,7 +36,11 @@ def _fake(tmp_path: Path, name: str, body: str) -> Path:
         "cfg = os.environ.get('OPENCODE_CONFIG', '')\n"
         "home = os.environ.get('HOME', '')\n"
         "db = os.path.join(home, 'data', 'opencode', 'opencode.db')\n"
-        "json.dump({'db': open(db).read() if os.path.exists(db) else None,"
+        # Bytes, not text: a real warmed cache on the developer's machine puts a
+        # binary sqlite file here, and reading it as UTF-8 failed the fixture
+        # rather than the code under test.
+        "json.dump({'db': open(db, 'rb').read().decode('utf-8', 'replace')"
+        " if os.path.exists(db) else None,"
         " 'config_is_link': os.path.islink(os.path.join(home, 'config')),"
         " 'config_has_modules': os.path.isdir("
         "os.path.join(home, 'config', 'opencode', 'node_modules'))},"

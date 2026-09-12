@@ -539,9 +539,9 @@ def test_the_public_pricing_page_says_what_the_plans_enforce():
 
     from basivo_orch.billing.plans import PLAN_ORDER, PLANS
 
-    page = (
-        Path(__file__).resolve().parents[4] / "apps/web/src/routes/Legal.tsx"
-    ).read_text(encoding="utf-8")
+    page = (Path(__file__).resolve().parents[4] / "apps/web/src/routes/Legal.tsx").read_text(
+        encoding="utf-8"
+    )
 
     missing: list[str] = []
     for code in PLAN_ORDER:

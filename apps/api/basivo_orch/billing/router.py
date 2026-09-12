@@ -82,7 +82,7 @@ async def read_billing(
             apps_limit=plan.apps,
             seats_used=state.seats_used,
             seats_limit=plan.seats,
-            storage_used_mb=round(state.storage_used_bytes / (1024 * 1024)),
+            storage_used_mb=round(state.storage_used_bytes / (1024 * 1024), 1),
             storage_limit_mb=plan.storage_mb,
             history_days=plan.history_days,
         ),

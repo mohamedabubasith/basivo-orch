@@ -92,13 +92,19 @@ function Meter({
   hint,
 }: {
   label: string;
-  used: number;
-  limit: number | null;
+  /** Undefined when the API has not been upgraded yet. See below. */
+  used: number | undefined;
+  limit: number | null | undefined;
   hint?: string;
 }) {
-  const share = limit === null ? 0 : Math.min(used / Math.max(limit, 1), 1);
+  // An API one deploy behind this bundle does not send a field this page was
+  // written for, and reading a number off `undefined` took the whole billing
+  // page down rather than one meter. A missing figure is a missing meter.
+  if (typeof used !== "number") return null;
+  const ceiling = limit ?? null;
+  const share = ceiling === null ? 0 : Math.min(used / Math.max(ceiling, 1), 1);
   const tone =
-    limit === null || share < 0.8
+    ceiling === null || share < 0.8
       ? "var(--status-good)"
       : share < 1
         ? "var(--status-warn)"
@@ -110,7 +116,7 @@ function Meter({
         <p className="text-sm font-medium text-ink-200">{label}</p>
         <p className="font-mono text-sm text-ink-300">
           {used.toLocaleString()}
-          <span className="text-ink-500"> / {limitText(limit)}</span>
+          <span className="text-ink-500"> / {limitText(ceiling)}</span>
         </p>
       </div>
       <div className="mt-2 h-2 overflow-hidden rounded-full bg-ink-800">

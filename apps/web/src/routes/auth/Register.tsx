@@ -193,7 +193,18 @@ export function Register() {
         </Button>
 
         <p className="text-center text-xs leading-relaxed text-ink-500">
-          By creating an account you agree to our terms and privacy policy.
+          By creating an account you agree to our{" "}
+          <Link to="/terms" className="text-ink-300 underline hover:text-ink-100">
+            terms
+          </Link>{" "}
+          and{" "}
+          <Link
+            to="/privacy"
+            className="text-ink-300 underline hover:text-ink-100"
+          >
+            privacy policy
+          </Link>
+          .
         </p>
       </form>
 

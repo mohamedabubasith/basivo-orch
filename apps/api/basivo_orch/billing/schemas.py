@@ -51,8 +51,10 @@ class UsageRead(BaseModel):
     seats_used: int
     seats_limit: int | None
     #: Files and app builds, in megabytes, because a workspace reads its own
-    #: storage in the units its plan is written in.
-    storage_used_mb: int
+    #: storage in the units its plan is written in. One decimal: a workspace
+    #: holding a few hundred kilobytes has not used "0 MB", and a meter that
+    #: says it has looks broken to the person who just built something.
+    storage_used_mb: float
     storage_limit_mb: int | None
     history_days: int
 
