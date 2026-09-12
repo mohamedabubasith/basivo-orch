@@ -80,14 +80,15 @@ MAX_ARGV_PROMPT = 60_000
 
 #: How long a streaming agent may say nothing before it is presumed gone.
 #:
-#: The agents here print an event for every model token and every tool call,
-#: so a healthy run is never silent for long: the gaps are a model thinking,
-#: seconds at most. Seven silent minutes means the provider is holding a
-#: socket open and sending nothing, which no overall timeout notices until it
-#: is far too late, and which the person watching experiences as a spinner
-#: that never stops. Stalls are killed here, quickly, and reported as what
-#: they are.
-STALL_SECONDS = 120.0
+#: The agents here print an event when a tool finishes and when the model
+#: speaks, so silence is one model call in progress. Those are seconds
+#: normally and a minute or two when a free endpoint is queueing, which is why
+#: this is not tighter: the failure it exists for is a provider holding a
+#: socket open and sending nothing for the rest of the node's budget, which no
+#: overall timeout notices until far too late and which the person watching
+#: experiences as a spinner that never stops. Stalls are killed here and
+#: reported as what they are.
+STALL_SECONDS = 300.0
 
 
 @dataclass

@@ -43,6 +43,8 @@ refused even when its signature is valid.
 | Limit | Where it is enforced |
 |---|---|
 | Runs per month | `flows.service.create_run`, so all four routes, the webhook path and the schedule ticker share one check |
+| Apps | `appbuilder.service.create_project`, before the flow and the address are written |
+| Storage | `FlowEngine._save_artifact` and the app builder's upload route, the two places bytes are written. Counted over every artifact and every uploaded image the workspace holds |
 | Flows | `flows.service.create_flow`, so the template installer cannot get past it |
 | Members | `auth/routers/orgs.py::invite_member` |
 | Run history | `flows.service.list_runs` filters the window. Nothing is deleted |
