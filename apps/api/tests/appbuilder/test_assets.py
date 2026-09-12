@@ -188,7 +188,11 @@ async def test_the_route_takes_a_picture_and_refuses_a_document(session, organiz
     # And the image itself comes back, with nothing allowed to run in it.
     served = await router.read_asset(project.id, stored.id, context=context, session=session)
     assert served.body == PNG
-    assert served.headers["content-security-policy"].startswith("sandbox")
+    # Nothing may run, and the console must still be able to paint it: an
+    # opaque response here is a broken thumbnail in the screen that asked.
+    assert served.headers["content-security-policy"] == "default-src 'none'"
+    assert "sandbox" not in served.headers["content-security-policy"]
+    assert served.headers["cross-origin-resource-policy"] == "cross-origin"
 
     await router.delete_asset(project.id, stored.id, context=context, session=session)
     assert await service.list_assets(session, project) == []

@@ -52,6 +52,17 @@ def _site(files: dict[str, bytes]) -> bytes:
     return buffer.getvalue()
 
 
+def _context(organization):
+    """The little of an authenticated caller that these routes read."""
+    from basivo_orch.auth.authz import OrgContext, Permission, Role
+    from basivo_orch.auth.models import User
+
+    user = User(id=uuid.uuid4(), email="owner@example.com", hashed_password="x", is_active=True)  # noqa: S106 — never verified here; the gate runs before the route.
+    return OrgContext(
+        user=user, organization=organization, role=Role.OWNER, permissions=frozenset(Permission)
+    )
+
+
 async def _built(session, organization, project, number: int, body: bytes) -> AppVersion:
     build = Artifact(
         organization_id=organization.id,
@@ -373,6 +384,28 @@ async def test_the_download_carries_the_pictures_that_are_not_in_the_tree(sessio
     )
     with zipfile.ZipFile(io.BytesIO(body)) as bundle:
         assert f"{project.slug}-v1/public/uploads/front.png" in bundle.namelist()
+
+
+async def test_the_code_tab_reads_a_version_and_lists_what_it_cannot_show(
+    session, organization
+):
+    """Text arrives with the listing, because a tree that needs a request per
+    click feels broken. A photograph is listed with its size and no text."""
+    project = await service.create_project(session, organization_id=organization.id, name="Code")
+    version = await _built(session, organization, project, 1, b"<h1>hi</h1>")
+    await service.add_asset(
+        session, project=project, filename="front.png", data=b"\x89PNG\r\n\x1a\nphoto"
+    )
+
+    files = await api.read_source(
+        project.id, version.id, context=_context(organization), session=session
+    )
+    by_path = {file.path: file for file in files}
+
+    assert "src/App.tsx" in by_path and by_path["src/App.tsx"].text
+    assert by_path["package.json"].text.startswith("{")
+    upload = by_path["public/uploads/front.png"]
+    assert upload.text == "" and upload.size_bytes > 0
 
 
 async def test_one_message_at_a_time(session, organization):

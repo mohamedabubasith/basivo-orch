@@ -437,9 +437,18 @@ async def read_asset(
         headers={
             "Cache-Control": "private, max-age=86400, immutable",
             # An uploaded SVG is a document with script in it as easily as a
-            # picture. Nothing here may run: this address is the console's own.
-            "Content-Security-Policy": "sandbox; default-src 'none'",
+            # picture, so nothing here may load or run anything: this address
+            # is the console's own. `sandbox` was here too and was wrong: it
+            # gives the response an opaque origin, which made the browser
+            # refuse to paint the thumbnail in the very screen that asked for
+            # it. `default-src 'none'` already stops an SVG opened directly
+            # from fetching or executing.
+            "Content-Security-Policy": "default-src 'none'",
             "X-Content-Type-Options": "nosniff",
+            # The console and the API are one origin in production and two in
+            # development. Embedding is not access: the session cookie is
+            # still what admits anybody to this route.
+            "Cross-Origin-Resource-Policy": "cross-origin",
         },
     )
 
@@ -509,6 +518,67 @@ async def download_source(
             "Cache-Control": "private, no-store",
         },
     )
+
+
+class SourceFile(BaseModel):
+    path: str
+    #: Empty for a file that is not text, such as an uploaded photograph.
+    text: str
+    size_bytes: int
+
+
+#: A page's source is a few dozen small files. This ceiling is about a browser
+#: holding the response, not about the project: past it the console shows the
+#: tree and asks you to download the zip for the rest.
+MAX_SOURCE_TEXT = 600_000
+#: One file. A minified vendor blob in `public/` is not something to read here.
+MAX_FILE_TEXT = 120_000
+
+
+@router.get("/{project_id}/versions/{version_id}/files", response_model=list[SourceFile])
+async def read_source(
+    project_id: uuid.UUID,
+    version_id: uuid.UUID,
+    context: OrgContext = Depends(require(Permission.FLOW_READ)),
+    session: AsyncSession = Depends(get_async_session),
+) -> list[SourceFile]:
+    """The project's files at one version, for the Code tab beside the preview.
+
+    Text arrives with the listing rather than one request per file: the whole
+    project is smaller than a photograph, and a tree that needs a round trip
+    per click feels broken on a slow connection.
+    """
+    project = await _load(session, context.organization_id, project_id)
+    version = await session.get(AppVersion, version_id)
+    if version is None or version.project_id != project.id or version.source_artifact_id is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "That version does not exist.")
+    artifact = await session.get(Artifact, version.source_artifact_id)
+    if artifact is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "That version does not exist.")
+
+    files: list[SourceFile] = []
+    budget = MAX_SOURCE_TEXT
+    with tarfile.open(fileobj=io.BytesIO(artifact.data), mode="r:gz") as tar:
+        for member in sorted(tar.getmembers(), key=lambda m: m.name):
+            if not member.isfile() or ".." in member.name:
+                continue
+            handle = tar.extractfile(member)
+            blob = handle.read() if handle is not None else b""
+            text = ""
+            if len(blob) <= MAX_FILE_TEXT and budget > 0:
+                try:
+                    text = blob.decode("utf-8")
+                except UnicodeDecodeError:
+                    text = ""  # not text: listed, not shown
+                else:
+                    budget -= len(text)
+            files.append(SourceFile(path=member.name.strip("/"), text=text, size_bytes=member.size))
+
+    # The uploads live outside the stored tree, so they are added here, listed
+    # rather than shown: a photograph has nothing to read.
+    for path, blob in (await service.asset_files(session, project)).items():
+        files.append(SourceFile(path=path, text="", size_bytes=len(blob)))
+    return sorted(files, key=lambda file: file.path)
 
 
 README = """# {name}

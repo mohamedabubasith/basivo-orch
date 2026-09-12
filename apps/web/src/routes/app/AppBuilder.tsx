@@ -35,6 +35,7 @@ import { cx } from "../../lib/cx";
 import { useWorkspace } from "../../lib/workspace";
 import { Alert, Button, Pill, Spinner } from "../../components/ui";
 import { Formatted } from "../../components/chat/markdown";
+import { CodeBrowser, type SourceFile } from "./code";
 import { RelativeTime } from "./bits";
 import type { AppProject } from "./Apps";
 
@@ -104,6 +105,9 @@ export default function AppBuilder() {
   const [uploading, setUploading] = useState(false);
   // What the agent is doing right now, straight from the run's own events.
   const [activity, setActivity] = useState("");
+  const [tab, setTab] = useState<"preview" | "code">("preview");
+  const [files, setFiles] = useState<SourceFile[] | null>(null);
+  const [history, setHistory] = useState(false);
   const picker = useRef<HTMLInputElement>(null);
 
   const base = orgId ? `/api/v1/orgs/${orgId}/apps/${appId}` : "";
@@ -111,6 +115,8 @@ export default function AppBuilder() {
     (turn) => turn.status === "queued" || turn.status === "running",
   );
   const builtCount = versions.length;
+  /** The version the preview and the code tab show: the newest one. */
+  const latestId = versions[0]?.id ?? "";
 
   const load = useCallback(async () => {
     if (!base) return;
@@ -183,6 +189,29 @@ export default function AppBuilder() {
       window.clearInterval(timer);
     };
   }, [running, load, builtCount, runId, orgId]);
+
+  // The code tab reads a version, so it is fetched when that tab is open and
+  // again whenever a turn produces a new one. Not on page load: most visits
+  // are to the preview, and the source is the larger of the two.
+  useEffect(() => {
+    if (tab !== "code" || !base || !latestId) {
+      return;
+    }
+    let live = true;
+    void (async () => {
+      try {
+        const list = await api.get<SourceFile[]>(
+          `${base}/versions/${latestId}/files`,
+        );
+        if (live) setFiles(list);
+      } catch (err) {
+        if (!isSessionEnded(err) && live) setFiles([]);
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [tab, base, latestId]);
 
   async function send(event: FormEvent) {
     event.preventDefault();
@@ -267,33 +296,35 @@ export default function AppBuilder() {
   return (
     <div className="flex h-[calc(100dvh-8rem)] min-h-[32rem] flex-col gap-4">
       <header className="flex flex-wrap items-center justify-between gap-3">
-        <div className="min-w-0">
+        <div className="flex min-w-0 items-center gap-2.5">
           <Link
             to="/app/apps"
-            className="text-sm text-ink-400 transition hover:text-ink-200"
+            aria-label="Back to apps"
+            className="rounded-lg p-1.5 text-ink-400 transition hover:bg-ink-800/70 hover:text-ink-100"
           >
-            Apps
+            <Icon path="M15 19l-7-7 7-7" />
           </Link>
-          <h1 className="flex items-center gap-2.5 text-xl font-medium text-ink-50">
+          <h1 className="flex min-w-0 items-center gap-2.5 text-base font-medium text-ink-50">
             <span className="truncate">{project.name}</span>
             <Pill tone="warn">Beta</Pill>
           </h1>
-        </div>
-        <div className="flex items-center gap-2">
           {project.published_version ? (
-            <Pill tone="good">deployed v{project.published_version}</Pill>
-          ) : (
-            <Pill>not deployed</Pill>
-          )}
+            <Pill tone="good">v{project.published_version} live</Pill>
+          ) : null}
+        </div>
+        <div className="relative flex items-center gap-2">
+          <Button
+            variant="ghost"
+            onClick={() => setHistory((open) => !open)}
+            disabled={versions.length === 0}
+          >
+            {latest ? `v${latest.version}` : "No versions"}
+            <span className="ml-1.5 text-ink-500">history</span>
+          </Button>
           {project.published_version && (
-            <>
-              <Button variant="ghost" onClick={copyShareLink}>
-                {copied ? "Link copied" : "Copy link"}
-              </Button>
-              <Button variant="ghost" onClick={() => act("unpublish")}>
-                Unpublish
-              </Button>
-            </>
+            <Button variant="ghost" onClick={copyShareLink}>
+              {copied ? "Link copied" : "Share"}
+            </Button>
           )}
           {latest && (
             <Button
@@ -303,13 +334,27 @@ export default function AppBuilder() {
               {latest.published ? "Deployed" : `Deploy v${latest.version}`}
             </Button>
           )}
+          {history && (
+            <VersionMenu
+              versions={versions}
+              published={project.published_version}
+              busy={running}
+              onClose={() => setHistory(false)}
+              onDeploy={(version) => act(`versions/${version.id}/deploy`)}
+              onRestore={(version) => act(`versions/${version.id}/restore`)}
+              onUnpublish={() => act("unpublish")}
+              codeUrl={(version) =>
+                `${API_BASE}${base}/versions/${version.id}/source.zip`
+              }
+            />
+          )}
         </div>
       </header>
 
       {error && <Alert tone="error">{error}</Alert>}
 
       <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[minmax(20rem,26rem)_1fr]">
-        <section className="flex min-h-0 flex-col rounded-2xl border border-ink-700/70 bg-ink-900/50">
+        <section className="flex min-h-0 min-w-0 flex-col rounded-2xl border border-ink-700/70 bg-ink-900/50">
           <Conversation
             turns={turns}
             running={running}
@@ -318,83 +363,164 @@ export default function AppBuilder() {
           />
           <form
             onSubmit={send}
-            className="border-t border-ink-700/70 p-3"
+            className="flex-none border-t border-ink-700/70 p-3"
             aria-label="Describe a change"
           >
-            {library && library.items.length > 0 && (
-              <Uploads
-                library={library}
-                onPick={(asset) =>
-                  setMessage(
-                    (text) => `${text}${text.trim() ? " " : ""}${asset.path} `,
-                  )
-                }
-                onRemove={removeAsset}
-                busy={running}
-              />
-            )}
-            <textarea
-              value={message}
-              onChange={(event) => setMessage(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
-                  void send(event as unknown as FormEvent);
-                }
-              }}
-              rows={3}
-              maxLength={8000}
-              disabled={running}
-              placeholder={
-                turns.length === 0
-                  ? "A landing page for a bakery called Sunrise, with the menu and opening hours"
-                  : "Make the header smaller and move the menu above it"
-              }
-              className="block w-full resize-none rounded-xl border border-ink-600/70 bg-ink-900/60 px-3.5 py-3 text-sm text-ink-100 placeholder:text-ink-500 focus:border-brand-400 focus:outline-none disabled:opacity-60"
-            />
-            <div className="mt-2 flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <input
-                  ref={picker}
-                  type="file"
-                  accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml"
-                  multiple
-                  hidden
-                  onChange={(event) => void upload(event.target.files)}
+            {/* One box. The attachments, the text and the two controls belong
+                to the same act, and three separate panels made a chat window
+                look like a form. */}
+            <div className="rounded-2xl border border-ink-600/70 bg-ink-900/60 transition focus-within:border-brand-400">
+              {library && library.items.length > 0 && (
+                <Uploads
+                  library={library}
+                  onPick={(asset) =>
+                    setMessage(
+                      (text) => `${text}${text.trim() ? " " : ""}${asset.path} `,
+                    )
+                  }
+                  onRemove={removeAsset}
+                  busy={running}
                 />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  disabled={running || uploading}
-                  onClick={() => picker.current?.click()}
+              )}
+
+              <textarea
+                value={message}
+                onChange={(event) => setMessage(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && !event.shiftKey) {
+                    // Enter sends, which is what a chat box does everywhere
+                    // else. Shift and Enter is the new line.
+                    void send(event as unknown as FormEvent);
+                  }
+                }}
+                rows={3}
+                maxLength={8000}
+                disabled={running}
+                placeholder={
+                  turns.length === 0
+                    ? "A landing page for a bakery called Sunrise, with the menu and opening hours"
+                    : "Make the header smaller and move the menu above it"
+                }
+                className="block w-full resize-none bg-transparent px-3.5 pt-3 pb-2 text-sm text-ink-100 placeholder:text-ink-500 focus:outline-none disabled:opacity-60"
+              />
+
+              <div className="flex items-center justify-between gap-2 px-2 pb-2">
+                <div className="flex items-center gap-1">
+                  <input
+                    ref={picker}
+                    type="file"
+                    accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml"
+                    multiple
+                    hidden
+                    onChange={(event) => void upload(event.target.files)}
+                  />
+                  <button
+                    type="button"
+                    aria-label="Add an image"
+                    title="Add an image for this app to use"
+                    disabled={running || uploading}
+                    onClick={() => picker.current?.click()}
+                    className="rounded-lg p-2 text-ink-400 transition hover:bg-ink-800/70 hover:text-ink-100 disabled:opacity-40"
+                  >
+                    {uploading ? (
+                      <Spinner className="h-4 w-4" />
+                    ) : (
+                      <Icon path="M21 15l-5-5L9 17M8.5 9.5a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zM4 5h16v14H4z" />
+                    )}
+                  </button>
+                  <p className="text-xs text-ink-500">
+                    {running
+                      ? "Working on your last message"
+                      : "Enter to send, Shift and Enter for a new line"}
+                  </p>
+                </div>
+                <button
+                  type="submit"
+                  aria-label="Send"
+                  disabled={running || sending || !message.trim()}
+                  className="rounded-xl bg-brand-500 p-2 text-ink-950 transition hover:brightness-110 disabled:bg-ink-700 disabled:text-ink-500"
                 >
-                  {uploading ? "Adding" : "Add image"}
-                </Button>
-                <p className="text-xs text-ink-500">
-                  {running ? "Working on your last message" : "Enter to add a line"}
-                </p>
+                  {running || sending ? (
+                    <Spinner className="h-4 w-4" />
+                  ) : (
+                    <Icon path="M5 12h14M13 6l6 6-6 6" />
+                  )}
+                </button>
               </div>
-              <Button
-                type="submit"
-                disabled={running || sending || !message.trim()}
-              >
-                {running ? "Working" : "Send"}
-              </Button>
             </div>
           </form>
         </section>
 
-        <section className="flex min-h-0 flex-col gap-3">
-          <div className="relative min-h-0 flex-1 overflow-hidden rounded-2xl border border-ink-700/70 bg-white">
-            {previewUrl ? (
+        <section className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl border border-ink-700/70 bg-ink-900/50">
+          <div className="flex flex-none items-center justify-between gap-2 border-b border-ink-700/70 px-2 py-1.5">
+            <div
+              role="tablist"
+              aria-label="Preview or code"
+              className="flex items-center gap-0.5 rounded-xl bg-ink-900/70 p-0.5"
+            >
+              {(["preview", "code"] as const).map((which) => (
+                <button
+                  key={which}
+                  role="tab"
+                  aria-selected={tab === which}
+                  onClick={() => setTab(which)}
+                  className={cx(
+                    "rounded-lg px-3 py-1.5 text-sm capitalize transition",
+                    tab === which
+                      ? "bg-ink-800 text-ink-100"
+                      : "text-ink-400 hover:text-ink-200",
+                  )}
+                >
+                  {which}
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-0.5">
+              <button
+                type="button"
+                aria-label="Reload the preview"
+                title="Reload"
+                disabled={!previewUrl}
+                onClick={() => setPreviewKey((key) => key + 1)}
+                className="rounded-lg p-2 text-ink-400 transition hover:bg-ink-800/70 hover:text-ink-100 disabled:opacity-40"
+              >
+                <Icon path="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6" />
+              </button>
+              <a
+                href={previewUrl || undefined}
+                target="_blank"
+                rel="noreferrer noopener"
+                aria-label="Open the preview in a new tab"
+                title="Open in a new tab"
+                className={cx(
+                  "rounded-lg p-2 text-ink-400 transition hover:bg-ink-800/70 hover:text-ink-100",
+                  !previewUrl && "pointer-events-none opacity-40",
+                )}
+              >
+                <Icon path="M14 4h6v6M20 4l-8.5 8.5M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" />
+              </a>
+            </div>
+          </div>
+
+          <div className="min-h-0 flex-1 bg-ink-950/40">
+            {tab === "code" ? (
+              files ? (
+                <CodeBrowser files={files} />
+              ) : (
+                <div className="grid h-full place-items-center">
+                  <Spinner className="h-5 w-5" />
+                </div>
+              )
+            ) : previewUrl ? (
               <iframe
                 key={previewKey}
                 src={previewUrl}
                 title={`${project.name} preview`}
-                className="h-full w-full"
+                className="h-full w-full bg-white"
                 sandbox="allow-scripts allow-forms allow-popups allow-modals"
               />
             ) : (
-              <div className="grid h-full place-items-center bg-ink-900/60 p-8 text-center">
+              <div className="grid h-full place-items-center p-8 text-center">
                 <p className="max-w-sm text-sm text-ink-400">
                   Nothing built yet. Describe the page you want and it appears
                   here.
@@ -402,15 +528,6 @@ export default function AppBuilder() {
               </div>
             )}
           </div>
-          <VersionRail
-            versions={versions}
-            onDeploy={(version) => act(`versions/${version.id}/deploy`)}
-            onRestore={(version) => act(`versions/${version.id}/restore`)}
-            busy={running}
-            codeUrl={(version) =>
-              `${API_BASE}${base}/versions/${version.id}/source.zip`
-            }
-          />
         </section>
       </div>
     </div>
@@ -495,7 +612,7 @@ function Conversation({
           animate={{ opacity: 1, y: 0 }}
           className="space-y-2"
         >
-          <p className="ml-auto max-w-[85%] rounded-2xl rounded-br-sm bg-brand-500/15 px-3.5 py-2.5 text-sm text-ink-100">
+          <p className="ml-auto max-w-[85%] rounded-2xl rounded-br-sm bg-brand-500/15 px-3.5 py-2.5 text-sm wrap-anywhere text-ink-100">
             {turn.prompt}
           </p>
           {turn.status === "built" && turn.reply && (
@@ -545,7 +662,7 @@ function Uploads({
 }) {
   const left = Math.max(0, library.limit_bytes - library.used_bytes);
   return (
-    <div className="mb-2 space-y-1.5">
+    <div className="space-y-1.5 border-b border-ink-700/60 px-2.5 pt-2.5 pb-2">
       <div className="flex flex-wrap gap-2">
         {library.items.map((asset) => (
           <div
@@ -618,81 +735,139 @@ function Working({ since, activity }: { since: string; activity: string }) {
   );
 }
 
+/** One line drawing, stroked in the current colour. */
+function Icon({ path }: { path: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className="h-4 w-4"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.7"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d={path} />
+    </svg>
+  );
+}
+
 /**
- * Every build, newest first, with the two things you can do to one.
+ * Every build, newest first, in a menu rather than a rail.
  *
- * Deploy points the share link at it. Go back makes it what the next message
- * starts from, which is undo, and leaves the newer versions alone so changing
- * your mind twice costs nothing.
+ * The rail was always visible and cost the preview sixty pixels of height on
+ * every screen, to show something people touch about once a session: going
+ * back to a version, or taking the code away. The preview is the point of
+ * this page, so the list moved behind the version number.
  */
-function VersionRail({
+function VersionMenu({
   versions,
+  published,
+  busy,
+  onClose,
   onDeploy,
   onRestore,
-  busy,
+  onUnpublish,
   codeUrl,
 }: {
   versions: Version[];
+  published: number | null;
+  busy: boolean;
+  onClose: () => void;
   onDeploy: (version: Version) => void;
   onRestore: (version: Version) => void;
-  busy: boolean;
-  /** Where a version's code downloads from, given its id. */
+  onUnpublish: () => void;
   codeUrl: (version: Version) => string;
 }) {
-  const shown = useMemo(() => versions.slice(0, 12), [versions]);
-  if (shown.length === 0) return null;
+  const shown = useMemo(() => versions.slice(0, 20), [versions]);
 
   return (
-    <div className="flex gap-2 overflow-x-auto rounded-2xl border border-ink-700/70 bg-ink-900/50 p-3">
-      {shown.map((version) => (
-        <div
-          key={version.id}
-          className={cx(
-            "flex shrink-0 items-center gap-2 rounded-xl border px-3 py-2",
-            version.published
-              ? "border-[color-mix(in_oklab,var(--status-good)_45%,transparent)] bg-[color-mix(in_oklab,var(--status-good)_10%,transparent)]"
-              : "border-ink-700/70 bg-ink-800/40",
-          )}
-        >
-          <div className="text-sm text-ink-200">
-            v{version.version}
-            <span className="ml-2 text-xs text-ink-500">
-              <RelativeTime value={version.created_at} />
-            </span>
-          </div>
-          <a
-            href={version.url}
-            target="_blank"
-            rel="noreferrer noopener"
-            className="rounded-lg px-2 py-1 text-xs text-ink-300 transition hover:bg-ink-700/60 hover:text-ink-100"
-          >
-            Open
-          </a>
-          {!version.published && (
+    <>
+      {/* A click anywhere else closes it. Cheaper than a listener on the
+          document, and it cannot leak past unmount. */}
+      <button
+        type="button"
+        aria-label="Close the version list"
+        onClick={onClose}
+        className="fixed inset-0 z-30 cursor-default"
+      />
+      <div className="absolute top-full right-0 z-40 mt-2 w-[22rem] overflow-hidden rounded-2xl border border-ink-700/70 bg-ink-900 shadow-2xl">
+        <div className="flex items-center justify-between gap-2 border-b border-ink-700/70 px-3.5 py-2.5">
+          <p className="text-sm font-medium text-ink-100">Versions</p>
+          {published !== null && (
             <button
               type="button"
-              onClick={() => onDeploy(version)}
-              className="rounded-lg px-2 py-1 text-xs text-ink-300 transition hover:bg-ink-700/60 hover:text-ink-100"
+              onClick={() => {
+                onUnpublish();
+                onClose();
+              }}
+              className="text-xs text-ink-400 transition hover:text-ink-100"
             >
-              Deploy
+              Unpublish v{published}
             </button>
           )}
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => onRestore(version)}
-            className="rounded-lg px-2 py-1 text-xs text-ink-300 transition hover:bg-ink-700/60 hover:text-ink-100 disabled:opacity-50"
-          >
-            Go back to this
-          </button>
-          <a
-            href={codeUrl(version)}
-            className="rounded-lg px-2 py-1 text-xs text-ink-300 transition hover:bg-ink-700/60 hover:text-ink-100"
-          >
-            Download code
-          </a>
         </div>
-      ))}
-    </div>
+
+        <ul className="max-h-[22rem] overflow-y-auto p-1.5">
+          {shown.map((version) => (
+            <li
+              key={version.id}
+              className="flex items-center gap-2 rounded-xl px-2 py-1.5 hover:bg-ink-800/60"
+            >
+              <div className="min-w-0 flex-1">
+                <p className="flex items-center gap-2 text-sm text-ink-100">
+                  v{version.version}
+                  {version.published && <Pill tone="good">live</Pill>}
+                </p>
+                <p className="text-xs text-ink-500">
+                  <RelativeTime value={version.created_at} />
+                </p>
+              </div>
+              <a
+                href={version.url}
+                target="_blank"
+                rel="noreferrer noopener"
+                title="Open this version"
+                className="rounded-lg p-1.5 text-ink-400 transition hover:bg-ink-700/60 hover:text-ink-100"
+              >
+                <Icon path="M14 4h6v6M20 4l-8.5 8.5M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" />
+              </a>
+              <a
+                href={codeUrl(version)}
+                title="Download this version as a project"
+                className="rounded-lg p-1.5 text-ink-400 transition hover:bg-ink-700/60 hover:text-ink-100"
+              >
+                <Icon path="M12 4v12M7 12l5 5 5-5M5 20h14" />
+              </a>
+              <button
+                type="button"
+                disabled={busy}
+                title="Start the next message from this version"
+                onClick={() => {
+                  onRestore(version);
+                  onClose();
+                }}
+                className="rounded-lg p-1.5 text-ink-400 transition hover:bg-ink-700/60 hover:text-ink-100 disabled:opacity-40"
+              >
+                <Icon path="M9 14 4 9l5-5M4 9h10a6 6 0 0 1 0 12h-3" />
+              </button>
+              {!version.published && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onDeploy(version);
+                    onClose();
+                  }}
+                  className="rounded-lg px-2 py-1 text-xs text-ink-300 transition hover:bg-ink-700/60 hover:text-ink-100"
+                >
+                  Deploy
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      </div>
+    </>
   );
 }
