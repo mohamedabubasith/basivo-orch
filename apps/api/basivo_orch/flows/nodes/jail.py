@@ -120,6 +120,19 @@ def _linked_targets(workspace: Path) -> list[Path]:
     return targets
 
 
+#: Why the last probe found no jail, for the error the operator actually reads.
+#: A message that says "none is available" and stops sends somebody to the
+#: documentation; a message carrying `bwrap: setting up uid map: Permission
+#: denied` sends them to the one line of configuration that fixes it.
+_refusal = ""
+
+
+def refusal() -> str:
+    """What the jail probe said, when it refused. Empty when it did not run."""
+    tool()
+    return _refusal
+
+
 @lru_cache(maxsize=1)
 def tool() -> str | None:
     """Which jail this machine can run, checked once by actually running it.
@@ -128,11 +141,15 @@ def tool() -> str | None:
     unprivileged user namespaces, which Docker's default seccomp profile
     denies. A probe that runs `/bin/true` in a jail is the only honest answer.
     """
+    global _refusal
+
     if MODE == "off":
         return None
     if platform.system() == "Darwin" and _find("sandbox-exec"):
         return "sandbox-exec"
     bwrap = _find("bwrap")
+    if bwrap is None:
+        _refusal = "bubblewrap (bwrap) is not installed on this worker."
     if bwrap:
         probe = [bwrap, "--unshare-all", "--share-net", "--die-with-parent"]
         for tree in SYSTEM_READ_ONLY:
@@ -145,10 +162,17 @@ def tool() -> str | None:
         try:
             result = subprocess.run(probe, capture_output=True, timeout=10, check=False)  # noqa: S603
         except (OSError, subprocess.TimeoutExpired) as exc:
+            _refusal = f"bwrap could not be run: {str(exc)[:200]}"
             log.warning("agent.jail.probe_failed", error=str(exc)[:200])
             return None
         if result.returncode == 0:
             return "bwrap"
+        said = result.stderr.decode(errors="replace").strip().splitlines()
+        _refusal = (
+            f"bwrap exited {result.returncode}: {said[-1][:200]}"
+            if said
+            else f"bwrap exited {result.returncode} with no message."
+        )
         log.warning(
             "agent.jail.unusable",
             detail=result.stderr.decode(errors="replace").strip()[-300:],
@@ -173,8 +197,11 @@ def wrap(
         if MODE == "required":
             raise NodeError(
                 "Coding agents run only inside an OS jail on this deployment, and none is "
-                "available on this worker. Install bubblewrap and allow user namespaces, or "
-                "set BASIVO_AGENT_JAIL=auto to run without one."
+                f"available on this worker. {refusal()} "
+                "In Docker the worker needs security_opt seccomp=unconfined and "
+                "apparmor=unconfined, and the host needs unprivileged user namespaces. "
+                "Setting BASIVO_AGENT_JAIL=auto runs the agent without a jail, which lets "
+                "anything it is told to read leave the workspace."
             )
         _warn_once()
         return list(argv)

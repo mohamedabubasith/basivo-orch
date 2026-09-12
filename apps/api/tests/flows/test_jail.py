@@ -35,6 +35,27 @@ def test_required_mode_refuses_to_run_an_agent_without_a_jail(monkeypatch, tmp_p
         jail.wrap(["agent"], workspace=tmp_path, home=tmp_path)
 
 
+def test_the_refusal_names_the_reason_rather_than_the_documentation(monkeypatch, tmp_path):
+    """An operator reading this in a run log needs the kernel's own words. The
+    first version said only that no jail was available, which is the one fact
+    they already knew."""
+    monkeypatch.setattr(jail, "MODE", "required")
+    monkeypatch.setattr(jail, "tool", lambda: None)
+    monkeypatch.setattr(
+        jail, "refusal", lambda: "bwrap exited 1: setting up uid map: Permission denied"
+    )
+    with pytest.raises(NodeError, match="setting up uid map"):
+        jail.wrap(["agent"], workspace=tmp_path, home=tmp_path)
+
+
+def test_a_missing_binary_and_a_refused_one_read_differently(monkeypatch, tmp_path):
+    monkeypatch.setattr(jail, "MODE", "required")
+    monkeypatch.setattr(jail, "_find", lambda name: None)
+    jail.tool.cache_clear()
+    assert jail.tool() is None
+    assert "not installed" in jail.refusal()
+
+
 def test_auto_mode_runs_unjailed_and_says_so_once(monkeypatch, tmp_path, caplog):
     monkeypatch.setattr(jail, "MODE", "auto")
     monkeypatch.setattr(jail, "tool", lambda: None)
