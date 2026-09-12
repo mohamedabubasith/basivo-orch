@@ -83,8 +83,11 @@ every customer it has, which shows up as a build that comes back with nothing
 said. Two things answer that. `BASIVO_OPENCODE_FALLBACK_MODELS` is tried in
 order when a model says nothing at all, and `BASIVO_OPENCODE_API_KEY` is a key
 the deployment owns, used for every run whose node names no credential of its
-own. With that key set the operator is paying, the customer is not, and
-nothing they see changes, because nothing they see ever named the model.
+own. That key does not mean paying for anything: the free models stay free
+with one, and what it buys is an account for the limit to be counted against
+instead of the server's address, which is shared by every customer at once. A
+paid model is a separate decision, made by naming one in
+`BASIVO_OPENCODE_MODEL`.
 
 Because that spend is ours, the free engine is metered: a turn counter per
 organisation per day, shared by the App Builder and `git.autofix`, checked in
