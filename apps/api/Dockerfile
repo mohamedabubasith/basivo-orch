@@ -214,14 +214,16 @@ RUN mkdir -p "$XDG_CACHE_HOME" \
     && chmod -R a+rX "$XDG_CACHE_HOME" /opt/basivo/remotion
 
 # A cold OpenCode home costs two things on its first real session: a one time
-# sqlite migration, and a 57MB package install it performs for itself. Every
-# run gets a throwaway HOME by design, so both are paid here instead, once, by
-# doing a real session against the free model.
+# sqlite migration, and a package install it performs for itself. Every run
+# gets a throwaway HOME by design, so both are warmed here, once.
 #
-# That makes this the model's smoke test as well: if the free model is gone or
-# renamed, no packages land and the build fails here rather than on somebody's
-# first flow. The run's own exit status is not the check, because a model
-# having a bad minute should not fail a deploy; the packages are.
+# Best effort, deliberately. The migration is offline and always works; the
+# package install happens inside a real session, which needs a model to
+# answer. An image build must not depend on somebody else's inference
+# endpoint being up, so a session that does not complete leaves a note in the
+# build log and nothing else. The worker warms what is missing on its first
+# turn and caches it (see `_write_opencode_home`), which is where the network
+# is known to work because a turn is already talking to a model.
 ENV BASIVO_OPENCODE_HOME_TEMPLATE=/opt/basivo/opencode
 RUN set -e; \
     mkdir -p /opt/basivo/opencode/work; \
@@ -230,10 +232,16 @@ RUN set -e; \
     XDG_DATA_HOME=/opt/basivo/opencode/data \
     XDG_CONFIG_HOME=/opt/basivo/opencode/config \
     XDG_CACHE_HOME=/opt/basivo/opencode/cache \
-    opencode run --pure --dir . -m "${BASIVO_OPENCODE_MODEL:-opencode/big-pickle}" \
-        "Reply with the single word OK." || true; \
-    test -d /opt/basivo/opencode/config/opencode/node_modules \
-        || (echo "OpenCode did not warm: the free model may have been renamed" && exit 1); \
+    timeout 180 opencode run --pure --dir . \
+        -m "${BASIVO_OPENCODE_MODEL:-opencode/big-pickle}" \
+        "Reply with the single word OK." || echo "opencode warm session skipped"; \
+    test -d /opt/basivo/opencode/data/opencode \
+        || (echo "opencode did not create its data directory" && exit 1); \
+    if [ -d /opt/basivo/opencode/config/opencode/node_modules ]; then \
+        echo "opencode packages warmed"; \
+    else \
+        echo "opencode packages not warmed at build; the first turn will do it"; \
+    fi; \
     rm -rf /opt/basivo/opencode/work; \
     chmod -R a+rX /opt/basivo/opencode
 
@@ -250,7 +258,7 @@ RUN set -e; \
     codex --version; \
     opencode --version; \
     bwrap --version; \
-    test -d /opt/basivo/opencode/config/opencode/node_modules && echo "opencode warmed"; \
+    test -d /opt/basivo/opencode/data/opencode && echo "opencode home warmed"; \
     test -s /opt/basivo/speech/voices-v1.0.bin && echo "voice model ok"
 
 

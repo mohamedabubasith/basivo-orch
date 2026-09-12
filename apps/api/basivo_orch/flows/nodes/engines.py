@@ -56,9 +56,22 @@ DEFAULT_OPENCODE_MODEL = os.environ.get("BASIVO_OPENCODE_MODEL", "opencode/big-p
 
 #: A prewarmed OpenCode home, baked into the worker image, holding `data` and
 #: `config`. Every run gets a throwaway HOME by design, and a cold one costs
-#: two things: a one time sqlite migration, and a 57MB package install that
-#: OpenCode performs on its first real session. Both are paid once, at build.
+#: two things: a one time sqlite migration, and a package install OpenCode
+#: performs on its first real session.
 OPENCODE_HOME_TEMPLATE = os.environ.get("BASIVO_OPENCODE_HOME_TEMPLATE", "")
+
+#: Where the worker keeps what the image could not warm.
+#:
+#: The image warms the home at build time, but the package half needs a real
+#: session, which needs a model to answer, and a build that depends on a third
+#: party's endpoint is a build that fails for reasons nobody in the room can
+#: fix. So the worker finishes the job on its first turn: that turn is already
+#: talking to a model, so the network is known to work, and what it installs
+#: is copied here for every turn after it.
+#:
+#: Written by the worker and never by an agent, which cannot see this path
+#: from inside its jail. That is what makes sharing it safe.
+OPENCODE_WARM_CACHE = os.environ.get("BASIVO_OPENCODE_WARM_CACHE", "/tmp/basivo-opencode-warm")  # noqa: S108
 
 #: An agent's task can be a whole bug report. Past this it does not travel as
 #: an argument: ARG_MAX is a real limit and a visible command line is a real
@@ -546,6 +559,7 @@ class OpenCodeEngine:
                 engine="OpenCode",
                 stall_seconds=STALL_SECONDS,
             )
+            await asyncio.to_thread(_keep_what_was_warmed, home)
 
         events = _jsonl(out)
         text = _opencode_text(events)
@@ -573,27 +587,68 @@ class OpenCodeEngine:
 # ---------------------------------------------------------------------------
 
 
+def _packages_in(home: Path) -> Path | None:
+    """Where OpenCode put the packages it installs for itself, if it has."""
+    candidate = home / "config" / "opencode" / "node_modules"
+    return candidate if candidate.is_dir() else None
+
+
 def _write_opencode_home(home: Path, config: dict[str, Any]) -> None:
     """Lay down a HOME OpenCode can start in without paying to warm it.
 
-    Both halves of the warmed template are *copied*, not shared. `data` holds
-    the database and the session history, which are a tenant's. `config`
-    holds the packages OpenCode installs for itself, and a shared, writable
-    copy of those would let one tenant's agent drop a plugin that runs inside
-    the next tenant's session. Fifty megabytes copied per turn is the price
-    of not having that conversation, and it is a fraction of a second.
+    Both halves of the warmed home are *copied*, not shared. `data` holds the
+    database and the session history, which are a tenant's. `config` holds the
+    packages OpenCode installs for itself, and a shared, writable copy of those
+    would let one tenant's agent drop a plugin that runs inside the next
+    tenant's session.
 
-    With no template, as on a developer machine, both are simply fresh and the
-    first run pays for warming them.
+    The image warms both at build time when it can. When it could not, the
+    cache filled by the first successful turn stands in. With neither, the
+    directories are simply fresh and this run pays for warming them, which is
+    slow exactly once.
     """
-    template = Path(OPENCODE_HOME_TEMPLATE) if OPENCODE_HOME_TEMPLATE else None
+    sources = [Path(p) for p in (OPENCODE_HOME_TEMPLATE, OPENCODE_WARM_CACHE) if p]
     for half in ("data", "config"):
-        if template and (template / half).is_dir():
-            shutil.copytree(template / half, home / half, dirs_exist_ok=True, symlinks=True)
+        for source in sources:
+            if (source / half).is_dir():
+                shutil.copytree(source / half, home / half, dirs_exist_ok=True, symlinks=True)
+                break
     (home / "tmp").mkdir(exist_ok=True)
     path = home / "opencode.json"
     path.write_text(json.dumps(config))
     path.chmod(0o600)
+
+
+def _keep_what_was_warmed(home: Path) -> None:
+    """Copy this run's packages into the cache, if nothing has yet.
+
+    Called after a turn, in a thread, and never allowed to fail one: this is
+    an optimisation for the next run, and a run that has already produced an
+    answer must not be lost to a full disk while tidying up.
+    """
+    packages = _packages_in(home)
+    if packages is None:
+        return
+    for source in (OPENCODE_HOME_TEMPLATE, OPENCODE_WARM_CACHE):
+        if source and _packages_in(Path(source)) is not None:
+            return
+    cache = Path(OPENCODE_WARM_CACHE)
+    try:
+        staging = cache.with_name(f"{cache.name}.{os.getpid()}")
+        shutil.rmtree(staging, ignore_errors=True)
+        for half in ("data", "config"):
+            if (home / half).is_dir():
+                shutil.copytree(home / half, staging / half, symlinks=True)
+        if cache.exists():
+            # Another worker got there first. Theirs is as good as ours.
+            shutil.rmtree(staging, ignore_errors=True)
+            return
+        # One rename, so a half copied cache is never what the next run finds.
+        staging.replace(cache)
+    except OSError as exc:  # pragma: no cover - a tidy-up, never load bearing
+        log.warning("opencode.warm_cache_failed", error=str(exc)[:200])
+    else:
+        log.info("opencode.warm_cached", path=str(cache))
 
 
 def _opencode_config(system_prompt: str, mcp_servers: McpServers | None) -> dict[str, Any]:

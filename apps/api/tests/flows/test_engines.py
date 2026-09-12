@@ -363,3 +363,32 @@ async def test_every_cli_agent_runs_inside_the_jail(monkeypatch, tmp_path):
             )
         assert wrapped, f"{name} ran its binary without the jail"
         assert name.split("_")[0] in wrapped[0][0]
+
+
+async def test_the_first_turn_warms_what_the_image_could_not(monkeypatch, tmp_path):
+    """The image warms OpenCode's packages at build time when the model
+    answers. When it could not, a build must still ship, so the first turn
+    that installs them keeps a copy for every turn after it."""
+    body = _OPENCODE_OUTPUT + (
+        "home = os.environ['HOME']\n"
+        "os.makedirs(os.path.join(home, 'config', 'opencode', 'node_modules'), exist_ok=True)\n"
+        "open(os.path.join(home, 'config', 'opencode', 'node_modules', 'marker'), 'w').write('x')\n"
+    )
+    monkeypatch.setenv("BASIVO_OPENCODE_BIN", str(_fake(tmp_path, "opencode", body)))
+    cache = tmp_path / "warm"
+    monkeypatch.setattr(engines, "OPENCODE_HOME_TEMPLATE", "")
+    monkeypatch.setattr(engines, "OPENCODE_WARM_CACHE", str(cache))
+
+    work = tmp_path / "work"
+    work.mkdir()
+    await engines.ENGINES["opencode"].run(
+        cwd=work, prompt="x", system_prompt="", timeout_seconds=30
+    )
+
+    assert (cache / "config" / "opencode" / "node_modules" / "marker").exists()
+
+    # And the next run starts from it rather than installing again.
+    home = tmp_path / "next"
+    home.mkdir()
+    await asyncio.to_thread(engines._write_opencode_home, home, {"agent": {}})
+    assert (home / "config" / "opencode" / "node_modules" / "marker").exists()
