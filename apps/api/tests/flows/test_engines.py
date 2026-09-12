@@ -560,3 +560,50 @@ async def test_an_agent_that_never_starts_is_given_up_on_sooner(monkeypatch, tmp
     )
     monkeypatch.setattr(engines, "STALL_SECONDS", 1.0)
     assert "provider refused the request" in (await attempt()).said
+
+
+async def test_a_deployment_can_pay_for_the_included_agent(monkeypatch, tmp_path):
+    """The included agent is free to the person building, not free to serve:
+    the shared tier rate limits per caller and a server is one caller for
+    everybody. An operator who would rather pay sets a key on the worker, and
+    the run uses it without the node naming any credential at all."""
+    monkeypatch.setenv(
+        "BASIVO_OPENCODE_BIN",
+        str(
+            _fake(
+                tmp_path,
+                "opencode",
+                "print(json.dumps({'type': 'text', 'part': {'type': 'text', 'text': 'done'}}))",
+            )
+        ),
+    )
+    monkeypatch.setattr(engines, "PLATFORM_OPENCODE_KEY", "sk-paid-by-the-operator")
+    work = tmp_path / "work"
+    work.mkdir()
+
+    await engines.ENGINES["opencode"].run(cwd=work, prompt="x", system_prompt="")
+
+    assert _call(tmp_path, "opencode")["env"]["OPENCODE_API_KEY"] == "sk-paid-by-the-operator"
+
+
+async def test_a_credential_on_the_node_still_wins(monkeypatch, tmp_path):
+    """Somebody building on their own key is not silently moved onto ours."""
+    monkeypatch.setenv(
+        "BASIVO_OPENCODE_BIN",
+        str(
+            _fake(
+                tmp_path,
+                "opencode",
+                "print(json.dumps({'type': 'text', 'part': {'type': 'text', 'text': 'done'}}))",
+            )
+        ),
+    )
+    monkeypatch.setattr(engines, "PLATFORM_OPENCODE_KEY", "sk-paid-by-the-operator")
+    work = tmp_path / "work"
+    work.mkdir()
+
+    await engines.ENGINES["opencode"].run(
+        cwd=work, prompt="x", system_prompt="", api_key="sk-theirs"
+    )
+
+    assert _call(tmp_path, "opencode")["env"]["OPENCODE_API_KEY"] == "sk-theirs"

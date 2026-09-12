@@ -55,6 +55,15 @@ log = get_logger(__name__)
 #: pays for something better should be able to say so.
 DEFAULT_OPENCODE_MODEL = os.environ.get("BASIVO_OPENCODE_MODEL", "opencode/big-pickle")
 
+#: A key this deployment owns, used when the node names no credential.
+#:
+#: The free tier is free to the person building, not free to serve: it is
+#: rate limited per caller, and a busy shared address is exactly what a server
+#: is. An operator who would rather pay than hand their customers a silent
+#: build puts a key here, and nothing changes for the customer, who was never
+#: told which model answers them in the first place.
+PLATFORM_OPENCODE_KEY = os.environ.get("BASIVO_OPENCODE_API_KEY", "").strip()
+
 #: What to try when the first one says nothing at all.
 #:
 #: The free models are free because they are being evaluated, and an evaluated
@@ -615,6 +624,7 @@ class OpenCodeEngine:
         # nothing at all gets tried once more with the next one, and the
         # person watching sees it happen rather than waiting out a second
         # five minute silence with no idea why.
+        api_key = api_key or PLATFORM_OPENCODE_KEY
         wanted = model or DEFAULT_OPENCODE_MODEL
         attempts = [wanted, *(m for m in OPENCODE_FALLBACK_MODELS if m != wanted)]
         for index, candidate in enumerate(attempts):

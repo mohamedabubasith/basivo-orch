@@ -77,6 +77,15 @@ built, by a real session whose packages have to land or the build fails. It
 never reaches the browser, the run log, or a node's configuration: a person
 sees "building", not a supplier.
 
+Free with no account holds for a laptop and does not hold for a server. The
+shared tier is rate limited per caller, and a deployment is one caller for
+every customer it has, which shows up as a build that comes back with nothing
+said. Two things answer that. `BASIVO_OPENCODE_FALLBACK_MODELS` is tried in
+order when a model says nothing at all, and `BASIVO_OPENCODE_API_KEY` is a key
+the deployment owns, used for every run whose node names no credential of its
+own. With that key set the operator is paying, the customer is not, and
+nothing they see changes, because nothing they see ever named the model.
+
 Because that spend is ours, the free engine is metered: a turn counter per
 organisation per day, shared by the App Builder and `git.autofix`, checked in
 the same place plan limits are checked today, with a message that names the
