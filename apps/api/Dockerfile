@@ -243,6 +243,15 @@ RUN set -e; \
         echo "opencode packages not warmed at build; the first turn will do it"; \
     fi; \
     rm -rf /opt/basivo/opencode/work; \
+    # The model catalogue, which OpenCode fetches from models.dev before it can
+    # name a model. Every run gets a fresh cache, so without this in the image
+    # every turn waits on a third party, and a turn that cannot reach it says
+    # nothing at all rather than failing. Fetched directly when the warm
+    # session above did not run far enough to write it.
+    mkdir -p /opt/basivo/opencode/cache/opencode; \
+    test -s /opt/basivo/opencode/cache/opencode/models.json \
+        || curl -fsSL --retry 3 https://models.dev/api.json \
+            -o /opt/basivo/opencode/cache/opencode/models.json; \
     chmod -R a+rX /opt/basivo/opencode
 
 
@@ -259,6 +268,7 @@ RUN set -e; \
     opencode --version; \
     bwrap --version; \
     test -d /opt/basivo/opencode/data/opencode && echo "opencode home warmed"; \
+    test -s /opt/basivo/opencode/cache/opencode/models.json && echo "opencode catalogue baked"; \
     test -s /opt/basivo/speech/voices-v1.0.bin && echo "voice model ok"
 
 

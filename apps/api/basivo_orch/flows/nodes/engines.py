@@ -761,11 +761,14 @@ def _packages_in(home: Path) -> Path | None:
 def _write_opencode_home(home: Path, config: dict[str, Any]) -> None:
     """Lay down a HOME OpenCode can start in without paying to warm it.
 
-    Both halves of the warmed home are *copied*, not shared. `data` holds the
-    database and the session history, which are a tenant's. `config` holds the
-    packages OpenCode installs for itself, and a shared, writable copy of those
-    would let one tenant's agent drop a plugin that runs inside the next
-    tenant's session.
+    All three parts are *copied*, not shared. `data` holds the database and
+    the session history, which are a tenant's. `config` holds the packages
+    OpenCode installs for itself, and a shared, writable copy of those would
+    let one tenant's agent drop a plugin that runs inside the next tenant's
+    session. `cache` holds the model catalogue, which OpenCode fetches from
+    models.dev before it can name a model: without it every turn depends on a
+    third party being reachable at that moment, and a turn that cannot reach
+    it does not fail loudly, it sits there saying nothing.
 
     The image warms both at build time when it can. When it could not, the
     cache filled by the first successful turn stands in. With neither, the
@@ -773,7 +776,7 @@ def _write_opencode_home(home: Path, config: dict[str, Any]) -> None:
     slow exactly once.
     """
     sources = [Path(p) for p in (OPENCODE_HOME_TEMPLATE, OPENCODE_WARM_CACHE) if p]
-    for half in ("data", "config"):
+    for half in ("data", "config", "cache"):
         for source in sources:
             if (source / half).is_dir():
                 shutil.copytree(source / half, home / half, dirs_exist_ok=True, symlinks=True)
@@ -801,7 +804,7 @@ def _keep_what_was_warmed(home: Path) -> None:
     try:
         staging = cache.with_name(f"{cache.name}.{os.getpid()}")
         shutil.rmtree(staging, ignore_errors=True)
-        for half in ("data", "config"):
+        for half in ("data", "config", "cache"):
             if (home / half).is_dir():
                 shutil.copytree(home / half, staging / half, symlinks=True)
         if cache.exists():

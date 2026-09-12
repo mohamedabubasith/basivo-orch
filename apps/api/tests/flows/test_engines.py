@@ -607,3 +607,26 @@ async def test_a_credential_on_the_node_still_wins(monkeypatch, tmp_path):
     )
 
     assert _call(tmp_path, "opencode")["env"]["OPENCODE_API_KEY"] == "sk-theirs"
+
+
+def test_the_model_catalogue_travels_with_the_warmed_home(tmp_path):
+    """OpenCode fetches the catalogue from models.dev before it can name a
+    model, and caches it. Every run gets a fresh HOME, so a cache left behind
+    means every turn waits on a third party, and a turn that cannot reach it
+    prints nothing at all rather than failing: the exact silence this is here
+    to stop."""
+    template = tmp_path / "warm"
+    (template / "data" / "opencode").mkdir(parents=True)
+    (template / "config" / "opencode" / "node_modules").mkdir(parents=True)
+    (template / "cache" / "opencode").mkdir(parents=True)
+    (template / "cache" / "opencode" / "models.json").write_text('{"opencode": {}}')
+    home = tmp_path / "home"
+    home.mkdir()
+
+    engines.OPENCODE_HOME_TEMPLATE = str(template)
+    try:
+        engines._write_opencode_home(home, {})
+    finally:
+        engines.OPENCODE_HOME_TEMPLATE = ""
+
+    assert (home / "cache" / "opencode" / "models.json").read_text() == '{"opencode": {}}'
