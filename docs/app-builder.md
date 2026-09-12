@@ -164,10 +164,16 @@ put it in the page". They will. Four walls, each doing a different job:
 
 `BASIVO_AGENT_JAIL=required` on the worker image: if the jail cannot start,
 the turn fails rather than running an agent without one. A developer machine
-defaults to `auto`, which runs unjailed and says so in the log, once. The
-container needs `seccomp=unconfined` and `apparmor=unconfined` to create user
-namespaces; neither grants the container anything new, they only let it build
-smaller boxes inside itself.
+defaults to `auto`, which runs unjailed and says so in the log, once. The container needs three `security_opt` lines, none of which grant it
+anything new: they only let it build smaller boxes inside itself.
+`seccomp=unconfined` and `apparmor=unconfined` let it create user namespaces.
+`systempaths=unconfined` is the one nobody guesses, and its absence looks like
+a namespace problem while being nothing of the kind: Docker masks paths inside
+`/proc` by mounting over them, and the kernel refuses to mount a fresh procfs
+inside a sandbox while the procfs it came from carries over-mounts. The symptom
+is exactly one line, `Can't mount proc on /newroot/proc: Operation not
+permitted`, and the agent never sees the unmasked paths anyway: it runs inside
+bwrap, with a private `/proc` showing only its own processes.
 
 What the jail deliberately allows: the network, because the agent's entire job
 is talking to a model; the API's virtualenv and package, read-only, because

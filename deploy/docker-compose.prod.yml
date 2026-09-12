@@ -213,9 +213,24 @@ services:
     # binary. Neither line adds a capability: the container still cannot do
     # anything it could not before; it can only carve itself into smaller
     # boxes, which is exactly what the jail does.
+    #
+    # `systempaths=unconfined` is the third, and the one whose absence looks
+    # like a user namespace problem but is not. Docker masks parts of /proc
+    # (kcore, keys, timer_list) by mounting over them, and the kernel refuses
+    # to mount a fresh procfs inside a sandbox while the procfs it came from
+    # carries over-mounts. bwrap then fails with:
+    #
+    #   Can't mount proc on /newroot/proc: Operation not permitted
+    #
+    # Unmasking them costs little here and buys the jail: those paths are
+    # readable by root in this container either way, and the agent never runs
+    # in this container. It runs inside bwrap, which gives it a private /proc
+    # showing only its own processes, no environment of ours, and none of the
+    # paths Docker was masking.
     security_opt:
       - seccomp=unconfined
       - apparmor=unconfined
+      - systempaths=unconfined
     deploy:
       replicas: 2
       resources:

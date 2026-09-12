@@ -177,8 +177,11 @@ def tool() -> str | None:
             "agent.jail.unusable",
             detail=result.stderr.decode(errors="replace").strip()[-300:],
             hint=(
-                "bwrap needs unprivileged user namespaces. In Docker, run the worker with "
-                "security_opt seccomp=unconfined (and apparmor=unconfined on Ubuntu 24.04)."
+                "In Docker the worker needs security_opt seccomp=unconfined, "
+                "apparmor=unconfined and systempaths=unconfined. The last one is what "
+                "'Can't mount proc on /newroot/proc' means: Docker masks paths inside "
+                "/proc, and the kernel will not mount a fresh procfs inside a sandbox "
+                "while the one it came from has over-mounts."
             ),
         )
     return None
@@ -198,8 +201,9 @@ def wrap(
             raise NodeError(
                 "Coding agents run only inside an OS jail on this deployment, and none is "
                 f"available on this worker. {refusal()} "
-                "In Docker the worker needs security_opt seccomp=unconfined and "
-                "apparmor=unconfined, and the host needs unprivileged user namespaces. "
+                "In Docker the worker needs security_opt seccomp=unconfined, "
+                "apparmor=unconfined and systempaths=unconfined, and the host needs "
+                "unprivileged user namespaces. "
                 "Setting BASIVO_AGENT_JAIL=auto runs the agent without a jail, which lets "
                 "anything it is told to read leave the workspace."
             )
