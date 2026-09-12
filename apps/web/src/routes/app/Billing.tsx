@@ -145,7 +145,7 @@ function PlanCard({
 }: {
   plan: Plan;
   current: boolean;
-  mode: "demo" | "production";
+  mode: "demo" | "testing" | "production";
   busy: boolean;
   onChoose: (code: string) => void;
 }) {
@@ -333,7 +333,7 @@ export function Billing() {
       />
 
       {mode === "testing" && (
-        <Alert tone="warn">
+        <Alert tone="info">
           Payments are in test mode. Checkout, webhooks and the plan limits all
           work exactly as they will in production, with test cards and no
           money. Switch BILLING_MODE to production when you are ready to be
