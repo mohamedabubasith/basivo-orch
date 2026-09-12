@@ -13,7 +13,7 @@
 
 <img src="docs/media/basivo.gif" width="860" alt="Basivo: the triggers, the canvas, the agent, the renders, and where the result lands">
 
-<sub>Made by this repository's own video node. The full film, with the App Builder, the run page and the receipt, is
+<sub>Made by this repository's own video node. The full sixty three second film, with the App Builder, the run page and the receipt, is
 <a href="https://github.com/mohamedabubasith/basivo-orch/raw/main/docs/media/basivo.mp4">here</a>.</sub>
 
 </div>
