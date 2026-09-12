@@ -313,6 +313,23 @@ export function Billing() {
     tone: "neutral" as Tone,
   };
 
+  /**
+   * What happens next to this plan, in one phrase.
+   *
+   * Cancelled does not mean gone: the period is paid for. Past due does not
+   * mean gone either, there is a grace window. Both used to show no date at
+   * all beside a worrying pill, which is the state somebody writes in to ask
+   * about.
+   */
+  const until =
+    view.status === "past_due" && view.grace_until
+      ? `${plan.name} until ${day(view.grace_until)}`
+      : view.cancel_at_period_end && view.current_period_end
+        ? `${plan.name} until ${day(view.current_period_end)}`
+        : view.current_period_end && view.status === "active"
+          ? `Renews ${day(view.current_period_end)}`
+          : "";
+
   return (
     <div className="space-y-8">
       <PageHeader
@@ -377,11 +394,11 @@ export function Billing() {
           </div>
           <div className="flex items-center gap-2">
             {mode !== "demo" && <Pill tone={status.tone}>{status.label}</Pill>}
-            {view.current_period_end && !view.cancel_at_period_end && (
-              <span className="text-sm text-ink-500">
-                Renews {day(view.current_period_end)}
-              </span>
-            )}
+            {/* The date is the whole answer here. A card that says Pro and
+                Cancelled with nothing else reads as "you have lost it", when
+                the truth is that the plan is paid for until a day this line
+                can simply name. */}
+            {until && <span className="text-sm text-ink-500">{until}</span>}
           </div>
         </div>
 

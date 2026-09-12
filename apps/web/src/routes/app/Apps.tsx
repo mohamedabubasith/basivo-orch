@@ -91,10 +91,26 @@ export default function Apps() {
     <div className="space-y-6">
       <PageHeader
         eyebrow="Build"
-        title="Apps"
+        title={
+          <span className="flex flex-wrap items-center gap-2.5">
+            Apps
+            <Pill tone="warn">Beta</Pill>
+          </span>
+        }
         subtitle="Describe a page and watch it appear. Deploy the version you like and send the link to anyone."
         action={<Button onClick={() => setCreating(true)}>New app</Button>}
       />
+
+      {/* Said here rather than in a changelog nobody opens: what this is today
+          and what it is going to be. A beta that does not say what is missing
+          gets judged as a finished product. */}
+      <Alert tone="info">
+        The app builder is in beta. It builds one page at a time, front end
+        only, and we are working on the bigger workspace next: files and
+        folders you can open, several pages, and your own data behind them.
+        Everything you build now keeps working, and the code is yours to
+        download at any point.
+      </Alert>
 
       {error && <Alert tone="error">{error}</Alert>}
 

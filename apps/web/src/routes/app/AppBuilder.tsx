@@ -274,8 +274,9 @@ export default function AppBuilder() {
           >
             Apps
           </Link>
-          <h1 className="truncate text-xl font-medium text-ink-50">
-            {project.name}
+          <h1 className="flex items-center gap-2.5 text-xl font-medium text-ink-50">
+            <span className="truncate">{project.name}</span>
+            <Pill tone="warn">Beta</Pill>
           </h1>
         </div>
         <div className="flex items-center gap-2">

@@ -11,7 +11,8 @@ export function PageHeader({
 }: {
   /** Tiny uppercase kicker above the title — situates the page in one glance. */
   eyebrow?: string;
-  title: string;
+  /** A node, not just text: some pages put a status badge beside the name. */
+  title: ReactNode;
   subtitle?: ReactNode;
   action?: ReactNode;
 }) {
