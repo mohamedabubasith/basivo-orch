@@ -248,13 +248,19 @@ def _bwrap(argv: Sequence[str], *, workspace: Path, home: Path, read_only: list[
             command += ["--ro-bind", tree, tree]
     for path in _unique(read_only):
         command += ["--ro-bind-try", str(path), str(path)]
+
+    # ORDER IS LOAD-BEARING. bwrap applies these in sequence, so anything
+    # mounted over a path hides what was bound there earlier. The workspace
+    # and the agent's home are temporary directories, and on Linux that means
+    # they live under /tmp: with the tmpfs emitted last it landed on top of
+    # both, and the agent started with
+    #
+    #   bwrap: Can't chdir to /tmp/basivo-app-xxxx/app: No such file or directory
+    #
+    # A developer machine never saw it, because macOS puts temporary
+    # directories under /var/folders. So the private filesystems come first
+    # and the binds go on top of them.
     command += [
-        "--bind",
-        str(workspace),
-        str(workspace),
-        "--bind",
-        str(home),
-        str(home),
         # A /proc of its own PID namespace: the worker's environment is not
         # in it. A private /tmp: no other tenant's turn is in it.
         "--proc",
@@ -263,6 +269,12 @@ def _bwrap(argv: Sequence[str], *, workspace: Path, home: Path, read_only: list[
         "/dev",
         "--tmpfs",
         "/tmp",  # noqa: S108 - a fresh tmpfs, not a shared directory
+        "--bind",
+        str(workspace),
+        str(workspace),
+        "--bind",
+        str(home),
+        str(home),
         "--chdir",
         str(workspace),
         *argv,

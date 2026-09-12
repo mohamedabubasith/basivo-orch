@@ -129,12 +129,15 @@ function AppRoutes() {
               settings form, with the sidebar eating the axis a graph needs
               most. It carries its own way back. */}
           <Route path="/app/flows/:flowId" element={<Builder />} />
+          {/* Same reason: the preview is the point of the screen, and the
+              sidebar spends a fifth of the width on navigation somebody
+              already used to get here. */}
+          <Route path="/app/apps/:appId" element={<AppBuilder />} />
 
           <Route path="/app" element={<AppShell />}>
             <Route index element={<Dashboard />} />
             <Route path="flows" element={<Flows />} />
             <Route path="apps" element={<Apps />} />
-            <Route path="apps/:appId" element={<AppBuilder />} />
             <Route path="runs" element={<Runs />} />
             <Route path="runs/:runId" element={<RunDetail />} />
             <Route path="api-keys" element={<ApiKeys />} />

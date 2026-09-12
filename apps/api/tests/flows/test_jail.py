@@ -179,3 +179,23 @@ def test_the_linux_jail_confines_reads_and_hides_the_parent_environment(tmp_path
     import os
 
     assert run("/bin/cat", f"/proc/{os.getpid()}/environ").returncode != 0
+
+
+def test_the_private_tmp_is_mounted_before_the_workspace_is_bound(tmp_path):
+    """On Linux both the workspace and the agent's home are under /tmp, and
+    bwrap applies its arguments in order: a tmpfs emitted after the binds
+    lands on top of them, and the agent cannot chdir into its own project."""
+    workspace = tmp_path / "app"
+    home = tmp_path / "home"
+    workspace.mkdir()
+    home.mkdir()
+
+    argv = jail._bwrap(["agent"], workspace=workspace, home=home, read_only=[])
+    tmpfs = argv.index("--tmpfs")
+    binds = [i for i, item in enumerate(argv) if item == "--bind"]
+
+    assert binds, "the workspace and the home are bound"
+    assert tmpfs < min(binds), "the tmpfs would cover the workspace"
+    assert argv.index("--proc") < min(binds)
+    # And the agent still starts inside its project.
+    assert argv[argv.index("--chdir") + 1] == str(workspace)

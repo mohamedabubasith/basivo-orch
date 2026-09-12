@@ -45,6 +45,8 @@ export default function Apps() {
   const [projects, setProjects] = useState<AppProject[] | null>(null);
   const [error, setError] = useState("");
   const [creating, setCreating] = useState(false);
+  const [doomed, setDoomed] = useState<AppProject | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -82,6 +84,22 @@ export default function Apps() {
       );
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function remove() {
+    if (!orgId || !doomed) return;
+    setDeleting(true);
+    try {
+      await api.del(`/api/v1/orgs/${orgId}/apps/${doomed.id}`);
+      setDoomed(null);
+      await load();
+    } catch (err) {
+      setError(
+        err instanceof ApiError ? err.message : "That app could not be deleted.",
+      );
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -126,45 +144,75 @@ export default function Apps() {
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         {(projects ?? []).map((project, index) => (
-          <motion.button
+          <motion.div
             key={project.id}
-            type="button"
-            onClick={() => navigate(`/app/apps/${project.id}`)}
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: Math.min(index, 8) * 0.03 }}
-            className="rounded-2xl border border-ink-700/70 bg-ink-900/50 p-5 text-left transition hover:border-ink-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-400"
+            className="group relative rounded-2xl border border-ink-700/70 bg-ink-900/50 transition hover:border-ink-500"
           >
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <h2 className="text-base font-medium text-ink-50">
-                  {project.name}
-                </h2>
-                <p className="mt-1 text-sm text-ink-400">
-                  edited <RelativeTime value={project.updated_at} />
-                </p>
+            {/* The card is the link and the delete button sits on top of it.
+                A button inside a button is not valid HTML and, in practice,
+                is the thing that eats the click somebody meant for the app. */}
+            <button
+              type="button"
+              onClick={() => navigate(`/app/apps/${project.id}`)}
+              className="block w-full p-5 text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-400"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <h2 className="truncate text-base font-medium text-ink-50">
+                    {project.name}
+                  </h2>
+                  <p className="mt-1 text-sm text-ink-400">
+                    edited <RelativeTime value={project.updated_at} />
+                  </p>
+                </div>
+                <IconChip>
+                  <svg
+                    viewBox="0 0 24 24"
+                    className="h-4 w-4"
+                    aria-hidden="true"
+                  >
+                    <path
+                      fill="currentColor"
+                      d="M4 5.5A1.5 1.5 0 0 1 5.5 4h13A1.5 1.5 0 0 1 20 5.5v13a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 18.5v-13Zm2 .5v2h12V6H6Zm12 4H6v8h12v-8Z"
+                    />
+                  </svg>
+                </IconChip>
               </div>
-              <IconChip>
-                <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true">
-                  <path
-                    fill="currentColor"
-                    d="M4 5.5A1.5 1.5 0 0 1 5.5 4h13A1.5 1.5 0 0 1 20 5.5v13a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 18.5v-13Zm2 .5v2h12V6H6Zm12 4H6v8h12v-8Z"
-                  />
-                </svg>
-              </IconChip>
-            </div>
-            <div className="mt-4 flex flex-wrap gap-2">
-              {project.busy ? (
-                <Pill tone="info">working</Pill>
-              ) : project.published_version ? (
-                <Pill tone="good">deployed v{project.published_version}</Pill>
-              ) : project.latest_version ? (
-                <Pill>built, not deployed</Pill>
-              ) : (
-                <Pill>empty</Pill>
-              )}
-            </div>
-          </motion.button>
+              <div className="mt-4 flex flex-wrap gap-2">
+                {project.busy ? (
+                  <Pill tone="info">working</Pill>
+                ) : project.published_version ? (
+                  <Pill tone="good">deployed v{project.published_version}</Pill>
+                ) : project.latest_version ? (
+                  <Pill>built, not deployed</Pill>
+                ) : (
+                  <Pill>empty</Pill>
+                )}
+              </div>
+            </button>
+            <button
+              type="button"
+              aria-label={`Delete ${project.name}`}
+              title="Delete this app"
+              onClick={() => setDoomed(project)}
+              className="absolute top-3 right-3 rounded-lg p-1.5 text-ink-500 opacity-0 transition group-hover:opacity-100 hover:bg-ink-800 hover:text-ink-100 focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-400"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                className="h-4 w-4"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.7"
+                strokeLinecap="round"
+                aria-hidden="true"
+              >
+                <path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12M10 11v5M14 11v5" />
+              </svg>
+            </button>
+          </motion.div>
         ))}
       </div>
 
@@ -198,6 +246,44 @@ export default function Apps() {
           </form>
         </Modal>
       )}
-    </div>
+          {doomed && (
+        <Modal
+          size="sm"
+          title={`Delete ${doomed.name}`}
+          description="The app, its versions and its published address all go. This cannot be undone."
+          onClose={() => {
+            if (!deleting) setDoomed(null);
+          }}
+          footer={
+            <>
+              <Button
+                variant="ghost"
+                onClick={() => setDoomed(null)}
+                disabled={deleting}
+              >
+                Cancel
+              </Button>
+              <Button
+                loading={deleting}
+                className="hover:brightness-110"
+                style={{
+                  background: "var(--status-bad)",
+                  color: "var(--color-ink-950)",
+                }}
+                onClick={() => void remove()}
+              >
+                Delete app
+              </Button>
+            </>
+          }
+        >
+          <p className="text-sm text-ink-300">
+            Anyone holding the share link stops being able to open it. Download
+            the code first if you want to keep what it built.
+          </p>
+        </Modal>
+      )}
+
+</div>
   );
 }

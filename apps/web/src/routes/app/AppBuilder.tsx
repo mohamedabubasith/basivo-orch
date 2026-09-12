@@ -32,7 +32,7 @@ import { Link, useParams } from "react-router-dom";
 
 import { API_BASE, ApiError, api, isSessionEnded } from "../../lib/api";
 import { cx } from "../../lib/cx";
-import { useWorkspace } from "../../lib/workspace";
+import { WorkspaceProvider, useWorkspace } from "../../lib/workspace";
 import { Alert, Button, Pill, Spinner } from "../../components/ui";
 import { Formatted } from "../../components/chat/markdown";
 import { CodeBrowser, type SourceFile } from "./code";
@@ -89,7 +89,22 @@ function size(bytes: number): string {
     : `${Math.max(1, Math.round(bytes / 1024))} KB`;
 }
 
+/**
+ * The builder owns the screen, like the flow canvas next door.
+ *
+ * That puts it outside `<AppShell>`, which is also where the workspace
+ * context lived, so it carries its own provider: the same pattern `Builder`
+ * uses, and the same reason.
+ */
 export default function AppBuilder() {
+  return (
+    <WorkspaceProvider>
+      <AppBuilderInner />
+    </WorkspaceProvider>
+  );
+}
+
+function AppBuilderInner() {
   const { appId } = useParams();
   const { orgId } = useWorkspace();
 
@@ -194,7 +209,12 @@ export default function AppBuilder() {
   // again whenever a turn produces a new one. Not on page load: most visits
   // are to the preview, and the source is the larger of the two.
   useEffect(() => {
-    if (tab !== "code" || !base || !latestId) {
+    if (tab !== "code" || !base) return;
+    if (!latestId) {
+      // Nothing built yet, which is not a slow request: the spinner would
+      // have spun for ever, and on a deployment whose agent cannot start
+      // that is every project.
+      setFiles([]);
       return;
     }
     let live = true;
@@ -294,8 +314,8 @@ export default function AppBuilder() {
   const previewUrl = latest ? latest.url : "";
 
   return (
-    <div className="flex h-[calc(100dvh-8rem)] min-h-[32rem] flex-col gap-4">
-      <header className="flex flex-wrap items-center justify-between gap-3">
+    <div className="flex h-dvh flex-col gap-3 bg-ink-950 p-3 sm:p-4">
+      <header className="flex flex-none flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2.5">
           <Link
             to="/app/apps"
@@ -353,7 +373,7 @@ export default function AppBuilder() {
 
       {error && <Alert tone="error">{error}</Alert>}
 
-      <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[minmax(20rem,26rem)_1fr]">
+      <div className="grid min-h-0 flex-1 gap-3 lg:grid-cols-[minmax(20rem,26rem)_1fr]">
         <section className="flex min-h-0 min-w-0 flex-col rounded-2xl border border-ink-700/70 bg-ink-900/50">
           <Conversation
             turns={turns}
