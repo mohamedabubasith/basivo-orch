@@ -118,8 +118,11 @@ function AppBuilderInner() {
   const [copied, setCopied] = useState(false);
   const [library, setLibrary] = useState<Library | null>(null);
   const [uploading, setUploading] = useState(false);
-  // What the agent is doing right now, straight from the run's own events.
-  const [activity, setActivity] = useState("");
+  // Everything the agent has done this turn, in order, straight from the
+  // run's own events. Not the last line only: watching a coding agent work is
+  // how you can tell a slow turn from a stuck one, which is the question
+  // somebody actually has while they wait.
+  const [activity, setActivity] = useState<string[]>([]);
   const [tab, setTab] = useState<"preview" | "code">("preview");
   const [files, setFiles] = useState<SourceFile[] | null>(null);
   const [history, setHistory] = useState(false);
@@ -168,7 +171,7 @@ function AppBuilderInner() {
   // "Editing Menu.tsx" rather than a spinner and a guess.
   useEffect(() => {
     if (!running) {
-      setActivity("");
+      setActivity([]);
       return;
     }
     let live = true;
@@ -192,8 +195,10 @@ function AppBuilderInner() {
               event.type === "node.progress" &&
               typeof event.data?.progress === "string",
           )
-          .pop();
-        if (said) setActivity(String(said.data.progress));
+          .map((event) => String(event.data.progress));
+        if (said.length) {
+          setActivity((was) => [...was, ...said].slice(-40));
+        }
       } catch {
         // The clock beside the spinner is still honest without this.
       }
@@ -250,6 +255,18 @@ function AppBuilderInner() {
       );
     } finally {
       setSending(false);
+    }
+  }
+
+  async function stop() {
+    if (!orgId || !runId) return;
+    try {
+      await api.post(`/api/v1/orgs/${orgId}/runs/${runId}/stop`, {});
+      await load();
+    } catch (err) {
+      setError(
+        err instanceof ApiError ? err.message : "That could not be stopped.",
+      );
     }
   }
 
@@ -379,6 +396,7 @@ function AppBuilderInner() {
             turns={turns}
             running={running}
             activity={activity}
+            onStop={() => void stop()}
             onStarter={(text) => setMessage(text)}
           />
           <form
@@ -589,12 +607,14 @@ function Conversation({
   turns,
   running,
   activity,
+  onStop,
   onStarter,
 }: {
   turns: Turn[];
   running: boolean;
-  /** What the agent is doing this second, or nothing yet. */
-  activity: string;
+  /** Every step this turn has taken, oldest first. */
+  activity: string[];
+  onStop: () => void;
   onStarter: (text: string) => void;
 }) {
   const end = useRef<HTMLDivElement>(null);
@@ -652,7 +672,7 @@ function Conversation({
             </p>
           )}
           {(turn.status === "queued" || turn.status === "running") && (
-            <Working since={turn.created_at} activity={activity} />
+            <Working since={turn.created_at} activity={activity} onStop={onStop} />
           )}
         </motion.div>
       ))}
@@ -730,7 +750,15 @@ function Uploads({
  * the agent edited Menu.tsx, and the elapsed time says the thing is still
  * going without promising when it will stop.
  */
-function Working({ since, activity }: { since: string; activity: string }) {
+function Working({
+  since,
+  activity,
+  onStop,
+}: {
+  since: string;
+  activity: string[];
+  onStop: () => void;
+}) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
@@ -743,14 +771,45 @@ function Working({ since, activity }: { since: string; activity: string }) {
   );
 
   return (
-    <div className="mr-auto flex max-w-[85%] items-center gap-2.5 rounded-2xl rounded-bl-sm bg-ink-800/70 px-3.5 py-2.5 text-sm text-ink-300">
-      <Spinner className="h-4 w-4" />
-      <span className="min-w-0 truncate">{activity || "Starting"}</span>
-      <span className="text-xs text-ink-500">
-        {seconds < 60
-          ? `${seconds}s`
-          : `${Math.floor(seconds / 60)}m ${seconds % 60}s`}
-      </span>
+    <div className="mr-auto w-[92%] rounded-2xl rounded-bl-sm bg-ink-800/70 text-sm text-ink-300">
+      <div className="flex items-center gap-2.5 px-3.5 py-2.5">
+        <Spinner className="h-4 w-4 flex-none" />
+        <span className="min-w-0 flex-1 truncate text-ink-200">
+          {activity.at(-1) ?? "Starting"}
+        </span>
+        <span className="flex-none text-xs text-ink-500">
+          {seconds < 60
+            ? `${seconds}s`
+            : `${Math.floor(seconds / 60)}m ${seconds % 60}s`}
+        </span>
+        {/* Always offered, never after the fact: a person who changed their
+            mind should not have to wait out a ten minute agent, and a run
+            nobody wants is a worker and its memory held for nothing. */}
+        <button
+          type="button"
+          onClick={onStop}
+          className="flex-none rounded-lg px-2 py-1 text-xs text-ink-400 transition hover:bg-ink-700/60 hover:text-ink-100"
+        >
+          Stop
+        </button>
+      </div>
+
+      {/* The trail. Every step the agent has taken this turn, the way the
+          command line tools show it, so a slow turn and a stuck one look
+          different from each other. */}
+      {activity.length > 1 && (
+        <ol className="max-h-44 overflow-y-auto border-t border-ink-700/60 px-3.5 py-2">
+          {activity.slice(0, -1).map((line, index) => (
+            <li
+              key={`${index}-${line}`}
+              className="flex items-start gap-2 py-0.5 text-xs text-ink-500"
+            >
+              <span className="mt-1.5 h-1 w-1 flex-none rounded-full bg-ink-600" />
+              <span className="min-w-0 wrap-anywhere">{line}</span>
+            </li>
+          ))}
+        </ol>
+      )}
     </div>
   );
 }

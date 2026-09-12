@@ -166,20 +166,22 @@ class AppBuildNode(Node):
                 allowed_mcp_tools=tuple(allowed),
                 progress=ctx.progress,
                 step=ctx.step,
+                on_stop=ctx.stop_requested,
             )
         except Exception as exc:
-            # An agent that timed out or stalled raises before the turn has a
-            # result. The turn must still be closed, or the project stays
-            # "working" forever and nobody can send another message: that is
-            # the failure a person cannot recover from, so it is handled
-            # first and the error is re-raised for the run log afterwards.
+            # An agent that timed out, stalled, or was stopped raises before
+            # the turn has a result. The turn must still be closed, or the
+            # project stays "working" forever and nobody can send another
+            # message: that is the failure a person cannot recover from, so it
+            # is handled first and the error is re-raised afterwards.
+            stopped = isinstance(exc, engines.Stopped)
             await ctx.app_state(
                 action="finish",
                 project_id=config.project_id,
                 turn_id=turn_id,
                 ok=False,
                 reply="",
-                error=str(exc)[:4000],
+                error="Stopped." if stopped else str(exc)[:4000],
                 engine=engine.name,
             )
             raise

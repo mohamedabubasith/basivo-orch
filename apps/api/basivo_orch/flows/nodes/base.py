@@ -50,6 +50,16 @@ class ResolvedCredential:
     options: dict[str, Any]
 
 
+class RunCancelled(Exception):
+    """Somebody pressed Stop.
+
+    Ends the run without calling it a failure: the distinction matters on the
+    Runs screen, where a wall of red is how a person stops trusting the log.
+    A node that holds a long subprocess raises a subclass of this when it is
+    killed on request, and the engine needs no knowledge of which node it was.
+    """
+
+
 class NodeError(Exception):
     """A node failed in a way worth reporting to the flow's author.
 
@@ -142,6 +152,13 @@ class NodeContext:
     #: for the same reason as everything above: the node knows how to run a
     #: coding agent over a directory, not how this product stores projects.
     app_state: Callable[..., Awaitable[dict[str, Any]]] | None = None
+
+    #: Has somebody pressed Stop. Only long-running nodes need to ask: the
+    #: engine already checks between nodes, so a node that finishes in a
+    #: second can ignore this. A node holding a subprocess for ten minutes
+    #: cannot, or Stop would mean "stop once the agent is done", which is
+    #: not what the person pressing it meant.
+    stop_requested: Callable[[], Awaitable[bool]] | None = None
 
     #: Nodes wired to one of this node's output ports, as
     #: [{"id", "name", "type", "purpose"}]. How an agent discovers the

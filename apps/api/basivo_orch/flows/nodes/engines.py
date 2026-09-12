@@ -43,7 +43,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from basivo_orch.flows.nodes import claude_code, jail
-from basivo_orch.flows.nodes.base import NodeError
+from basivo_orch.flows.nodes.base import NodeError, RunCancelled
 from basivo_orch.logging import get_logger
 
 log = get_logger(__name__)
@@ -78,6 +78,11 @@ OPENCODE_WARM_CACHE = os.environ.get("BASIVO_OPENCODE_WARM_CACHE", "/tmp/basivo-
 #: leak. Engines that cannot read stdin get the task in a file instead.
 MAX_ARGV_PROMPT = 60_000
 
+#: How often the agent's wait is interrupted to ask whether somebody pressed
+#: Stop. Three seconds is under the time it takes to look back at the screen
+#: after clicking, and costs one small database read.
+STOP_POLL_SECONDS = 3.0
+
 #: How long a streaming agent may say nothing before it is presumed gone.
 #:
 #: The agents here print an event when a tool finishes and when the model
@@ -89,6 +94,14 @@ MAX_ARGV_PROMPT = 60_000
 #: experiences as a spinner that never stops. Stalls are killed here and
 #: reported as what they are.
 STALL_SECONDS = 300.0
+
+
+class Stopped(RunCancelled):
+    """The agent was killed because somebody pressed Stop.
+
+    Not a `NodeError`: this is not a failure to report, it is an instruction
+    that was followed, and the engine turns it into a cancelled run.
+    """
 
 
 @dataclass
@@ -149,6 +162,7 @@ class CodingEngine(Protocol):
         mcp_servers: McpServers | None = None,
         allowed_mcp_tools: Sequence[str] = (),
         on_activity: Callable[[str], Awaitable[None]] | None = None,
+        on_stop: Callable[[], Awaitable[bool]] | None = None,
     ) -> EngineResult:
         """One headless session over `cwd`, editing files in place.
 
@@ -175,6 +189,7 @@ async def _execute(
     engine: str,
     stall_seconds: float | None = STALL_SECONDS,
     on_line: Callable[[str], Awaitable[None]] | None = None,
+    on_stop: Callable[[], Awaitable[bool]] | None = None,
 ) -> tuple[int, str, str]:
     """Run a CLI to completion, or kill it. Returns (code, stdout, stderr).
 
@@ -183,6 +198,10 @@ async def _execute(
     prints, and a streaming agent that prints nothing for `stall_seconds` has
     stopped, whatever its socket says. Pass `None` for an agent that only
     speaks at the end, where silence means nothing.
+
+    And a third thing, which is not a clock: `on_stop`. Somebody pressing Stop
+    wants the process gone now, not when the model finishes, so the wait is
+    broken into short windows whenever a way to ask exists.
     """
     process = await asyncio.create_subprocess_exec(
         *argv,
@@ -241,9 +260,18 @@ async def _execute(
             remaining = deadline - asyncio.get_running_loop().time()
             seen = len(out) + len(err)
             window = remaining if stall_seconds is None else min(remaining, stall_seconds)
+            if on_stop is not None:
+                # Short windows, so Stop is felt in seconds rather than at the
+                # end of the stall clock.
+                window = min(window, STOP_POLL_SECONDS)
             done, _ = await asyncio.wait({reader}, timeout=max(0.0, window))
             if done:
                 break
+            if on_stop is not None and await on_stop():
+                process.kill()
+                with suppress(ProcessLookupError):
+                    await process.wait()
+                raise Stopped
             # The ceiling first: at the deadline the honest word is "too long",
             # even if the last thing the agent did was fall silent.
             if asyncio.get_running_loop().time() >= deadline:
@@ -343,6 +371,7 @@ class ClaudeCodeEngine:
         mcp_servers: McpServers | None = None,
         allowed_mcp_tools: Sequence[str] = (),
         on_activity: Callable[[str], Awaitable[None]] | None = None,
+        on_stop: Callable[[], Awaitable[bool]] | None = None,
     ) -> EngineResult:
         allowed = list(allowed_mcp_tools) or [f"mcp__{name}" for name in (mcp_servers or {})]
         result = await claude_code.run_claude_code(
@@ -405,6 +434,7 @@ class CodexEngine:
         mcp_servers: McpServers | None = None,
         allowed_mcp_tools: Sequence[str] = (),
         on_activity: Callable[[str], Awaitable[None]] | None = None,
+        on_stop: Callable[[], Awaitable[bool]] | None = None,
     ) -> EngineResult:
         import tempfile
 
@@ -527,6 +557,7 @@ class OpenCodeEngine:
         mcp_servers: McpServers | None = None,
         allowed_mcp_tools: Sequence[str] = (),
         on_activity: Callable[[str], Awaitable[None]] | None = None,
+        on_stop: Callable[[], Awaitable[bool]] | None = None,
     ) -> EngineResult:
         import tempfile
 
@@ -581,6 +612,7 @@ class OpenCodeEngine:
                 engine="OpenCode",
                 stall_seconds=STALL_SECONDS,
                 on_line=_narrator(on_activity) if on_activity else None,
+                on_stop=on_stop,
             )
             await asyncio.to_thread(_keep_what_was_warmed, home)
 

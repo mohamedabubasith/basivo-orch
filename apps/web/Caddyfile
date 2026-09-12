@@ -24,7 +24,12 @@
 		# endpoints — would fall through to the static file server and answer
 		# 405 to a POST. Nothing in development catches this: the Vite dev
 		# server routes by origin, not by path.
-		path /auth /auth/* /users /users/* /orgs /orgs/* /api /api/* /flows /flows/* /hooks /hooks/* /billing /billing/* /health /config
+		# `/p` and `/s` are the App Builder: the tokened preview the console
+		# frames, and the published site a customer sends to anyone. Leaving
+		# them out sent both to the static file server, which answered with
+		# the console's own index.html, and the preview pane showed "refused
+		# to connect" because that page is served X-Frame-Options DENY.
+		path /auth /auth/* /users /users/* /orgs /orgs/* /api /api/* /flows /flows/* /hooks /hooks/* /billing /billing/* /p /p/* /s /s/* /health /config
 	}
 	handle @api {
 		reverse_proxy api:8000 {
@@ -102,10 +107,18 @@
 		# app, which Caddy serves without the API ever being involved.
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"
 		X-Content-Type-Options "nosniff"
-		X-Frame-Options "DENY"
 		Referrer-Policy "strict-origin-when-cross-origin"
 		-Server
 	}
+
+	# Framing is decided per path rather than for the whole host. A built app
+	# is MEANT to be framed: that is the preview beside the chat. The API
+	# sends those responses their own Content-Security-Policy with
+	# frame-ancestors and a sandbox, which is the modern control and a
+	# stricter one; adding X-Frame-Options DENY on top of it only breaks the
+	# preview. Everything else on this host still refuses to be framed.
+	@not_an_app not path /p /p/* /s /s/*
+	header @not_an_app X-Frame-Options "DENY"
 	log {
 		output stdout
 		format console

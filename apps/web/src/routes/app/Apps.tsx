@@ -198,7 +198,7 @@ export default function Apps() {
               aria-label={`Delete ${project.name}`}
               title="Delete this app"
               onClick={() => setDoomed(project)}
-              className="absolute top-3 right-3 rounded-lg p-1.5 text-ink-500 opacity-0 transition group-hover:opacity-100 hover:bg-ink-800 hover:text-ink-100 focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-400"
+              className="absolute right-4 bottom-4 rounded-lg p-1.5 text-ink-500 transition hover:bg-ink-800 hover:text-ink-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-400"
             >
               <svg
                 viewBox="0 0 24 24"

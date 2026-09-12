@@ -531,6 +531,26 @@ def test_the_verification_page_is_matched_before_the_api_proxy():
     assert "/auth/verify" in block and "/auth/reset-password" in block
 
 
+def test_the_built_apps_are_proxied_and_allowed_to_be_framed():
+    """The preview beside the chat is an iframe of /p on this same host. Left
+    out of the proxy list it was answered by the static file server with the
+    console's own page, and that page is sent X-Frame-Options DENY, so the
+    pane read "refused to connect" and nothing about the app was wrong."""
+    from pathlib import Path
+
+    caddyfile = (
+        Path(__file__).resolve().parents[4] / "apps/web/Caddyfile"
+    ).read_text(encoding="utf-8")
+
+    proxied = next(line for line in caddyfile.splitlines() if line.strip().startswith("path /auth"))
+    assert " /p /p/* " in proxied and " /s /s/* " in proxied
+
+    # And the framing refusal must skip exactly those paths.
+    assert "@not_an_app not path /p /p/* /s /s/*" in caddyfile
+    assert 'header @not_an_app X-Frame-Options "DENY"' in caddyfile
+    assert '\n\t\tX-Frame-Options "DENY"' not in caddyfile, "a blanket deny would break the preview"
+
+
 def test_the_entry_points_are_revalidated_and_the_hashed_assets_are_not():
     """The bug this pins: with no Cache-Control on index.html a browser keeps
     the copy it has, and that file is the only thing naming the current

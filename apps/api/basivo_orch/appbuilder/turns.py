@@ -115,6 +115,7 @@ async def run_turn(
     allowed_mcp_tools: tuple[str, ...] = (),
     progress: Callable[[str], Awaitable[None]] | None = None,
     step: Callable[[str, dict[str, Any]], Awaitable[None]] | None = None,
+    on_stop: Callable[[], Awaitable[bool]] | None = None,
 ) -> TurnResult:
     """Open the project, let the agent change it, build it, hand back the result."""
 
@@ -146,6 +147,7 @@ async def run_turn(
             # What it is doing, while it does it. A minute of silence beside a
             # spinner is how a person decides that something is broken.
             on_activity=say,
+            on_stop=on_stop,
         )
         reply = result.text.strip()
         after = ws.snapshot(root)
@@ -199,6 +201,7 @@ async def run_turn(
                 mcp_servers=mcp_servers,
                 allowed_mcp_tools=allowed_mcp_tools,
                 on_activity=say,
+                on_stop=on_stop,
             )
             reply = result.text.strip() or reply
             after = ws.snapshot(root)

@@ -45,6 +45,7 @@ from basivo_orch.flows.nodes.base import (
     NodeError,
     NodeResult,
     ResolvedCredential,
+    RunCancelled,
     summarise,
 )
 from basivo_orch.logging import get_logger
@@ -92,10 +93,6 @@ RUN_TIMEOUT_SECONDS = 900
 #: fan-out of thirty agents firing thirty simultaneous model calls earns a
 #: provider rate-limit instead of a fast run.
 MAX_PARALLEL_NODES = 8
-
-
-class RunCancelled(Exception):
-    """Raised when a run is cancelled while executing."""
 
 
 class Engine:
@@ -514,6 +511,15 @@ class Engine:
                 "run.succeeded", {"run_id": str(self.run.id), "output": self.run.output}
             )
 
+        except RunCancelled:
+            # Not a failure: somebody asked for this. The distinction matters
+            # on the Runs screen, where a wall of red is how a person stops
+            # trusting the log.
+            self.run.status = RunStatus.CANCELLED
+            self.run.error = "Stopped before it finished."
+            await self._finish(started)
+            await self.events.emit("run.cancelled", {"run_id": str(self.run.id)})
+
         except Exception as exc:
             self.run.status = RunStatus.FAILED
             self.run.error = str(exc)[:2000]
@@ -554,6 +560,18 @@ class Engine:
             return {"result": self.outputs[terminals[0]]}
         return {"result": {node_id: self.outputs[node_id] for node_id in terminals}}
 
+    async def _stop_requested(self) -> bool:
+        """Has somebody pressed Stop since the last time we looked.
+
+        Read from the database rather than pushed, because the person pressing
+        the button is talking to the API and the run is held by a worker that
+        may be on another machine. One small read between waves, and one every
+        few seconds while an agent is running, is the whole cost.
+        """
+        async with self._db:
+            await self.session.refresh(self.run, ["cancel_requested"])
+        return bool(self.run.cancel_requested)
+
     async def _run_nodes(self, http: httpx.AsyncClient) -> None:
         """Execute the graph in waves, everything independent running together.
 
@@ -571,6 +589,8 @@ class Engine:
         gate = asyncio.Semaphore(MAX_PARALLEL_NODES)
 
         while pending:
+            if await self._stop_requested():
+                raise RunCancelled("Stopped.")
             wave = sorted(
                 (
                     node_id
@@ -752,6 +772,7 @@ class Engine:
                 variables=self.variables,
                 trigger=self.run.input or {},
                 progress=progress,
+                stop_requested=self._stop_requested,
                 step=step,
                 resolve_credential=self._resolve_credential,
                 save_artifact=self._save_artifact,

@@ -904,6 +904,23 @@ async def read_artifact(
     )
 
 
+@management_router.post("/orgs/{organization_id}/runs/{run_id}/stop")
+async def stop_run(
+    run_id: uuid.UUID,
+    context: OrgContext = Depends(require(Permission.FLOW_RUN)),
+    session: AsyncSession = Depends(get_async_session),
+) -> dict[str, str]:
+    """Stop a run that is queued or in flight.
+
+    The permission is FLOW_RUN rather than a read: stopping is an act on the
+    work, and whoever may start one may stop one.
+    """
+    run = await service.get_run(session, organization_id=context.organization_id, run_id=run_id)
+    if run is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No such run.")
+    return {"status": await service.request_stop(session, run)}
+
+
 @management_router.get("/orgs/{organization_id}/runs/{run_id}/events")
 async def run_events(
     run_id: uuid.UUID,

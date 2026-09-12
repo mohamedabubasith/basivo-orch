@@ -208,6 +208,11 @@ class Run(Base):
     input: Mapped[dict[str, Any]] = mapped_column(JSONColumn, default=dict)
     output: Mapped[dict[str, Any] | None] = mapped_column(JSONColumn, default=None)
     error: Mapped[str | None] = mapped_column(Text(), default=None)
+    #: Somebody pressed Stop. A queued run is cancelled on the spot; a running
+    #: one is asked, because only the worker holding it can kill what it
+    #: started. Set once, never cleared: a run that was stopped stays stopped
+    #: even if a retry would otherwise pick it up.
+    cancel_requested: Mapped[bool] = mapped_column(Boolean(), default=False, server_default=false())
 
     idempotency_key: Mapped[str | None] = mapped_column(String(200), default=None)
     #: Who or what started it. Null for API-key triggered runs.

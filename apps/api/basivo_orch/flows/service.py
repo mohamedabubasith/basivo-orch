@@ -484,3 +484,28 @@ async def run_stats(
         "by_status": by_status,
         "success_rate": round(succeeded / total, 4) if total else None,
     }
+
+
+async def request_stop(session: AsyncSession, run: Run) -> str:
+    """Ask a run to stop, and say what happened.
+
+    Two cases, and the difference matters. A queued run has not been claimed
+    by anybody, so it is cancelled here and now: no worker will ever pick it
+    up, because the queue only takes QUEUED rows. A running run belongs to a
+    worker that may be on another machine, and only that worker can kill what
+    it started, so the request is recorded and the worker acts on it within a
+    few seconds. A run that already finished is left exactly as it is.
+    """
+    if run.status.is_terminal:
+        return "already finished"
+
+    run.cancel_requested = True
+    if run.status == RunStatus.QUEUED:
+        run.status = RunStatus.CANCELLED
+        run.error = "Stopped before it started."
+        run.finished_at = datetime.now(UTC)
+        await session.commit()
+        return "cancelled"
+
+    await session.commit()
+    return "stopping"
