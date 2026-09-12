@@ -167,6 +167,7 @@ export function Nav() {
               ["What it does", "#does"],
               ["Compared", "#compare"],
               ["Trust", "#trust"],
+              ["Pricing", "/pricing"],
             ].map(([label, href]) => (
               <a
                 key={href}
@@ -676,14 +677,36 @@ export function CTA() {
 
 /* -------------------------------------------------------------- footer --- */
 
+/** The pages a customer, and a payment provider, expect to find in a footer. */
+const LEGAL: [string, string][] = [
+  ["Pricing", "/pricing"],
+  ["Terms", "/terms"],
+  ["Privacy", "/privacy"],
+  ["Refunds", "/refunds"],
+  ["Contact", "/contact"],
+];
+
 export function Footer() {
   return (
     <footer className="border-t border-ink-800/70 py-10">
-      <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-4 px-5 text-center sm:flex-row sm:text-left">
-        <Logo />
+      <div className="mx-auto flex max-w-6xl flex-col items-center gap-6 px-5 text-center">
+        <div className="flex w-full flex-col items-center justify-between gap-4 sm:flex-row sm:text-left">
+          <Logo />
+          <nav className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2">
+            {LEGAL.map(([label, to]) => (
+              <Link
+                key={to}
+                to={to}
+                className="text-sm text-ink-400 transition-colors hover:text-ink-100"
+              >
+                {label}
+              </Link>
+            ))}
+          </nav>
+        </div>
         <p className="text-sm text-ink-500">
           © {new Date().getFullYear()} Basivo. Beta software. Expect sharp
-          edges.
+          edges. Payments by Dodo Payments, our merchant of record.
         </p>
       </div>
     </footer>

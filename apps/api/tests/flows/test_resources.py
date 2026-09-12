@@ -531,6 +531,27 @@ def test_the_verification_page_is_matched_before_the_api_proxy():
     assert "/auth/verify" in block and "/auth/reset-password" in block
 
 
+def test_the_public_pricing_page_says_what_the_plans_enforce():
+    """A price or a limit that is only right on the marketing page is a
+    promise the software will break, and the customer finds out after paying.
+    So every line of the public page is checked against the catalogue."""
+    from pathlib import Path
+
+    from basivo_orch.billing.plans import PLAN_ORDER, PLANS
+
+    page = (
+        Path(__file__).resolve().parents[4] / "apps/web/src/routes/Legal.tsx"
+    ).read_text(encoding="utf-8")
+
+    missing: list[str] = []
+    for code in PLAN_ORDER:
+        plan = PLANS[code]
+        for claim in (plan.name, plan.tagline, plan.price_inr, plan.price_usd, *plan.features):
+            if claim not in page:
+                missing.append(f"{code}: {claim}")
+    assert not missing, "the pricing page does not match plans.py:\n  " + "\n  ".join(missing)
+
+
 def test_no_ai_dash_in_user_facing_text():
     """No em-dash, en-dash or `--` in anything a customer reads.
 

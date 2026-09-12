@@ -12,6 +12,7 @@ import { consoleOrigin, isAppRoute, isConsoleHost } from "./lib/consoleOrigin";
 import { ThemeProvider } from "./lib/theme";
 import { Chat } from "./routes/Chat";
 import { Landing } from "./routes/Landing";
+import { Contact, Pricing, Privacy, Refunds, Terms } from "./routes/Legal";
 import { Admin } from "./routes/app/Admin";
 import { ApiKeys } from "./routes/app/ApiKeys";
 import { Credentials } from "./routes/app/Credentials";
@@ -94,6 +95,15 @@ function AppRoutes() {
         <Route path="/forgot-password" element={<ForgotPassword />} />
       </Route>
       <Route path="/two-factor" element={<TwoFactor />} />
+
+      {/* What it costs, what we promise, what we do with your data, and how
+          to reach a person. Public on both hosts: a customer following a link
+          from an invoice should not meet a sign-in form. */}
+      <Route path="/pricing" element={<Pricing />} />
+      <Route path="/terms" element={<Terms />} />
+      <Route path="/privacy" element={<Privacy />} />
+      <Route path="/refunds" element={<Refunds />} />
+      <Route path="/contact" element={<Contact />} />
 
       {/* A published chat page. Public on purpose: the people who use it are
           the flow owner's customers, and asking them to sign in to ours would
