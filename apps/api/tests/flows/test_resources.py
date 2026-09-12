@@ -531,6 +531,26 @@ def test_the_verification_page_is_matched_before_the_api_proxy():
     assert "/auth/verify" in block and "/auth/reset-password" in block
 
 
+def test_the_entry_points_are_revalidated_and_the_hashed_assets_are_not():
+    """The bug this pins: with no Cache-Control on index.html a browser keeps
+    the copy it has, and that file is the only thing naming the current
+    bundle, so a deploy appears not to have happened. The hashed assets are
+    the opposite case: a new build is a new name, so a year is safe."""
+    from pathlib import Path
+
+    caddyfile = (
+        Path(__file__).resolve().parents[4] / "apps/web/Caddyfile"
+    ).read_text(encoding="utf-8")
+
+    assert 'header Cache-Control "no-cache"' in caddyfile
+    assert 'header Cache-Control "public, max-age=31536000, immutable"' in caddyfile
+    # The immutable one must be scoped to the hashed assets, never the page.
+    hashed = caddyfile.index("@hashed path /assets/*")
+    immutable = caddyfile.index('max-age=31536000, immutable')
+    revalidated = caddyfile.index('header Cache-Control "no-cache"')
+    assert hashed < immutable < revalidated
+
+
 def test_the_public_pricing_page_says_what_the_plans_enforce():
     """A price or a limit that is only right on the marketing page is a
     promise the software will break, and the customer finds out after paying.
