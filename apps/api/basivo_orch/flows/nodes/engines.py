@@ -112,14 +112,28 @@ STOP_POLL_SECONDS = 3.0
 #: reported as what they are.
 STALL_SECONDS = 300.0
 
+#: How long to wait for the *first* byte, before any of the above applies.
+#:
+#: Silence in the middle of a run is a model thinking. Silence before a single
+#: event is a run that never began, and five minutes of it buys nothing: the
+#: process has started, the CLI prints its first event as soon as the provider
+#: accepts the request, so nothing here is queueing politely. Short, because
+#: the next model is a better use of the person's time than this one.
+FIRST_BYTE_SECONDS = 90.0
+
 
 class AgentSilent(NodeError):
     """The agent produced nothing for long enough to be presumed gone.
 
     Its own type because it is the one failure worth trying a different model
     for: the process was healthy, the jail was fine, and the provider simply
-    never answered.
+    never answered. `said` carries whatever the process had printed before it
+    went quiet, which is the only account of the failure anybody gets.
     """
+
+    def __init__(self, message: str, said: str = "") -> None:
+        super().__init__(message)
+        self.said = said
 
 
 class Stopped(RunCancelled):
@@ -277,7 +291,10 @@ async def _execute(
         process.kill()
         with suppress(ProcessLookupError):
             await process.wait()
-        raise AgentSilent(reason) if silent else NodeError(reason)
+        if silent:
+            said = (bytes(err) + bytes(out)).decode(errors="replace").strip()[-600:]
+            raise AgentSilent(reason, claude_code.redact(said, secret))
+        raise NodeError(reason)
 
     feeder = asyncio.create_task(feed())
     reader = asyncio.create_task(drain())
@@ -285,7 +302,10 @@ async def _execute(
         while not reader.done():
             remaining = deadline - asyncio.get_running_loop().time()
             seen = len(out) + len(err)
-            window = remaining if stall_seconds is None else min(remaining, stall_seconds)
+            patience = stall_seconds
+            if patience is not None and seen == 0:
+                patience = min(patience, FIRST_BYTE_SECONDS)
+            window = remaining if patience is None else min(remaining, patience)
             if on_stop is not None:
                 # Short windows, so Stop is felt in seconds rather than at the
                 # end of the stall clock.
@@ -305,10 +325,10 @@ async def _execute(
                     f"{engine} did not finish within {timeout_seconds:.0f}s. Narrow the task, "
                     "or raise the node's timeout."
                 )
-            if stall_seconds is not None and len(out) + len(err) == seen:
+            if patience is not None and len(out) + len(err) == seen:
                 await kill(
-                    f"{engine} stopped responding: nothing for {stall_seconds:.0f} seconds "
-                    "while it was working.",
+                    f"{engine} stopped responding: nothing for {patience:.0f} seconds "
+                    f"{'after it started' if seen else 'after it was asked'}.",
                     silent=True,
                 )
         await reader
@@ -597,7 +617,6 @@ class OpenCodeEngine:
         # five minute silence with no idea why.
         wanted = model or DEFAULT_OPENCODE_MODEL
         attempts = [wanted, *(m for m in OPENCODE_FALLBACK_MODELS if m != wanted)]
-        last: AgentSilent | None = None
         for index, candidate in enumerate(attempts):
             try:
                 return await self._one_run(
@@ -612,9 +631,14 @@ class OpenCodeEngine:
                     on_activity=on_activity,
                     on_stop=on_stop,
                 )
-            except AgentSilent as exc:
-                last = exc
-                log.warning("opencode.silent", model=candidate, attempt=index + 1)
+            except AgentSilent as silent:
+                log.warning(
+                    "opencode.silent",
+                    model=candidate,
+                    attempt=index + 1,
+                    reason=str(silent),
+                    said=silent.said,
+                )
                 if on_activity and index + 1 < len(attempts):
                     with suppress(Exception):
                         await on_activity("Still working")

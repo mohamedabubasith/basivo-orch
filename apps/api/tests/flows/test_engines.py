@@ -508,3 +508,55 @@ async def test_when_nothing_answers_the_message_names_no_tier(monkeypatch, tmp_p
     # Which engine ran, and on whose money, is ours to know.
     assert "free" not in str(raised.value).lower()
     assert "opencode" not in str(raised.value).lower()
+
+
+async def test_an_agent_that_never_starts_is_given_up_on_sooner(monkeypatch, tmp_path):
+    """Silence mid run is a model thinking. Silence before the first event is a
+    run that never began, and it is not worth the full stall budget: the next
+    model is a better use of the wait. Whatever the process printed is kept
+    with the failure, because a silent run with no account of itself cannot be
+    diagnosed from a log afterwards."""
+
+    async def attempt() -> engines.AgentSilent:
+        work = tmp_path / "work"
+        work.mkdir(exist_ok=True)
+        with pytest.raises(engines.AgentSilent) as caught:
+            await engines.ENGINES["opencode"]._one_run(
+                executable=os.environ["BASIVO_OPENCODE_BIN"],
+                cwd=work,
+                prompt="x",
+                system_prompt="",
+                api_key="",
+                model="opencode/big-pickle",
+                timeout_seconds=120,
+                mcp_servers=None,
+                on_activity=None,
+                on_stop=None,
+            )
+        return caught.value
+
+    # Nothing at all: the generous stall budget does not apply.
+    monkeypatch.setenv(
+        "BASIVO_OPENCODE_BIN", str(_fake(tmp_path, "opencode", "import time\ntime.sleep(60)\n"))
+    )
+    monkeypatch.setattr(engines, "STALL_SECONDS", 90.0)
+    monkeypatch.setattr(engines, "FIRST_BYTE_SECONDS", 1.0)
+    started = time.monotonic()
+    await attempt()
+    assert time.monotonic() - started < 20
+
+    # And what it did say comes back with the failure, for the worker log.
+    monkeypatch.setenv(
+        "BASIVO_OPENCODE_BIN",
+        str(
+            _fake(
+                tmp_path,
+                "quiet",
+                "import sys, time\n"
+                "print('provider refused the request', file=sys.stderr, flush=True)\n"
+                "time.sleep(60)\n",
+            )
+        ),
+    )
+    monkeypatch.setattr(engines, "STALL_SECONDS", 1.0)
+    assert "provider refused the request" in (await attempt()).said
