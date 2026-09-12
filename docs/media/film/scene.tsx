@@ -251,16 +251,16 @@ export default function Scene({ tagline, url, consoleUrl, pr, shots, voiceOver }
   return (
     <AbsoluteFill style={{ backgroundColor: "#eef1f7" }}>
       {/* Who this is. Three seconds, no longer: the viewer came for the tool. */}
-      <Sequence from={at(0)} durationInFrames={len(0, 7)}>
-        <Beat length={len(0, 7)}>
+      <Sequence from={at(0)} durationInFrames={len(0, 4)}>
+        <Beat length={len(0, 4)}>
           <Opening unit={unit} tagline={tagline} />
         </Beat>
       </Sequence>
 
       {/* Every way a flow can start, together, because leading with one of
           them made the whole product look like a GitHub bot. */}
-      <Sequence from={at(7)} durationInFrames={len(7, 17)}>
-        <Beat length={len(7, 17)}>
+      <Sequence from={at(4)} durationInFrames={len(4, 18)}>
+        <Beat length={len(4, 18)}>
           <TriggerWall unit={unit} />
           {showLower ? (
             <Lower
@@ -274,8 +274,8 @@ export default function Scene({ tagline, url, consoleUrl, pr, shots, voiceOver }
       </Sequence>
 
       {/* The pipeline drawing itself, one node at a time. */}
-      <Sequence from={at(17)} durationInFrames={len(17, 29)}>
-        <Beat length={len(17, 29)}>
+      <Sequence from={at(18)} durationInFrames={len(18, 26)}>
+        <Beat length={len(18, 26)}>
           <Pipeline unit={unit} />
           {showLower ? (
             <Lower
@@ -289,8 +289,8 @@ export default function Scene({ tagline, url, consoleUrl, pr, shots, voiceOver }
       </Sequence>
 
       {/* What the agent node actually holds. */}
-      <Sequence from={at(29)} durationInFrames={len(29, 39)}>
-        <Beat length={len(29, 39)}>
+      <Sequence from={at(26)} durationInFrames={len(26, 37)}>
+        <Beat length={len(26, 37)}>
           <AgentCard unit={unit} />
           {showLower ? (
             <Lower
@@ -304,8 +304,8 @@ export default function Scene({ tagline, url, consoleUrl, pr, shots, voiceOver }
       </Sequence>
 
       {/* Three real files this product rendered. */}
-      <Sequence from={at(39)} durationInFrames={len(39, 48)}>
-        <Beat length={len(39, 48)}>
+      <Sequence from={at(37)} durationInFrames={len(37, 44)}>
+        <Beat length={len(37, 44)}>
           <Outputs unit={unit} />
           {showLower ? (
             <Lower
@@ -320,8 +320,8 @@ export default function Scene({ tagline, url, consoleUrl, pr, shots, voiceOver }
 
       {/* The App Builder: the newest half of the product, and the only part a
           person uses without drawing anything. */}
-      <Sequence from={at(48)} durationInFrames={len(48, 61)}>
-        <Beat length={len(48, 61)}>
+      <Sequence from={at(44)} durationInFrames={len(44, 67)}>
+        <Beat length={len(44, 67)}>
           <AbsoluteFill style={{ backgroundColor: "#eef1f7" }} />
           <AppBuilder unit={unit} />
           {showLower ? (
@@ -336,8 +336,8 @@ export default function Scene({ tagline, url, consoleUrl, pr, shots, voiceOver }
       </Sequence>
 
       {/* And then it delivers, which is the part demos usually skip. */}
-      <Sequence from={at(61)} durationInFrames={len(61, 69)}>
-        <Beat length={len(61, 69)}>
+      <Sequence from={at(67)} durationInFrames={len(67, 74)}>
+        <Beat length={len(67, 74)}>
           <Delivery unit={unit} pr={pr} />
           {showLower ? (
             <Lower
@@ -351,14 +351,14 @@ export default function Scene({ tagline, url, consoleUrl, pr, shots, voiceOver }
       </Sequence>
 
       {/* The real run page, with the real numbers on it. */}
-      <Sequence from={at(69)} durationInFrames={len(69, 78)}>
-        <Beat length={len(69, 78)}>
+      <Sequence from={at(74)} durationInFrames={len(74, 78)}>
+        <Beat length={len(74, 78)}>
           <Camera
             file={shots.run.file}
             aspect={shots.run.aspect}
             from={shots.run.page}
             to={shots.run.timeline}
-            length={len(69, 78)}
+            length={len(74, 78)}
           >
             <Ring rect={grow(shots.run.autofix, 1.03)} from={26} label="36.0s, tokens and cost" />
           </Camera>
@@ -374,16 +374,16 @@ export default function Scene({ tagline, url, consoleUrl, pr, shots, voiceOver }
       </Sequence>
 
       {/* The two numbers that are the argument. */}
-      <Sequence from={at(78)} durationInFrames={len(78, 84)}>
-        <Beat length={len(78, 84)}>
+      <Sequence from={at(78)} durationInFrames={len(78, 83)}>
+        <Beat length={len(78, 83)}>
           <AbsoluteFill style={{ backgroundColor: "#eef1f7" }} />
           <Receipt unit={unit} />
         </Beat>
       </Sequence>
 
       {/* What this replaces, and what it saves. */}
-      <Sequence from={at(84)} durationInFrames={len(84, 94)}>
-        <Beat length={len(84, 94)}>
+      <Sequence from={at(83)} durationInFrames={len(83, 96)}>
+        <Beat length={len(83, 96)}>
           <AbsoluteFill style={{ backgroundColor: "#eef1f7" }} />
           <Compare unit={unit} />
           {showLower ? (
@@ -397,8 +397,8 @@ export default function Scene({ tagline, url, consoleUrl, pr, shots, voiceOver }
         </Beat>
       </Sequence>
 
-      <Sequence from={at(94)}>
-        <Beat length={durationInFrames - at(94)}>
+      <Sequence from={at(96)}>
+        <Beat length={durationInFrames - at(96)}>
           <EndCard unit={unit} url={url} consoleUrl={consoleUrl} />
         </Beat>
       </Sequence>

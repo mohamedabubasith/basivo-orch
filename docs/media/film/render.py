@@ -29,7 +29,7 @@ PR = {"number": 9, "title": "Autofix: Remove the old pricing script now that the
       "branch": "basivo/autofix-cf60f477", "added": 6, "removed": 23, "files": 4}
 PROPS = {"tagline": "Draw the pipeline. It runs itself.", "url": "orch.basivo.in",
          "consoleUrl": "console.basivo.in", "pr": PR, "shots": SHOTS, "voiceOver": False}
-SECONDS = 51.0
+SECONDS = 63.2
 
 SCRIPT = (
     "Basivo. Draw the pipeline, and it runs itself. "
@@ -38,13 +38,15 @@ SCRIPT = (
     "Then you draw the flow on one canvas, from eighteen node types. "
     "The agent is a real agent: tools, skills, sub-agents, MCP servers, hand over. "
     "Bring your own key, or use the free one built in. "
-    "It makes more than text. React goes in, an MP4 comes out. "
+    "It makes more than text. React goes in, an MP4 comes out: renders, montages, a voice over the top. "
     "And it builds applications. Describe the page you want, and watch it appear beside what "
     "you typed. Change your mind, and it changes. Every build is a version. "
     "Deploy, and you have an address to send to anyone. The code is yours whenever you want it. "
     "Then it delivers: a pull request, a comment, a post where your people are. "
     "Every node reports itself while the run is going. One real run: thirty six seconds, "
     "nine cents. "
+    "Elsewhere that is a webhook you wire by hand and a render box beside the automation tool. "
+    "Here it is one canvas, and the cost is on the run. "
     "Basivo. Orch dot basivo dot in."
 )
 
