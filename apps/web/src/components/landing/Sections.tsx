@@ -12,6 +12,7 @@ import { Link } from "react-router-dom";
 import { consoleOrigin } from "../../lib/consoleOrigin";
 
 import { Backdrop } from "../Backdrop";
+import { ThemeToggle } from "../ThemeToggle";
 import { Badge, Button, Logo } from "../ui";
 import { FlowAnimation } from "./FlowAnimation";
 import { LogStream } from "./LogStream";
@@ -165,8 +166,8 @@ export function Nav() {
             {[
               ["How it works", "#how"],
               ["What it does", "#does"],
+              ["App builder", "#apps"],
               ["Compared", "#compare"],
-              ["Trust", "#trust"],
               ["Pricing", "/pricing"],
             ].map(([label, href]) => (
               <a
@@ -180,6 +181,10 @@ export function Nav() {
           </div>
 
           <div className="flex flex-none items-center gap-2">
+            {/* The console has had this since the first week and the page
+                people see first did not, which made the product look like it
+                only came in dark. */}
+            <ThemeToggle compact />
             <a
               href={REPO_URL}
               target="_blank"
@@ -435,6 +440,12 @@ const GROUPS = [
     ],
     icon: "M20.5 3.8 3.9 10.2c-.9.3-.9 1.6 0 1.9l6.3 2.1 2.1 6.3c.3.9 1.6.9 1.9 0zM20.5 3.8 10.2 14.2",
   },
+  {
+    title: "An application, from a sentence",
+    body: "Describe a page and watch it appear beside what you typed. Change your mind and it changes. Every build is a version you can go back to, deploy at an address you can send to anyone, or download as a project that runs anywhere Node does. Free plan included, no key of your own needed.",
+    items: ["Live preview", "Versions", "Deploy", "Your images", "The code"],
+    icon: "M3.5 5.5h17v13h-17zM3.5 9h17M6.5 7.2h.01M9 7.2h.01",
+  },
 ] as const;
 
 export function Features() {
@@ -630,7 +641,158 @@ export function Trust() {
   );
 }
 
+/* ----------------------------------------------------------- app builder --- */
+
+/**
+ * What the App Builder feels like, in one card.
+ *
+ * A screenshot would be out of date by the next release and a video would cost
+ * a megabyte before anybody scrolled this far. This is the real shape of the
+ * screen instead, drawn in divs: what you typed on the left, what exists on
+ * the right, and the versions underneath. It plays once when it comes into
+ * view, and not at all for somebody who asked for less motion.
+ */
+const BUILD_STEPS = [
+  { at: 0.0, label: "Reading the project" },
+  { at: 1.1, label: "Editing App.tsx" },
+  { at: 2.2, label: "Building the page" },
+] as const;
+
+export function AppBuilderSection() {
+  const reduceMotion = useReducedMotion();
+  const ease = [0.21, 0.5, 0.35, 1] as const;
+
+  return (
+    <section id="apps" className="relative border-t border-ink-800/70 py-24">
+      <div className="mx-auto max-w-6xl px-5">
+        <Heading
+          eyebrow="App builder"
+          title="Describe a page, and watch it appear"
+          lede="The same run engine, pointed at a React project instead of a repository. On the free plan, with no key of your own."
+        />
+
+        <Reveal className="mt-14">
+          <div className="surface overflow-hidden rounded-3xl p-3 sm:p-4">
+            <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_1.25fr] md:gap-4">
+              {/* what you typed */}
+              <div className="flex min-h-[15rem] flex-col rounded-2xl border border-ink-700/60 bg-ink-900/60 p-4">
+                <motion.p
+                  className="ml-auto max-w-[90%] rounded-2xl rounded-br-sm bg-brand-500/15 px-3.5 py-2.5 text-sm text-ink-100"
+                  initial={reduceMotion ? false : { opacity: 0, y: 8 }}
+                  whileInView={{ opacity: 1, y: 0 }}
+                  viewport={{ once: true, amount: 0.4 }}
+                  transition={{ duration: 0.45, ease }}
+                >
+                  A page for a corner shop called Bright Grocers, with the
+                  opening hours and a photograph at the top
+                </motion.p>
+
+                <div className="mt-3 space-y-2">
+                  {BUILD_STEPS.map((step) => (
+                    <motion.p
+                      key={step.label}
+                      className="flex items-center gap-2 text-sm text-ink-400"
+                      initial={reduceMotion ? false : { opacity: 0, x: -6 }}
+                      whileInView={{ opacity: 1, x: 0 }}
+                      viewport={{ once: true, amount: 0.4 }}
+                      transition={{ duration: 0.35, delay: 0.4 + step.at * 0.35, ease }}
+                    >
+                      <span className="h-1.5 w-1.5 flex-none rounded-full bg-brand-400" />
+                      {step.label}
+                    </motion.p>
+                  ))}
+                </div>
+
+                <motion.p
+                  className="mt-3 mr-auto max-w-[90%] rounded-2xl rounded-bl-sm bg-ink-800/70 px-3.5 py-2.5 text-sm text-ink-300"
+                  initial={reduceMotion ? false : { opacity: 0, y: 8 }}
+                  whileInView={{ opacity: 1, y: 0 }}
+                  viewport={{ once: true, amount: 0.4 }}
+                  transition={{ duration: 0.4, delay: 1.6, ease }}
+                >
+                  Your photograph is at the top, with the hours beside it.
+                </motion.p>
+              </div>
+
+              {/* what exists */}
+              <div className="overflow-hidden rounded-2xl border border-ink-700/60 bg-ink-950/60">
+                <div className="flex items-center gap-2 border-b border-ink-700/60 px-4 py-2.5">
+                  <span className="h-2 w-2 rounded-full bg-ink-600" />
+                  <span className="h-2 w-2 rounded-full bg-ink-600" />
+                  <span className="h-2 w-2 rounded-full bg-ink-600" />
+                  <span className="ml-2 truncate font-mono text-xs text-ink-500">
+                    bright-grocers-k3d9.basivo.app
+                  </span>
+                </div>
+
+                <motion.div
+                  className="space-y-3 p-4"
+                  initial={reduceMotion ? false : { opacity: 0 }}
+                  whileInView={{ opacity: 1 }}
+                  viewport={{ once: true, amount: 0.4 }}
+                  transition={{ duration: 0.5, delay: 1.5, ease }}
+                >
+                  <motion.div
+                    className="h-24 rounded-xl bg-gradient-to-br from-brand-500/30 via-brand-400/15 to-transparent sm:h-28"
+                    initial={reduceMotion ? false : { scale: 0.96, opacity: 0 }}
+                    whileInView={{ scale: 1, opacity: 1 }}
+                    viewport={{ once: true, amount: 0.4 }}
+                    transition={{ duration: 0.5, delay: 1.6, ease }}
+                  />
+                  <div className="h-3 w-2/5 rounded-full bg-ink-700" />
+                  <div className="h-2.5 w-4/5 rounded-full bg-ink-800" />
+                  <div className="grid grid-cols-3 gap-2 pt-1">
+                    {[0, 1, 2].map((card) => (
+                      <motion.div
+                        key={card}
+                        className="h-12 rounded-lg border border-ink-700/60 bg-ink-900/70"
+                        initial={reduceMotion ? false : { opacity: 0, y: 10 }}
+                        whileInView={{ opacity: 1, y: 0 }}
+                        viewport={{ once: true, amount: 0.4 }}
+                        transition={{
+                          duration: 0.4,
+                          delay: 1.8 + card * 0.1,
+                          ease,
+                        }}
+                      />
+                    ))}
+                  </div>
+                </motion.div>
+              </div>
+            </div>
+
+            {/* the versions, which is what makes changing your mind cheap */}
+            <div className="mt-3 flex flex-wrap items-center gap-2 rounded-2xl border border-ink-700/60 bg-ink-900/40 p-3 sm:mt-4">
+              {["v1", "v2", "v3"].map((version, i) => (
+                <motion.span
+                  key={version}
+                  className={
+                    i === 2
+                      ? "rounded-lg border border-ok-500/40 bg-ok-500/10 px-2.5 py-1 text-xs text-ink-200"
+                      : "rounded-lg border border-ink-700/70 px-2.5 py-1 text-xs text-ink-400"
+                  }
+                  initial={reduceMotion ? false : { opacity: 0, y: 6 }}
+                  whileInView={{ opacity: 1, y: 0 }}
+                  viewport={{ once: true, amount: 0.4 }}
+                  transition={{ duration: 0.3, delay: 2 + i * 0.12, ease }}
+                >
+                  {version}
+                  {i === 2 && " deployed"}
+                </motion.span>
+              ))}
+              <span className="ml-auto text-xs text-ink-500">
+                Go back to any version, or download the whole project
+              </span>
+            </div>
+          </div>
+        </Reveal>
+      </div>
+    </section>
+  );
+}
+
 /* ---------------------------------------------------------------- cta --- */
+
 
 export function CTA() {
   return (
@@ -677,6 +839,16 @@ export function CTA() {
 
 /* -------------------------------------------------------------- footer --- */
 
+/** The sections of this page. In the footer as well as the bar, because the
+ *  bar hides them under `md` and a phone would otherwise have no way there. */
+const PRODUCT: [string, string][] = [
+  ["How it works", "/#how"],
+  ["What it does", "/#does"],
+  ["App builder", "/#apps"],
+  ["Compared", "/#compare"],
+  ["Trust", "/#trust"],
+];
+
 /** The pages a customer, and a payment provider, expect to find in a footer. */
 const LEGAL: [string, string][] = [
   ["Pricing", "/pricing"],
@@ -690,6 +862,17 @@ export function Footer() {
   return (
     <footer className="border-t border-ink-800/70 py-10">
       <div className="mx-auto flex max-w-6xl flex-col items-center gap-6 px-5 text-center">
+        <nav className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2 md:hidden">
+          {PRODUCT.map(([label, to]) => (
+            <Link
+              key={to}
+              to={to}
+              className="text-sm text-ink-400 transition-colors hover:text-ink-100"
+            >
+              {label}
+            </Link>
+          ))}
+        </nav>
         <div className="flex w-full flex-col items-center justify-between gap-4 sm:flex-row sm:text-left">
           <Logo />
           <nav className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2">

@@ -1,4 +1,5 @@
 import {
+  AppBuilderSection,
   CTA,
   Compare,
   Features,
@@ -17,6 +18,7 @@ export function Landing() {
         <Hero />
         <HowItWorks />
         <Features />
+        <AppBuilderSection />
         <Compare />
         <Trust />
         <CTA />
