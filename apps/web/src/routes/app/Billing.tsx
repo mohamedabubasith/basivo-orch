@@ -41,7 +41,7 @@ interface Plan {
 }
 
 interface Overview {
-  mode: "demo" | "production";
+  mode: "demo" | "testing" | "production";
   plan: Plan;
   status: string;
   usage: {
@@ -320,7 +320,7 @@ export function Billing() {
         title="Plan and usage"
         subtitle="What this workspace is on, what it has used this month, and what else is available."
         action={
-          view.can_manage && mode === "production" ? (
+          view.can_manage && mode !== "demo" ? (
             <Button
               variant="secondary"
               onClick={() => void manage()}
@@ -332,6 +332,14 @@ export function Billing() {
         }
       />
 
+      {mode === "testing" && (
+        <Alert tone="warn">
+          Payments are in test mode. Checkout, webhooks and the plan limits all
+          work exactly as they will in production, with test cards and no
+          money. Switch BILLING_MODE to production when you are ready to be
+          paid.
+        </Alert>
+      )}
       {mode === "demo" && (
         <Alert tone="info">
           Billing is switched off in this deployment. The plans below are a
@@ -368,7 +376,7 @@ export function Billing() {
             <p className="mt-1 text-sm text-ink-400">{plan.tagline}</p>
           </div>
           <div className="flex items-center gap-2">
-            {mode === "production" && <Pill tone={status.tone}>{status.label}</Pill>}
+            {mode !== "demo" && <Pill tone={status.tone}>{status.label}</Pill>}
             {view.current_period_end && !view.cancel_at_period_end && (
               <span className="text-sm text-ink-500">
                 Renews {day(view.current_period_end)}

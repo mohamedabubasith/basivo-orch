@@ -7,9 +7,16 @@
 | Value | What happens |
 |---|---|
 | `demo` (default) | The plans on the billing page are a preview. No limit is enforced anywhere, the payment provider is never called, checkout and the customer portal answer 400, and `POST /billing/webhook` answers 404. |
+| `testing` | Identical to production in every way that matters, against the provider's test environment: real checkout sessions, real webhook deliveries, real plan limits, test cards, no money. The billing page says so. This is the mode to rehearse in. |
 | `production` | Every workspace starts on Free and its limits apply. Paying moves the workspace onto a bigger plan. |
 
-Production mode requires `DODO_API_KEY`, `DODO_WEBHOOK_SECRET`,
+The mode also decides which Dodo environment is called, so there is no second
+setting to put out of step with it: `testing` calls `test.dodopayments.com`
+and `production` calls `live.dodopayments.com`. Put the keys for that
+environment in the same file, test keys with `testing`, live keys with
+`production`.
+
+Both `testing` and `production` require `DODO_API_KEY`, `DODO_WEBHOOK_SECRET`,
 `DODO_PRODUCT_PRO` and `DODO_PRODUCT_TEAM`. Without them the service refuses to
 start, rather than looking healthy until the first customer tries to pay.
 

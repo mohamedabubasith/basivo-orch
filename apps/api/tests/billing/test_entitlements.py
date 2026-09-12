@@ -112,6 +112,34 @@ async def test_demo_mode_ignores_a_subscription_row(
     assert state.plan.runs_per_month is None
 
 
+def test_testing_mode_is_production_against_test_cards(monkeypatch: pytest.MonkeyPatch):
+    """The rehearsal mode: every limit applies and every call is real, but the
+    provider is its test environment. One switch decides both, so a deployment
+    cannot end up with live keys pointed at the test endpoint or the reverse."""
+    from basivo_orch.billing import provider
+
+    monkeypatch.setenv("BILLING_MODE", "testing")
+    get_settings.cache_clear()
+    settings = get_settings()
+    assert settings.billing_is_live is True
+    assert settings.billing_is_test is True
+    assert provider.base_url() == "https://test.dodopayments.com"
+
+    monkeypatch.setenv("BILLING_MODE", "production")
+    get_settings.cache_clear()
+    assert get_settings().billing_is_test is False
+    assert provider.base_url() == "https://live.dodopayments.com"
+
+
+def test_testing_mode_needs_its_keys_too(monkeypatch: pytest.MonkeyPatch):
+    """A rehearsal with no keys is a rehearsal that fails at the first click."""
+    for name in ("DODO_API_KEY", "DODO_WEBHOOK_SECRET", "DODO_PRODUCT_PRO", "DODO_PRODUCT_TEAM"):
+        monkeypatch.delenv(name, raising=False)
+    get_settings.cache_clear()
+    with pytest.raises(ValueError, match="BILLING_MODE=testing needs"):
+        Settings(BILLING_MODE="testing", _env_file=None)
+
+
 def test_production_mode_needs_its_keys(monkeypatch: pytest.MonkeyPatch):
     """A deployment that says it takes money and cannot must not start."""
     for name in ("DODO_API_KEY", "DODO_WEBHOOK_SECRET", "DODO_PRODUCT_PRO", "DODO_PRODUCT_TEAM"):

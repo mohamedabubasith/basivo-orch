@@ -63,11 +63,13 @@ class Settings(BaseSettings):
     # It is deliberately not derived from ENVIRONMENT: a staging box runs
     # ENVIRONMENT=production for cookie and TLS strictness while still having
     # no payment provider behind it.
-    BILLING_MODE: Literal["demo", "production"] = "demo"
+    #   testing     everything above behaves exactly as in production, against
+    #               the provider's test environment: real checkouts, real
+    #               webhooks, real limits, test cards, no money.
+    BILLING_MODE: Literal["demo", "testing", "production"] = "demo"
 
     DODO_API_KEY: str = ""
     DODO_WEBHOOK_SECRET: str = ""
-    DODO_ENVIRONMENT: Literal["test_mode", "live_mode"] = "test_mode"
     #: Provider product ids, one per paid plan. Both are required in
     #: production mode: a plan whose product id is missing would send a
     #: customer to a checkout for nothing.
@@ -80,7 +82,20 @@ class Settings(BaseSettings):
 
     @property
     def billing_is_live(self) -> bool:
-        return self.BILLING_MODE == "production"
+        """Is billing switched on: checkouts, webhooks and plan limits.
+
+        True in `testing` as well as `production`, because the whole point of
+        the testing mode is that nothing behaves differently. What changes is
+        which provider environment the keys belong to, and that is decided in
+        one place, below, rather than by a second setting somebody can put out
+        of step with this one.
+        """
+        return self.BILLING_MODE in ("testing", "production")
+
+    @property
+    def billing_is_test(self) -> bool:
+        """Is the payment provider its test environment rather than the real one."""
+        return self.BILLING_MODE != "production"
 
     @model_validator(mode="after")
     def _production_billing_is_configured(self) -> Settings:
@@ -89,7 +104,7 @@ class Settings(BaseSettings):
         A deployment that says it takes money and has no key would look
         healthy right up to the moment a customer tried to pay.
         """
-        if self.BILLING_MODE != "production":
+        if not self.billing_is_live:
             return self
         missing = [
             name
@@ -102,7 +117,9 @@ class Settings(BaseSettings):
             if not value.strip()
         ]
         if missing:
-            raise ValueError("BILLING_MODE=production needs " + ", ".join(missing) + " to be set.")
+            raise ValueError(
+                f"BILLING_MODE={self.BILLING_MODE} needs " + ", ".join(missing) + " to be set."
+            )
         return self
 
     def product_id(self, plan: str) -> str:

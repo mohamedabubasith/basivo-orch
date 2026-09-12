@@ -351,7 +351,10 @@ async def entitlement(
     plan = effective_plan(subscription, now, await catalogue(session)) if live else UNLIMITED
 
     return Entitlement(
-        mode="production" if live else "demo",
+        # The mode itself, not a boolean: the console says something different
+        # for a deployment rehearsing against test cards than for one taking
+        # money, and "live or not" cannot express that.
+        mode=get_settings().BILLING_MODE,
         plan=plan,
         status=subscription.status if subscription else SubscriptionStatus.ACTIVE,
         runs_used=await runs_this_month(session, organization_id, now=now),

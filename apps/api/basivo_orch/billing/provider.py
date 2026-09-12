@@ -46,9 +46,9 @@ class SignatureError(Exception):
 def base_url() -> str:
     settings = get_settings()
     return (
-        "https://live.dodopayments.com"
-        if settings.DODO_ENVIRONMENT == "live_mode"
-        else "https://test.dodopayments.com"
+        "https://test.dodopayments.com"
+        if settings.billing_is_test
+        else "https://live.dodopayments.com"
     )
 
 
