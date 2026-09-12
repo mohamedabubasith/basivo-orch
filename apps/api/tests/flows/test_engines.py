@@ -14,6 +14,7 @@ import asyncio
 import json
 import os
 import stat
+import time
 from contextlib import suppress
 from pathlib import Path
 
@@ -328,13 +329,18 @@ async def test_an_agent_that_goes_quiet_is_killed_long_before_the_ceiling(monkey
         ),
     )
     monkeypatch.setattr(engines, "STALL_SECONDS", 1.0)
+    # One model, so what surfaces is the silence rather than the retry.
+    monkeypatch.setattr(engines, "OPENCODE_FALLBACK_MODELS", ())
     work = tmp_path / "work"
     work.mkdir()
 
-    with pytest.raises(NodeError, match="stopped responding: nothing for 1 seconds"):
+    started = time.monotonic()
+    with pytest.raises(NodeError, match="did not answer"):
         await engines.ENGINES["opencode"].run(
             cwd=work, prompt="x", system_prompt="", timeout_seconds=60
         )
+    # Seconds, not the sixty second ceiling it was given.
+    assert time.monotonic() - started < 15
 
 
 async def test_every_cli_agent_runs_inside_the_jail(monkeypatch, tmp_path):
@@ -445,3 +451,60 @@ def test_an_event_nobody_recognises_produces_no_line_rather_than_a_guess():
     assert engines._activity({"type": "step_start", "part": {"type": "step-start"}}) == ""
     assert engines._activity({"part": {"type": "tool", "tool": "something-new"}}) == ""
     assert engines._activity({"part": {"type": "reasoning"}}) == "Thinking"
+
+
+async def test_a_silent_model_is_retried_with_another_one(monkeypatch, tmp_path):
+    """The models behind the included agent queue: one answered a probe in
+    twenty seconds one hour and not at all the next. A silent one must not be
+    the end of the turn, and what the person watching reads must never name
+    the tier they are on."""
+    # Silent on the first model, talkative on the second.
+    script = (
+        "import json, os, sys, time\n"
+        "model = sys.argv[sys.argv.index('-m') + 1]\n"
+        "if model == 'opencode/big-pickle':\n"
+        "    time.sleep(30)\n"
+        "print(json.dumps({'type': 'text', 'part': {'type': 'text', 'text': 'Done.'}}))\n"
+    )
+    fake = tmp_path / "opencode"
+    fake.write_text("#!/usr/bin/env python3\n" + script)
+    fake.chmod(0o755)
+    monkeypatch.setenv("BASIVO_OPENCODE_BIN", str(fake))
+    monkeypatch.setattr(engines, "STALL_SECONDS", 1.0)
+
+    said: list[str] = []
+
+    async def note(line: str) -> None:
+        said.append(line)
+
+    work = tmp_path / "work"
+    work.mkdir()
+    result = await engines.ENGINES["opencode"].run(
+        cwd=work,
+        prompt="Build it.",
+        system_prompt="",
+        timeout_seconds=30,
+        on_activity=note,
+    )
+
+    assert result.text == "Done."
+    assert said and all("free" not in line.lower() for line in said)
+
+
+async def test_when_nothing_answers_the_message_names_no_tier(monkeypatch, tmp_path):
+    fake = tmp_path / "opencode"
+    fake.write_text("#!/usr/bin/env python3\nimport time\ntime.sleep(30)\n")
+    fake.chmod(0o755)
+    monkeypatch.setenv("BASIVO_OPENCODE_BIN", str(fake))
+    monkeypatch.setattr(engines, "STALL_SECONDS", 1.0)
+    monkeypatch.setattr(engines, "OPENCODE_FALLBACK_MODELS", ("opencode/other-free",))
+
+    work = tmp_path / "work"
+    work.mkdir()
+    with pytest.raises(NodeError, match="did not answer") as raised:
+        await engines.ENGINES["opencode"].run(
+            cwd=work, prompt="x", system_prompt="", timeout_seconds=30
+        )
+    # Which engine ran, and on whose money, is ours to know.
+    assert "free" not in str(raised.value).lower()
+    assert "opencode" not in str(raised.value).lower()

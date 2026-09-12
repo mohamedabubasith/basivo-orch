@@ -36,6 +36,7 @@ import asyncio
 import json
 import os
 import shutil
+import tempfile
 from collections.abc import Awaitable, Callable, Sequence
 from contextlib import suppress
 from dataclasses import dataclass, field
@@ -53,6 +54,22 @@ log = get_logger(__name__)
 #: Overridable because a stealth model's name changes and a deployment that
 #: pays for something better should be able to say so.
 DEFAULT_OPENCODE_MODEL = os.environ.get("BASIVO_OPENCODE_MODEL", "opencode/big-pickle")
+
+#: What to try when the first one says nothing at all.
+#:
+#: The free models are free because they are being evaluated, and an evaluated
+#: model queues: the default answered a probe in twenty seconds one hour and
+#: not at all the next. One silent model should not be the whole free tier, so
+#: a run that gets no output falls through this list before giving up. Order
+#: matters only in that the first is the one we would rather have.
+OPENCODE_FALLBACK_MODELS = tuple(
+    model.strip()
+    for model in os.environ.get(
+        "BASIVO_OPENCODE_FALLBACK_MODELS",
+        "opencode/mimo-v2.5-free,opencode/nemotron-3.5-lightning-free",
+    ).split(",")
+    if model.strip()
+)
 
 #: A prewarmed OpenCode home, baked into the worker image, holding `data` and
 #: `config`. Every run gets a throwaway HOME by design, and a cold one costs
@@ -94,6 +111,15 @@ STOP_POLL_SECONDS = 3.0
 #: experiences as a spinner that never stops. Stalls are killed here and
 #: reported as what they are.
 STALL_SECONDS = 300.0
+
+
+class AgentSilent(NodeError):
+    """The agent produced nothing for long enough to be presumed gone.
+
+    Its own type because it is the one failure worth trying a different model
+    for: the process was healthy, the jail was fine, and the provider simply
+    never answered.
+    """
 
 
 class Stopped(RunCancelled):
@@ -247,11 +273,11 @@ async def _execute(
     async def drain() -> None:
         await asyncio.gather(pump(process.stdout, out, on_line), pump(process.stderr, err))
 
-    async def kill(reason: str) -> None:
+    async def kill(reason: str, silent: bool = False) -> None:
         process.kill()
         with suppress(ProcessLookupError):
             await process.wait()
-        raise NodeError(reason)
+        raise AgentSilent(reason) if silent else NodeError(reason)
 
     feeder = asyncio.create_task(feed())
     reader = asyncio.create_task(drain())
@@ -282,8 +308,8 @@ async def _execute(
             if stall_seconds is not None and len(out) + len(err) == seen:
                 await kill(
                     f"{engine} stopped responding: nothing for {stall_seconds:.0f} seconds "
-                    "while it was working. The model provider has gone quiet; send the "
-                    "message again."
+                    "while it was working.",
+                    silent=True,
                 )
         await reader
         await feeder
@@ -436,8 +462,6 @@ class CodexEngine:
         on_activity: Callable[[str], Awaitable[None]] | None = None,
         on_stop: Callable[[], Awaitable[bool]] | None = None,
     ) -> EngineResult:
-        import tempfile
-
         _refuse_per_tool_limits(allowed_mcp_tools, self.label)
         executable = os.environ.get("BASIVO_CODEX_BIN") or shutil.which("codex")
         if executable is None:
@@ -559,8 +583,6 @@ class OpenCodeEngine:
         on_activity: Callable[[str], Awaitable[None]] | None = None,
         on_stop: Callable[[], Awaitable[bool]] | None = None,
     ) -> EngineResult:
-        import tempfile
-
         _refuse_per_tool_limits(allowed_mcp_tools, self.label)
         executable = os.environ.get("BASIVO_OPENCODE_BIN") or shutil.which("opencode")
         if executable is None:
@@ -569,6 +591,56 @@ class OpenCodeEngine:
                 "set BASIVO_OPENCODE_BIN if it lives elsewhere."
             )
 
+        # One silent model is not the whole free tier. A model that answers
+        # nothing at all gets tried once more with the next one, and the
+        # person watching sees it happen rather than waiting out a second
+        # five minute silence with no idea why.
+        wanted = model or DEFAULT_OPENCODE_MODEL
+        attempts = [wanted, *(m for m in OPENCODE_FALLBACK_MODELS if m != wanted)]
+        last: AgentSilent | None = None
+        for index, candidate in enumerate(attempts):
+            try:
+                return await self._one_run(
+                    executable=executable,
+                    cwd=cwd,
+                    prompt=prompt,
+                    system_prompt=system_prompt,
+                    api_key=api_key,
+                    model=candidate,
+                    timeout_seconds=timeout_seconds,
+                    mcp_servers=mcp_servers,
+                    on_activity=on_activity,
+                    on_stop=on_stop,
+                )
+            except AgentSilent as exc:
+                last = exc
+                log.warning("opencode.silent", model=candidate, attempt=index + 1)
+                if on_activity and index + 1 < len(attempts):
+                    with suppress(Exception):
+                        await on_activity("Still working")
+        # Nothing here names the model or the tier: which engine ran is ours
+        # to know, and a customer reading "the free one" learns only that they
+        # are on the cheap thing.
+        raise NodeError(
+            "The model did not answer. Send the message again, or add your own model "
+            "credential to this project."
+        )
+
+    async def _one_run(
+        self,
+        *,
+        executable: str,
+        cwd: Path,
+        prompt: str,
+        system_prompt: str,
+        api_key: str,
+        model: str,
+        timeout_seconds: float,
+        mcp_servers: McpServers | None,
+        on_activity: Callable[[str], Awaitable[None]] | None,
+        on_stop: Callable[[], Awaitable[bool]] | None,
+    ) -> EngineResult:
+        """One attempt, with one model. Raises `AgentSilent` when it says nothing."""
         with tempfile.TemporaryDirectory(prefix="basivo-opencode-home-") as home_dir:
             home = Path(home_dir)
             config = home / "opencode.json"
@@ -593,7 +665,7 @@ class OpenCodeEngine:
                 "--format",
                 "json",
                 "-m",
-                model or DEFAULT_OPENCODE_MODEL,
+                model,
                 task,
             ]
             env = _base_env(home)

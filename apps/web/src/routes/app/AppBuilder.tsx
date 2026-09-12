@@ -349,7 +349,7 @@ function AppBuilderInner() {
             <Pill tone="good">v{project.published_version} live</Pill>
           ) : null}
         </div>
-        <div className="relative flex items-center gap-2">
+        <div className="relative flex flex-wrap items-center gap-2">
           <Button
             variant="ghost"
             onClick={() => setHistory((open) => !open)}
@@ -359,9 +359,16 @@ function AppBuilderInner() {
             <span className="ml-1.5 text-ink-500">history</span>
           </Button>
           {project.published_version && (
-            <Button variant="ghost" onClick={copyShareLink}>
-              {copied ? "Link copied" : "Share"}
-            </Button>
+            <>
+              <Button variant="ghost" onClick={copyShareLink}>
+                {copied ? "Link copied" : "Share"}
+              </Button>
+              {/* Next to Share, not inside the version menu: taking an app
+                  back off the internet is not something to go hunting for. */}
+              <Button variant="ghost" onClick={() => act("unpublish")}>
+                Unpublish
+              </Button>
+            </>
           )}
           {latest && (
             <Button
@@ -379,7 +386,6 @@ function AppBuilderInner() {
               onClose={() => setHistory(false)}
               onDeploy={(version) => act(`versions/${version.id}/deploy`)}
               onRestore={(version) => act(`versions/${version.id}/restore`)}
-              onUnpublish={() => act("unpublish")}
               codeUrl={(version) =>
                 `${API_BASE}${base}/versions/${version.id}/source.zip`
               }
@@ -775,7 +781,11 @@ function Working({
       <div className="flex items-center gap-2.5 px-3.5 py-2.5">
         <Spinner className="h-4 w-4 flex-none" />
         <span className="min-w-0 flex-1 truncate text-ink-200">
-          {activity.at(-1) ?? "Starting"}
+          {/* Naming the wait rather than saying "Starting" for five minutes.
+              Never naming which model or which tier: that is our plumbing,
+              and a customer reading "the free model" learns only that they
+              are on the cheap thing. */}
+          {activity.at(-1) ?? (seconds < 15 ? "Starting" : "Thinking")}
         </span>
         <span className="flex-none text-xs text-ink-500">
           {seconds < 60
@@ -847,7 +857,6 @@ function VersionMenu({
   onClose,
   onDeploy,
   onRestore,
-  onUnpublish,
   codeUrl,
 }: {
   versions: Version[];
@@ -856,7 +865,6 @@ function VersionMenu({
   onClose: () => void;
   onDeploy: (version: Version) => void;
   onRestore: (version: Version) => void;
-  onUnpublish: () => void;
   codeUrl: (version: Version) => string;
 }) {
   const shown = useMemo(() => versions.slice(0, 20), [versions]);
@@ -875,16 +883,7 @@ function VersionMenu({
         <div className="flex items-center justify-between gap-2 border-b border-ink-700/70 px-3.5 py-2.5">
           <p className="text-sm font-medium text-ink-100">Versions</p>
           {published !== null && (
-            <button
-              type="button"
-              onClick={() => {
-                onUnpublish();
-                onClose();
-              }}
-              className="text-xs text-ink-400 transition hover:text-ink-100"
-            >
-              Unpublish v{published}
-            </button>
+            <p className="text-xs text-ink-500">v{published} is live</p>
           )}
         </div>
 
